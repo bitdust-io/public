@@ -1,0 +1,16 @@
+#!/bin/bash
+
+git add -u :/
+git status
+read -p "OK?"
+git commit -am "update sources"
+git push --set-upstream origin master
+git status
+git checkout --orphan latest_branch
+git add -A
+now=$(date +"%H:%M:%S %d/%m/%Y")
+git commit -q -am "latest changes built at $now"
+git branch -D master
+git branch -m master
+git push -f origin master
+git push -f github master
