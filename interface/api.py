@@ -41,8 +41,11 @@ def OK(result='', message=None, status='OK',):
     o = on_api_result_prepared(o)
     return o
 
-def RESULT(result=[], message=None, status='OK', errors=None):
-    o = {'status': status, 'result': result,}
+def RESULT(result=[], message=None, status='OK', errors=None, source=None):
+    o = {}
+    if source is not None:
+        o.update(source)
+    o.update({'status': status, 'result': result,})
     if message is not None:
         o['message'] = message
     if errors is not None:
@@ -797,7 +800,7 @@ def suppliers_list():
         'idurl': s[1],
         'connected': misc.readSupplierData(s[1], 'connected'),
         'numfiles': len(misc.readSupplierData(s[1], 'listfiles').split('\n'))-1,
-        'status': contact_status.getStatusLabel(s[1]) 
+        'status': contact_status.getStatusLabel(s[1]),
         } for s in enumerate(contactsdb.suppliers())])
 
 def supplier_replace(index_or_idurl):
@@ -840,7 +843,7 @@ def supplier_change(index_or_idurl, new_idurl):
 
 def suppliers_ping():
     """
-    Send short requests to all suppliers to get their their current statuses.
+    Send short requests to all suppliers to get their current statuses.
     """
     from p2p import propagate
     propagate.SlowSendSuppliers(0.1)
@@ -857,10 +860,49 @@ def customers_list():
     return RESULT([{
         'position': s[0],
         'idurl': s[1],
-#         'connected': misc.readSupplierData(s[1], 'connected'),
-#         'numfiles': len(misc.readSupplierData(s[1], 'listfiles').split('\n'))-1,
         'status': contact_status.getStatusLabel(s[1]) 
         } for s in enumerate(contactsdb.customers())])
+
+def customer_reject(idurl):
+    """
+    Stop supporting given customer, remove all his files from local disc,
+    close connections with that node.
+    """
+    from contacts import contactsdb
+    from storage import accounting
+    from main import settings
+    from supplier import local_tester
+    from p2p import p2p_service
+    from lib import packetid
+    if not contactsdb.is_customer(idurl):
+        return ERROR('customer not found')
+    # send packet to notify about service from us was rejected
+    # TODO - this is not yet handled on other side
+    p2p_service.SendFailNoRequest(idurl, packetid.UniqueID(), 'service rejected')
+    # remove from customers list
+    current_customers = contactsdb.customers()
+    current_customers.remove(idurl)
+    contactsdb.update_customers(current_customers)
+    contactsdb.save_customers()
+    # remove records for this customers from quotas info 
+    space_dict = accounting.read_customers_quotas()
+    consumed_by_cutomer = space_dict.pop(idurl, None)
+    consumed_space = accounting.count_consumed_space(space_dict)
+    space_dict['free'] = settings.getDonatedBytes() - int(consumed_space)
+    accounting.write_customers_quotas(space_dict)
+    # restart local tester    
+    local_tester.TestUpdateCustomers()
+    return OK('customer %s rejected, %s bytes were freed' % (idurl, consumed_by_cutomer))
+
+def customers_ping():
+    """
+    Send Identity packet to all customers to check their current statuses.
+    Every node will reply with Ack packet on any valid incoming Identiy packet.  
+    """
+    from p2p import propagate
+    propagate.SlowSendCustomers(0.1)
+    return OK('requests to all customers was sent')
+    
 
 #------------------------------------------------------------------------------
 
@@ -869,69 +911,24 @@ def space_donated():
     Return detailed statistics about your donated space usage.
     """
     from logs import lg
-    from system import bpio
-    from main import settings
-    from contacts import contactsdb
-    space_dict = bpio._read_dict(settings.CustomersSpaceFile(), {})
-    used_space_dict = bpio._read_dict(settings.CustomersUsedSpaceFile(), {})
-    result = []
-    errors = []
-    consumed = 0
-    used = 0
-    try:
-        free = int(space_dict.pop('free'))
-    except:
-        free = 0
-    donated = settings.getDonatedBytes()
-    for idurl in contactsdb.customers():
-        consumed_by_customer = 0
-        used_by_customer = 0
-        if idurl not in space_dict.keys():
-            errors.append('space consumed by customer %s is unknown' % idurl)
-        else:
-            try:
-                consumed_by_customer = int(space_dict.pop(idurl))
-                consumed += consumed_by_customer
-            except:
-                errors.append('incorrect value of consumed space for customer %s' % idurl)
-        if idurl in used_space_dict.keys():
-            try:
-                used_by_customer = int(used_space_dict.pop(idurl))
-                used += used_by_customer
-            except:
-                errors.append('incorrect value of used space for customer %s' % idurl)
-        if consumed_by_customer < used_by_customer:
-            errors.append('customer %s currently using more space than requested' % idurl)
-        result.append({
-            'idurl': idurl,
-            'used': used_by_customer,
-            'consumed': consumed_by_customer,
-            })
-    if donated < free + consumed:
-        errors.append('total consumed %d bytes and known free %d bytes greater than donated %d bytes' % (
-            consumed, free, donated))
-    if used > donated:
-        errors.append('total space used by customers exceed the donated limit')
-    if len(space_dict) > 0:
-        errors.append('found %d incorrect records of consumed space' % len(space_dict))
-    if len(used_space_dict) > 0:
-        errors.append('found %d incorrect records of used space' % len(used_space_dict))
-    msg = "donated=%d, consumed=%d, free=%d, used=%d, customers=%d" % (
-        donated, consumed, free, used, len(contactsdb.customers()))
-    lg.out(4, 'api.space_donated finished with %d results and %d errors, %s' % (
-        len(result), len(errors), msg))
-    response = RESULT(result, message=msg, errors=errors)
-    response['donated'] = donated
-    response['consumed'] = consumed
-    response['free'] = free
-    response['used'] = used
-    response['customers'] = len(contactsdb.customers())
-    return response
+    from storage import accounting
+    result = accounting.report_donated_storage()
+    lg.out(4, 'api.space_donated finished with %d customers and %d errors' % (
+        len(result['customers']), len(result['errors']),))
+    for err in result['errors']:
+        lg.out(4, '    %s' % err)
+    errors = result.pop('errors')
+    return RESULT([result, ], errors=errors,)
 
 def space_consumed():
     """
+    Return some info about your current usage of BitDust resources.
     """
-    return RESULT([])
+    from logs import lg
+    from storage import accounting
+    result = accounting.report_consumed_storage()
+    lg.out(4, 'api.space_consumed : %r' % result)
+    return RESULT([result, ])
 
 #------------------------------------------------------------------------------ 
 
