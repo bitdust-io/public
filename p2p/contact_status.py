@@ -38,6 +38,13 @@ EVENTS:
 
 """
 
+#------------------------------------------------------------------------------ 
+
+_Debug = True
+_DebugLevel = 6
+
+#------------------------------------------------------------------------------ 
+
 import os
 import sys
 import time
@@ -64,6 +71,8 @@ from p2p import commands
 from transport import callback
 
 import ratings
+
+from userid import my_id
 
 #------------------------------------------------------------------------------ 
 
@@ -132,7 +141,8 @@ def isOnline(idurl):
         return False
     global _ContactsStatusDict
     if idurl not in _ContactsStatusDict.keys():
-        lg.out(6, 'contact_status.isOnline contact %s is not found, made a new instance' % idurl)
+        if _Debug:
+            lg.out(_DebugLevel, 'contact_status.isOnline contact %s is not found, made a new instance' % idurl)
     return A(idurl).state == 'CONNECTED'
 
 
@@ -147,7 +157,8 @@ def isOffline(idurl):
         return True
     global _ContactsStatusDict
     if idurl not in _ContactsStatusDict.keys():
-        lg.out(6, 'contact_status.isOffline contact %s is not found, made a new instance' % idurl)
+        if _Debug:
+            lg.out(_DebugLevel, 'contact_status.isOffline contact %s is not found, made a new instance' % idurl)
     return A(idurl).state == 'OFFLINE'
 
 
@@ -162,7 +173,8 @@ def isCheckingNow(idurl):
         return False
     global _ContactsStatusDict
     if idurl not in _ContactsStatusDict.keys():
-        lg.out(6, 'contact_status.isCheckingNow contact %s is not found, made a new instance' % idurl)
+        if _Debug:
+            lg.out(_DebugLevel, 'contact_status.isCheckingNow contact %s is not found, made a new instance' % idurl)
     st = A(idurl).state
     return st == 'PING' or st == 'ACK?' 
 
@@ -178,7 +190,8 @@ def getStatusLabel(idurl):
         return '?'
     global _ContactsStatusDict
     if idurl not in _ContactsStatusDict.keys():
-        lg.out(6, 'contact_status.getStatusLabel contact %s is not found, made a new instance' % idurl)
+        if _Debug:
+            lg.out(_DebugLevel, 'contact_status.getStatusLabel contact %s is not found, made a new instance' % idurl)
     global _StatusLabels
     return _StatusLabels.get(A(idurl).state, '?')
 
@@ -194,7 +207,8 @@ def getStatusIcon(idurl):
         return '?'
     global _ContactsStatusDict
     if idurl not in _ContactsStatusDict.keys():
-        lg.out(6, 'contact_status.getStatusIcon contact %s is not found, made a new instance' % idurl)
+        if _Debug:
+            lg.out(_DebugLevel, 'contact_status.getStatusIcon contact %s is not found, made a new instance' % idurl)
     global _StatusIcons
     return _StatusIcons.get(A(idurl).state, '?')
 
@@ -243,7 +257,8 @@ def A(idurl, event=None, arg=None):
     if not _ContactsStatusDict.has_key(idurl):
         if _ShutdownFlag:
             return None
-        _ContactsStatusDict[idurl] = ContactStatus(idurl, 'status_%s' % nameurl.GetName(idurl), 'OFFLINE', 10)
+        _ContactsStatusDict[idurl] = ContactStatus(
+            idurl, 'status_%s' % nameurl.GetName(idurl), 'OFFLINE', 8)
     if event is not None:
         _ContactsStatusDict[idurl].automat(event, arg)
     return _ContactsStatusDict[idurl]
@@ -264,10 +279,12 @@ class ContactStatus(automat.Automat):
         self.idurl = idurl
         self.time_connected = None
         automat.Automat.__init__(self, name, state, debug_level)
-        # lg.out(10, 'contact_status.ContactStatus %s %s %s' % (name, state, idurl))
+        if _Debug:
+            lg.out(_DebugLevel+2, 'contact_status.ContactStatus %s %s %s' % (name, state, idurl))
         
     def state_changed(self, oldstate, newstate, event, arg):
-        lg.out(6, '%s : [%s]->[%s]' % (nameurl.GetName(self.idurl), oldstate.lower(), newstate.lower()))
+        if _Debug:
+            lg.out(_DebugLevel-2, '%s : [%s]->[%s]' % (nameurl.GetName(self.idurl), oldstate.lower(), newstate.lower()))
         
     def A(self, event, arg):
         #---CONNECTED---
@@ -276,9 +293,11 @@ class ContactStatus(automat.Automat):
                 self.state = 'PING'
                 self.AckCounter=0
                 self.doRepaint(arg)
-            elif event == 'sent-failed' and self.isDataPacket(arg) :
+            elif event == 'sent-failed' and self.Fails>=3 and self.isDataPacket(arg) :
                 self.state = 'OFFLINE'
                 self.doRepaint(arg)
+            elif event == 'sent-failed' and self.isDataPacket(arg) and self.Fails<3 :
+                pass
         #---OFFLINE---
         elif self.state == 'OFFLINE':
             if event == 'outbox-packet' and self.isPingPacket(arg) :
@@ -287,6 +306,7 @@ class ContactStatus(automat.Automat):
                 self.doRepaint(arg)
             elif event == 'inbox-packet' :
                 self.state = 'CONNECTED'
+                self.Fails=0
                 self.doRememberTime(arg)
                 self.doRepaint(arg)
         #---PING---
@@ -296,6 +316,7 @@ class ContactStatus(automat.Automat):
                 self.AckCounter=0
             elif event == 'inbox-packet' :
                 self.state = 'CONNECTED'
+                self.Fails=0
                 self.doRememberTime(arg)
                 self.doRepaint(arg)
             elif event == 'file-sent' :
@@ -309,6 +330,7 @@ class ContactStatus(automat.Automat):
         elif self.state == 'ACK?':
             if event == 'inbox-packet' :
                 self.state = 'CONNECTED'
+                self.Fails=0
                 self.doRememberTime(arg)
                 self.doRepaint(arg)
             elif event == 'timer-20sec' :
@@ -317,6 +339,7 @@ class ContactStatus(automat.Automat):
                 self.state = 'PING'
                 self.AckCounter=0
                 self.doRepaint(arg)
+        return None
 
     def isPingPacket(self, arg):
         """
@@ -329,9 +352,19 @@ class ContactStatus(automat.Automat):
         """
         Condition method.
         """
-        outpacket, status, error = arg
-        return outpacket.Command not in [commands.Identity(), commands.Ack()]
+        pkt_out, status, error = arg
+        return pkt_out.outpacket.Command not in [commands.Identity(), commands.Ack()]
 
+    def isPacketSent(self, arg):
+        """
+        Condition method.
+        """
+        pkt_out, status, error = arg
+        if _Debug:
+            lg.out(_DebugLevel, 'contact: %s, packet: %s, arg: %s' % (
+                self.state, pkt_out.state, str(arg)))
+        return pkt_out.state == 'SENT'
+    
     def doRememberTime(self, arg):
         """
         Action method.
@@ -356,10 +389,14 @@ def OutboxStatus(pkt_out, status, error=''):
     This method is called from ``lib.transport_control`` when got a status report after 
     sending a packet to remote peer. If packet sent was failed - user seems to be OFFLINE.   
     """
+    if pkt_out.remote_idurl == my_id.getLocalID():
+        return False
     if status == 'finished':
-        A(pkt_out.remote_idurl, 'sent-done', (pkt_out.outpacket, status, error))
+        A(pkt_out.remote_idurl, 'sent-done', (pkt_out, status, error))
     else:
-        A(pkt_out.remote_idurl, 'sent-failed', (pkt_out.outpacket, status, error))
+        if _Debug:
+            lg.out(_DebugLevel, 'contact_status.OutboxStatus %s: [%s] with %s' % (status, pkt_out, pkt_out.outpacket))
+        A(pkt_out.remote_idurl, 'sent-failed', (pkt_out, status, error))
     return False
 
 
@@ -367,6 +404,8 @@ def Inbox(newpacket, info, status, message):
     """
     This is called when some ``packet`` was received from remote peer - user seems to be ONLINE.
     """
+    if newpacket.OwnerID == my_id.getLocalID():
+        return False    
     A(newpacket.OwnerID, 'inbox-packet', (newpacket, info, status, message))
     ratings.remember_connected_time(newpacket.OwnerID)
     return False
@@ -378,6 +417,8 @@ def Outbox(pkt_out):
     This packet can be our Identity packet - this is a sort of PING operation 
     to try to connect with that man.    
     """
+    if pkt_out.outpacket.RemoteID == my_id.getLocalID():
+        return False    
     A(pkt_out.outpacket.RemoteID, 'outbox-packet', pkt_out)
     return False
 
@@ -387,6 +428,8 @@ def FileSent(workitem, args):
     This is called when transport_control starts the file transfer to some peer.
     Used to count how many times you PING him.
     """
+    if workitem.remoteid == my_id.getLocalID():
+        return 
     A(workitem.remoteid, 'file-sent', (workitem, args))
 
 
@@ -395,5 +438,7 @@ def PacketSendingTimeout(remoteID, packetID):
     Called from ``p2p.io_throttle`` when some packet is timed out.
     Right now this do nothing, state machine ignores that event.
     """
+    if remoteID == my_id.getLocalID():
+        return 
     A(remoteID, 'sent-timeout', packetID)
 
