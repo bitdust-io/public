@@ -789,7 +789,7 @@ def cmd_automats(opts, args, overDict):
 #------------------------------------------------------------------------------ 
 
 def cmd_services(opts, args, overDict):
-    if len(args) < 2 or args[1] == 'list':
+    if len(args) < 2 or args[1] in ['list', 'ls',]:
         def _services_update(result):
             for i in xrange(len(result['result'])):
                 r = result['result'][i]
@@ -799,7 +799,13 @@ def cmd_services(opts, args, overDict):
             return result
         tpl = jsontemplate.Template(templ.TPL_SERVICES)
         return call_jsonrpc_method_transform_template_and_stop('services_list', tpl, _services_update)
-    if len(args) >= 2 and args[1].startswith('service_'):
+    if len(args) >= 3 and args[1] in ['start', 'enable', 'on',]:
+        tpl = jsontemplate.Template(templ.TPL_RAW)
+        return call_jsonrpc_method_template_and_stop('service_start', tpl, args[2])
+    if len(args) >= 3 and args[1] in ['stop', 'disable', 'off',]:
+        tpl = jsontemplate.Template(templ.TPL_RAW)
+        return call_jsonrpc_method_template_and_stop('service_stop', tpl, args[2])
+    if len(args) >= 2:
         tpl = jsontemplate.Template(templ.TPL_SERVICE_INFO)
         return call_jsonrpc_method_template_and_stop('service_info', tpl, args[1])
     return 2 
@@ -807,12 +813,27 @@ def cmd_services(opts, args, overDict):
 #------------------------------------------------------------------------------ 
 
 def cmd_message(opts, args, overDict):
-    if len(args) < 2 or args[1] == 'list':
+#     if len(args) < 2 or args[1] == 'list':
+#         tpl = jsontemplate.Template(templ.TPL_RAW)
+#         return call_jsonrpc_method_template_and_stop('list_messages', tpl)
+    if len(args) >= 4 and args[1] in ['send', 'to', ]:
         tpl = jsontemplate.Template(templ.TPL_RAW)
-        return call_jsonrpc_method_template_and_stop('list_messages', tpl)
-    if len(args) >= 4 and args[1] in [ 'send', ]:
-        tpl = jsontemplate.Template(templ.TPL_MESSAGE_SENDING)
         return call_jsonrpc_method_template_and_stop('send_message', tpl, args[2], args[3]) 
+    if len(args) < 2 or args[1] in ['listen', 'read', ]:
+        from chat import terminal_chat
+        def _send_message(to, msg):
+            call_jsonrpc_method('send_message', to, msg)
+        terminal_chat.init(do_send_message_func=_send_message)
+        def _next_message(x=None):
+            d = call_jsonrpc_method('receive_one_message')
+            d.addCallback(terminal_chat.on_incoming_message)
+            d.addCallback(_next_message)
+            d.addErrback(lambda x: reactor.stop())
+        _next_message()
+        reactor.callInThread(terminal_chat.run)
+        reactor.run()
+        terminal_chat.shutdown()
+        return 0
     return 2
 
 #------------------------------------------------------------------------------ 
@@ -1046,7 +1067,7 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
         return cmd_api(opts, args, overDict, executablePath)
     
     #---messages---
-    elif cmd == 'msg' or cmd == 'message' or cmd == 'messages':
+    elif cmd in ['msg', 'message', 'messages', 'chat', 'talk', ]:
         if not running:
             print_text('BitDust is not running at the moment\n')
             return 0

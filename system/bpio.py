@@ -51,7 +51,7 @@ def init():
     This installs a system locale, so all output messages will have a correct encoding. 
     """
     InstallLocale()
-    if Linux():
+    if Linux() or Mac():
         lg.setup_unbuffered_stdout()
     # StartCountingOpenedFiles()
         
@@ -59,7 +59,6 @@ def shutdown():
     """
     This is the last method to be invoked by the program before main process will stop.
     """
-    lg.out(2, 'bpio.shutdown')
     lg.restore_original_stdout()
     lg.close_log_file()
     lg.disable_logs()
