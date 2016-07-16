@@ -19,7 +19,7 @@ EVENTS:
 
 #------------------------------------------------------------------------------ 
 
-_Debug = True
+_Debug = False
 _DebugLevel = 14
 
 #------------------------------------------------------------------------------ 
@@ -176,11 +176,13 @@ def report_and_remove_pending_outbox_files_to_host(remote_host, error_message):
             i += 1
 
 
-def process_sessions():
+def process_sessions(sessions_to_process=None):
     global _ProcessSessionsTask
     global _ProcessSessionsDelay
     has_activity = False
-    for s in sessions().values():
+    if not sessions_to_process:
+        sessions_to_process = sessions().values()
+    for s in sessions_to_process:
         if not s.peer_id:
             continue
         if not s.file_queue:
@@ -193,14 +195,14 @@ def process_sessions():
             has_activity = True
     if _ProcessSessionsTask is None or _ProcessSessionsTask.called:
         if has_activity:
-            _ProcessSessionsTask = reactor.callLater(0, process_sessions)        
+            _ProcessSessionsDelay = MIN_PROCESS_SESSIONS_DELAY
         else:
             _ProcessSessionsDelay = misc.LoopAttenuation(
                 _ProcessSessionsDelay, has_activity, 
                 MIN_PROCESS_SESSIONS_DELAY, MAX_PROCESS_SESSIONS_DELAY,)
-            # attenuation
-            _ProcessSessionsTask = reactor.callLater(_ProcessSessionsDelay, 
-                                                     process_sessions)        
+        # attenuation
+        _ProcessSessionsTask = reactor.callLater(
+            _ProcessSessionsDelay, process_sessions)        
 
 
 def stop_process_sessions():
@@ -239,7 +241,8 @@ class UDPSession(automat.Automat):
         self.peer_id = peer_id
         self.peer_idurl = None
         self.file_queue = udp_file_queue.FileQueue(self) 
-        name = 'udp_session[%s:%d]' % (self.peer_address[0], self.peer_address[1])
+        name = 'udp_session[%s:%d:%s]' % (
+            self.peer_address[0], self.peer_address[1], str(self.peer_id))
         automat.Automat.__init__(self, name, 'AT_STARTUP', 18)
 
     def msg(self, msgid, arg=None):
@@ -469,6 +472,8 @@ class UDPSession(automat.Automat):
         else:
             lg.out(_DebugLevel, 'udp_session.doAcceptGreeting detected peer id : %s for session %s' % (new_peer_id, self.peer_address))
             self.peer_id = new_peer_id
+            self.name = 'udp_session[%s:%d:%s]' % (
+                self.peer_address[0], self.peer_address[1], str(self.peer_id))
             first_greeting = True
             try:
                 sessions_by_peer_id()[self.peer_id].append(self)
@@ -669,7 +674,7 @@ class UDPSession(automat.Automat):
                     oldest_rtt_moment = rtt_data[1]
                     oldest_rtt_id = rtt_id
             if oldest_rtt_id:
-                rtt = self.rtts[oldest_rtt_id][1] - self.rtts[oldest_rtt_id][0]
+                # rtt = self.rtts[oldest_rtt_id][1] - self.rtts[oldest_rtt_id][0]
                 del self.rtts[oldest_rtt_id]
                 #     lg.out(_DebugLevel, 'udp_session._rtt_start removed oldest RTT %s  %r' % (
                 #     oldest_rtt_id, rtt))
@@ -698,6 +703,3 @@ class UDPSession(automat.Automat):
         if _Debug:
             lg.out(_DebugLevel, 'udp_session._rtt_finish registered RTT %s  %r' % (
                 rtt_id_in, rtt))
-        
-        
-        

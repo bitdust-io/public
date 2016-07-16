@@ -3,6 +3,9 @@
 *.pyd
 *.~vsd
 *.orig
+history
+commits-from
+mergecommits.py
 .identities/
 plugins/
 web/*.db
