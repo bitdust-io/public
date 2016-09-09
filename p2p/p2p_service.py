@@ -60,6 +60,7 @@ import os
 import sys
 import cStringIO
 import zlib
+import json
 
 try:
     from twisted.internet import reactor
@@ -164,6 +165,10 @@ def inbox(newpacket, info, status, error_message):
         # contact asking for our current identity
         Correspondent(newpacket) 
         commandhandled = True
+    elif newpacket.Command == commands.Broadcast():
+        # handled by broadcasting_service
+        Broadcast(newpacket, info)
+        commandhandled = False
     
     return commandhandled
 
@@ -203,6 +208,9 @@ def makeFilename(customerID, packetID):
 
 #------------------------------------------------------------------------------
 
+def Ack(newpacket):
+    lg.out(8, "p2p_service.Ack %s from [%s] : %s" % (newpacket.PacketID, newpacket.CreatorID, newpacket.Payload))
+
 def SendAck(packettoack, response='', wide=False, callbacks={}, packetid=None):
     result = signed.Packet(
         commands.Ack(), 
@@ -214,33 +222,54 @@ def SendAck(packettoack, response='', wide=False, callbacks={}, packetid=None):
     lg.out(8, "p2p_service.SendAck %s to %s    response: %s ..." % (result.PacketID, result.RemoteID, str(response)[:15]))
     gateway.outbox(result, wide=wide, callbacks=callbacks)
     return result
-    
 
-def Ack(newpacket):
-    lg.out(8, "p2p_service.Ack %s from [%s] : %s" % (newpacket.PacketID, newpacket.CreatorID, newpacket.Payload))
-     
-    
-def SendFail(request, response='', remote_idurl=None):
-    if remote_idurl is None:
-        remote_idurl = request.OwnerID 
-    result = signed.Packet(commands.Fail(), my_id.getLocalID(), my_id.getLocalID(), 
-                                 request.PacketID, response, remote_idurl)
-    lg.out(8, "p2p_service.SendFail %s to %s    response: %s ..." % (result.PacketID, result.RemoteID, str(response)[:15]))
-    gateway.outbox(result)
-    return result
-    
-    
-def SendFailNoRequest(remoteID, packetID, response):
-    result = signed.Packet(commands.Fail(), my_id.getLocalID(), my_id.getLocalID(), 
-        packetID, response, remoteID)
-    lg.out(8, "p2p_service.SendFailNoRequest %s to %s" % (result.PacketID, result.RemoteID))
-    gateway.outbox(result)
-    return result
-
+def SendAckNoRequest(remoteID, packetid, response='', wide=False, callbacks={}):
+    result = signed.Packet(
+        commands.Ack(), 
+        my_id.getLocalID(), 
+        my_id.getLocalID(), 
+        packetid,
+        response, 
+        remoteID)
+    lg.out(8, "p2p_service.SendAckNoRequest %s to %s    response: %s ..." % (result.PacketID, result.RemoteID, str(response)[:15]))
+    gateway.outbox(result, wide=wide, callbacks=callbacks)
+   
+#------------------------------------------------------------------------------ 
 
 def Fail(newpacket):
     lg.out(8, "p2p_service.Fail from [%s]: %s" % (newpacket.CreatorID, newpacket.Payload))
  
+
+def SendFail(request, response='', remote_idurl=None):
+    if remote_idurl is None:
+        remote_idurl = request.OwnerID 
+    result = signed.Packet(
+        commands.Fail(),
+        my_id.getLocalID(),
+        my_id.getLocalID(), 
+        request.PacketID,
+        response,
+        remote_idurl,
+    )
+    lg.out(8, "p2p_service.SendFail %s to %s    response: %s ..." % (
+        result.PacketID, result.RemoteID, str(response)[:15]))
+    gateway.outbox(result)
+    return result
+    
+
+def SendFailNoRequest(remoteID, packetID, response):
+    result = signed.Packet(
+        commands.Fail(),
+        my_id.getLocalID(),
+        my_id.getLocalID(), 
+        packetID,
+        response,
+        remoteID,
+    )
+    lg.out(8, "p2p_service.SendFailNoRequest %s to %s" % (result.PacketID, result.RemoteID))
+    gateway.outbox(result)
+    return result
+
 #------------------------------------------------------------------------------ 
 
 def Identity(newpacket):
@@ -281,19 +310,17 @@ def Identity(newpacket):
         lg.out(8, "p2p_service.Identity from [%s]" % nameurl.GetName(idurl))
     return True
 
-
 def RequestIdentity(request):
     """
     Someone is requesting a copy of our current identity.
     Already verified that they are a contact.
     Can also be used as a sort of "ping" test to make sure we are alive.
     """
-    lg.out(6, "p2p_service.RequestIdentity starting")
+    lg.out(6, "p2p_service.RequestIdentity from %s" % request.OwnerID)
     MyID = my_id.getLocalID()
     RemoteID = request.OwnerID
     PacketID = request.PacketID
     identitystr = my_id.getLocalIdentity().serialize()
-    lg.out(8, "p2p_service.RequestIdentity returning ")
     result = signed.Packet(commands.Identity(), MyID, MyID, PacketID, identitystr, RemoteID)
     gateway.outbox(result, False)
        
@@ -913,6 +940,17 @@ def CheckWholeBackup(BackupID):
     lg.out(8, "p2p_service.CheckWholeBackup with BackupID=" + BackupID)
 
 #-------------------------------------------------------------------------------
+
+def Broadcast(request, info):
+    lg.out(8, "p2p_service.Broadcast   %r from %s" % (request, info.sender_idurl))
+    
+
+def SendBroadcastMessage(outpacket):
+    lg.out(8, "p2p_service.SendBroadcastMessage to %s" % outpacket.RemoteID)
+    gateway.outbox(outpacket)
+    return outpacket
+
+#------------------------------------------------------------------------------ 
 
 def message2gui(proto, text):
     pass

@@ -74,19 +74,25 @@ class UDPTransportService(LocalService):
 
     def _on_transport_state_changed(self, transport, oldstate, newstate):
         if self.starting_deferred:
-            if newstate in ['LISTENING', 'OFFLINE',]:
+            if newstate == 'LISTENING':
                 self.starting_deferred.callback(newstate)
                 self.starting_deferred = None
-#        if self.transport:
-#            from p2p import network_connector
-#            network_connector.A('network-transport-state-changed', self.transport)
-        
+            elif newstate == 'OFFLINE' and oldstate in ['STARTING', 'STOPPING',]:
+                self.starting_deferred.callback(newstate)
+                self.starting_deferred = None
+
     def _on_enabled_disabled(self, path, value, oldvalue, result):
         from p2p import network_connector
+        from logs import lg
+        lg.out(2, 'service_udp_transport._on_enabled_disabled : %s->%s : %s' % (
+            oldvalue, value, path))
         network_connector.A('reconnect')
         
     def _on_receiving_enabled_disabled(self, path, value, oldvalue, result):
         from p2p import network_connector
+        from logs import lg
+        lg.out(2, 'service_udp_transport._on_receiving_enabled_disabled : %s->%s : %s' % (
+            oldvalue, value, path))
         network_connector.A('reconnect')
         
     def _on_network_receive_limit_modified(self, path, value, oldvalue, result):

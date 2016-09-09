@@ -44,6 +44,7 @@ from system import bpio
 
 from lib import nameurl
 from lib import net_misc
+from lib import misc
 
 from main import settings
 
@@ -109,7 +110,7 @@ class IdRegistrator(automat.Automat):
         msg = self.MESSAGES.get(msgid, ['', 'black'])
         text = msg[0] % {
             'login': bpio.ReadTextFile(settings.UserNameFilename()),
-            'externalip': bpio.ReadTextFile(settings.ExternalIPFilename()),
+            'externalip': misc.readExternalIP(), # bpio.ReadTextFile(settings.ExternalIPFilename()),
             'localip': bpio.ReadTextFile(settings.LocalIPFilename()),}
         color = 'black'
         if len(msg) == 2:
@@ -442,7 +443,7 @@ class IdRegistrator(automat.Automat):
         Reads some extra info from config files.
         """
         login = bpio.ReadTextFile(settings.UserNameFilename())
-        externalIP = bpio.ReadTextFile(settings.ExternalIPFilename())
+        externalIP = misc.readExternalIP() # bpio.ReadTextFile(settings.ExternalIPFilename())
 
         lg.out(4, 'id_registrator._create_new_identity %s %s ' % (login, externalIP))
 
@@ -478,8 +479,8 @@ class IdRegistrator(automat.Automat):
         dlist = []
         for idurl in self.new_identity.sources:
             self.free_idurls.remove(idurl)
-            protocol, host, port, filename = nameurl.UrlParse(idurl)
-            webport, tcpport = known_servers.by_host().get(
+            _, host, _, _ = nameurl.UrlParse(idurl)
+            _, tcpport = known_servers.by_host().get(
                 host, (settings.IdentityWebPort(), settings.IdentityServerPort()))
             srvhost = '%s:%d' % (host, tcpport)
             dlist.append(gateway.send_file_single(

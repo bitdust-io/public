@@ -45,6 +45,10 @@ class EntangledDHTService(LocalService):
     
     def _on_udp_port_modified(self, path, value, oldvalue, result):
         from p2p import network_connector
-        network_connector.A('reconnect')
+        from logs import lg
+        lg.out(2, 'service_entangled_dht._on_udp_port_modified %s->%s : %s' % (
+            oldvalue, value, path))
+        if network_connector.A():
+            network_connector.A('reconnect')
         
     
