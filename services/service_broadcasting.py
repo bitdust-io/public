@@ -1,7 +1,24 @@
 #!/usr/bin/python
 #service_broadcasting.py
 #
-# <<<COPYRIGHT>>>
+# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+#
+# This file (service_broadcasting.py) is part of BitDust Software.
+#
+# BitDust is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# BitDust Software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Please contact us if you have any questions at bitdust.io@gmail.com
 #
 #
 #
@@ -57,6 +74,7 @@ class BroadcastingService(LocalService):
         from broadcast import broadcasters_finder
         from broadcast import broadcast_listener
         from main.config import conf
+        broadcasters_finder.A('shutdown')
         if broadcaster_node.A() is not None:
             broadcaster_node.A().removeStateChangedCallback(
                 self._on_broadcaster_node_switched)
@@ -65,7 +83,6 @@ class BroadcastingService(LocalService):
             broadcast_listener.A().removeStateChangedCallback(
                 self._on_broadcast_listener_switched)
             broadcast_listener.A('shutdown')
-        broadcasters_finder.A('shutdown')
         conf().removeCallback('services/broadcasting/routing-enabled')
         return True
     
@@ -74,8 +91,6 @@ class BroadcastingService(LocalService):
         from p2p import p2p_service
         from main import settings
         words = request.Payload.split(' ')
-        if len(request.Payload) > 1024 * 10:
-            return None
         try:
             mode = words[1][:10]
         except:
@@ -141,7 +156,7 @@ class BroadcastingService(LocalService):
         from logs import lg
         from twisted.internet import reactor
         from broadcast import broadcaster_node
-        if newstate == 'OFFLINE':
+        if newstate == 'OFFLINE' and oldstate != 'AT_STARTUP':
             reactor.callLater(60, broadcaster_node.A, 'reconnect')
             lg.out(8, 'service_broadcasting._on_broadcaster_node_switched will try to reconnect again after 1 minute')
  

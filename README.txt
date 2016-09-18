@@ -9,7 +9,7 @@ The redundancy in backup makes it so if someone loses your data, you can rebuild
 
 All your data is encrypted before it leaves your computer with a private key your computer generates. No one else can read your data, even BitDust Team! Recover data is only one way - download the necessary pieces from computers of other peers and decrypt them with your private key.
 
-BitDust is written in Python using pure Twisted framework.
+BitDust is written in Python using pure Twisted framework and published under GNU AGPLv3.
 
 http://bitdust.io
 
@@ -18,40 +18,46 @@ http://bitdust.io
 Install
 =======
 
-Seems like in Ubuntu you just need to install all dependencies at first step:
+Seems like in Ubuntu (probably most other distros) you just need to install all dependencies at first step:
 
-    sudo apt-get install python python-twisted python-pyasn1 python-openssl python-crypto python-wxgtk2.8 python-imaging
-
-
-Windows ussers can use links bellow and install packages by hands.
-
-If you installed from sources using command "python setup.py install", can do it this way:
+        sudo apt-get install git python-twisted python-setuptools python-pip
+        pip install Django==1.7 pycrypto psutil 
     
-    python -c "from bitdust.bitdust import main; main()"
+Optionally, you can also install [miniupnpc](http://miniupnp.tuxfamily.org/) tool if you want BitDust automatically deal with UPnPc configuration of your network router so it can also accept incomming connections from other nodes.:
 
-But I recomend to just download and extract sources in any place you want and just run the main script:
-
-    cd bitdust
-    python bitdust.py show
+        sudo apt-get install miniupnpc
 
 
-You will have to create a new "Identity" for you to be able to communicate with others,
-program will ask you to do that during first start. 
-If you run on a system without graphical interface you need to register from command line by hands:
+Get Sources:
 
-    python bitdust.py register <your_nickname>
+        git clone http://gitlab.bitdust.io/devel/bitdust.git
 
 
-I recommend you to create another copy of your Private Key in a safe place to be able to recover your data in the future.
-You can do it from GUI or type a command:
+Create an alias in OS so you can easily run the program from any location:
 
-python bitdust.py key copy <filename>
+        cd bitdust
+        python bitdust.py alias > /usr/local/bin/bitdust
+        chmod +x /usr/local/bin/bitdust
+        
+
+Create an identity for you in the BitDust network:
+       
+        bitdust id create <some nick name>
+       
+
+I recommend you to create another copy of your Private Key in a safe place to be able to recover your data in the future. You can do it with such command:
+
+        bitdust key copy <filename>
 
 
-Your settings and local files placed in the folder ~/.bitdust.
-Type this to read more info:
+Your settings and local files are located in that folder: ~/.bitdust.
 
-python bitdust.py help
+Type this command to read more info about BitDust commands:
+
+        bitdust help
+
+
+Please read more about BitDust Commands at http://bitdust.io/commands.html to start playing with software.
 
 
 
@@ -72,10 +78,9 @@ pyOpenSSL:
     
 pycrypto: 
     https://www.dlitz.net/software/pycrypto/
-    
-PIL: 
-    http://www.pythonware.com/products/pil
-    
+
 wxgtk2.8: 
     http://wiki.wxpython.org/InstallingOnUbuntuOrDebian
 
+miniupnpc:
+    http://miniupnp.tuxfamily.org/

@@ -1,7 +1,24 @@
 #!/usr/bin/python
 #service_p2p_hookups.py
 #
-# <<<COPYRIGHT>>>
+# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+#
+# This file (service_p2p_hookups.py) is part of BitDust Software.
+#
+# BitDust is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# BitDust Software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Please contact us if you have any questions at bitdust.io@gmail.com
 #
 #
 #
@@ -43,19 +60,20 @@ class P2PHookupsService(LocalService):
         p2p_service.init()
         contact_status.init()
         self._starting_defer = Deferred()
+        p2p_connector.A('init')
         p2p_connector.A().addStateChangedCallback(
             self._on_p2p_connector_switched)
         network_connector.A().addStateChangedCallback(
             self._on_network_connector_switched)
-        p2p_connector.A('init')
         return True
     
     def stop(self):
         from p2p import contact_status
         from p2p import p2p_connector
         from p2p import network_connector
-        network_connector.A().removeStateChangedCallback(
-            self._on_network_connector_switched)
+        if network_connector.A():
+            network_connector.A().removeStateChangedCallback(
+                self._on_network_connector_switched)
         p2p_connector.A().removeStateChangedCallback(
             self._on_p2p_connector_switched)
         contact_status.shutdown()

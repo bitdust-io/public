@@ -1,7 +1,24 @@
 #!/usr/bin/python
 #config_defaults.py
 #
-# <<<COPYRIGHT>>>
+# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+#
+# This file (config_types.py) is part of BitDust Software.
+#
+# BitDust is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# BitDust Software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Please contact us if you have any questions at bitdust.io@gmail.com
 #
 #
 #
@@ -70,6 +87,7 @@ def defaults():
         'personal/nickname':                            TYPE_STRING,
         'personal/private-key-size':                    TYPE_STRING,
         'personal/surname':                             TYPE_STRING,
+        'services/accountant/enabled':                  TYPE_BOOLEAN,
         'services/backup-db/enabled':                   TYPE_BOOLEAN,
         'services/backups/block-size':                  TYPE_DISK_SPACE,
         'services/backups/enabled':                     TYPE_BOOLEAN,
@@ -95,7 +113,10 @@ def defaults():
         'services/id-server/web-port':                  TYPE_POSITIVE_INTEGER,
         'services/identity-propagate/enabled':          TYPE_BOOLEAN,
         'services/id-server/enabled':                   TYPE_BOOLEAN,
+        'services/ip-port-responder/enabled':           TYPE_BOOLEAN,
         'services/list-files/enabled':                  TYPE_BOOLEAN,
+        'services/miner/enabled':                       TYPE_BOOLEAN,
+        'services/my-ip-port/enabled':                  TYPE_BOOLEAN,
         'services/network/enabled':                     TYPE_BOOLEAN,
         'services/network/proxy/enabled':               TYPE_BOOLEAN,
         'services/network/proxy/host':                  TYPE_STRING,
@@ -108,10 +129,19 @@ def defaults():
         'services/nodes-lookup/enabled':                TYPE_BOOLEAN,
         'services/p2p-hookups/enabled':                 TYPE_BOOLEAN,
         'services/private-messages/enabled':            TYPE_BOOLEAN,
+        'services/proxy-server/enabled':                TYPE_BOOLEAN,
+        'services/proxy-server/routes-limit':           TYPE_POSITIVE_INTEGER,
+        'services/proxy-server/current-routes':         TYPE_TEXT,
+        'services/proxy-transport/enabled':             TYPE_BOOLEAN,
+        'services/proxy-transport/sending-enabled':     TYPE_BOOLEAN,
+        'services/proxy-transport/receiving-enabled':   TYPE_BOOLEAN,
+        'services/proxy-transport/priority':            TYPE_POSITIVE_INTEGER,
+        'services/proxy-transport/my-original-identity':  TYPE_TEXT,
+        'services/proxy-transport/current-router':      TYPE_STRING,
+        'services/proxy-transport/preferred-routers':   TYPE_TEXT,
+        'services/proxy-transport/router-lifetime-seconds':     TYPE_POSITIVE_INTEGER,
         'services/rebuilding/enabled':                  TYPE_BOOLEAN,
         'services/restores/enabled':                    TYPE_BOOLEAN,
-        'services/my-ip-port/enabled':                  TYPE_BOOLEAN,
-        'services/ip-port-responder/enabled':           TYPE_BOOLEAN,
         'services/supplier/donated-space':              TYPE_DISK_SPACE,
         'services/supplier/enabled':                    TYPE_BOOLEAN,
         'services/tcp-connections/enabled':             TYPE_BOOLEAN,
@@ -127,17 +157,6 @@ def defaults():
         'services/udp-transport/receiving-enabled':     TYPE_BOOLEAN,
         'services/udp-transport/sending-enabled':       TYPE_BOOLEAN,
         'services/udp-transport/priority':              TYPE_POSITIVE_INTEGER,
-        'services/proxy-server/enabled':                TYPE_BOOLEAN,
-        'services/proxy-server/routes-limit':           TYPE_POSITIVE_INTEGER,
-        'services/proxy-server/current-routes':         TYPE_TEXT,
-        'services/proxy-transport/enabled':             TYPE_BOOLEAN,
-        'services/proxy-transport/sending-enabled':     TYPE_BOOLEAN,
-        'services/proxy-transport/receiving-enabled':   TYPE_BOOLEAN,
-        'services/proxy-transport/priority':            TYPE_POSITIVE_INTEGER,
-        'services/proxy-transport/my-original-identity':  TYPE_TEXT,
-        'services/proxy-transport/current-router':      TYPE_STRING,
-        'services/proxy-transport/preferred-routers':   TYPE_TEXT,
-        'services/proxy-transport/router-lifetime-seconds':     TYPE_POSITIVE_INTEGER,
         'updates/mode':                                 TYPE_COMBO_BOX,
         'updates/shedule':                              TYPE_TEXT,
     }

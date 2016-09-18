@@ -1,3 +1,24 @@
+#!/usr/bin/env python
+#broadcast_listener.py
+#
+# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+#
+# This file (broadcast_listener.py) is part of BitDust Software.
+#
+# BitDust is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# BitDust Software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Please contact us if you have any questions at bitdust.io@gmail.com
 
 
 """
@@ -77,10 +98,12 @@ class BroadcastListener(automat.Automat):
         """
         The state machine code, generated using `visio2python <http://bitdust.io/visio2python/>`_ tool.
         """
+        #--- AT_STARTUP
         if self.state == 'AT_STARTUP':
             if event == 'init':
                 self.state = 'OFFLINE'
                 self.doInit(arg)
+        #--- BROADCASTER?
         elif self.state == 'BROADCASTER?':
             if event == 'shutdown':
                 self.state = 'CLOSED'
@@ -90,6 +113,7 @@ class BroadcastListener(automat.Automat):
             elif event == 'broadcaster-connected':
                 self.state = 'LISTENING'
                 self.doSetBroadcaster(arg)
+        #--- LISTENING
         elif self.state == 'LISTENING':
             if event == 'disconnect' or event == 'message-failed':
                 self.state = 'OFFLINE'
@@ -102,6 +126,7 @@ class BroadcastListener(automat.Automat):
                 self.doSendMessageToBroadcaster(arg)
             elif event == 'incoming-message':
                 self.doNotifyInputMessage(arg)
+        #--- OFFLINE
         elif self.state == 'OFFLINE':
             if event == 'connect':
                 self.state = 'BROADCASTER?'
@@ -109,6 +134,7 @@ class BroadcastListener(automat.Automat):
             elif event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
+        #--- CLOSED
         elif self.state == 'CLOSED':
             pass
         return None

@@ -1,7 +1,24 @@
 #!/usr/bin/python
 #settings.py
 #
-# <<<COPYRIGHT>>>
+# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+#
+# This file (settings.py) is part of BitDust Software.
+#
+# BitDust is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# BitDust Software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Please contact us if you have any questions at bitdust.io@gmail.com
 #
 #
 #
@@ -288,7 +305,7 @@ def defaultDebugLevel():
     """
     Default debug level, lower values produce less messages.
     """
-    return 8
+    return 0
 
 def IntSize():
     """
@@ -1990,25 +2007,33 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('logs/stream-port', DefaultWebLogPort())
     config.conf().setDefaultValue('logs/traffic-enabled', 'false')
     config.conf().setDefaultValue('logs/traffic-port', DefaultWebTrafficPort())
+
     config.conf().setDefaultValue('emergency/email', '')
     config.conf().setDefaultValue('emergency/fax', '')
     config.conf().setDefaultValue('emergency/first', 'email')
     config.conf().setDefaultValue('emergency/phone', '')
     config.conf().setDefaultValue('emergency/second', 'phone')
     config.conf().setDefaultValue('emergency/text', '')
+
     config.conf().setDefaultValue('paths/backups', '')
     config.conf().setDefaultValue('paths/customers', '')
     config.conf().setDefaultValue('paths/messages', '')
     config.conf().setDefaultValue('paths/receipts', '')
     config.conf().setDefaultValue('paths/restore', '')
+
     config.conf().setDefaultValue('personal/private-key-size', DefaultPrivateKeySize())
     config.conf().setDefaultValue('personal/betatester', 'false')
     config.conf().setDefaultValue('personal/name', '')
     config.conf().setDefaultValue('personal/nickname', '')
     config.conf().setDefaultValue('personal/surname', '')
+
     config.conf().setDefaultValue('updates/mode', getUpdatesModeValues()[0])
     config.conf().setDefaultValue('updates/shedule', '5\n\n3600\n' ) # '1\n12:00:00\n6\n')
+    
+    config.conf().setDefaultValue('services/accountant/enabled', 'false')
+
     config.conf().setDefaultValue('services/backup-db/enabled', 'true')
+
     config.conf().setDefaultValue('services/backups/enabled', 'true')
     config.conf().setDefaultValue('services/backups/block-size', 
                                   diskspace.MakeStringFromBytes(DefaultBackupBlockSize()))
@@ -2017,24 +2042,37 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/backups/max-copies', '2')
     config.conf().setDefaultValue('services/backups/keep-local-copies-enabled', 'false')
     config.conf().setDefaultValue('services/backups/wait-suppliers-enabled', 'true')
+
     config.conf().setDefaultValue('services/broadcasting/enabled', 'true')
     config.conf().setDefaultValue('services/broadcasting/routing-enabled', 'false')
     config.conf().setDefaultValue('services/broadcasting/max-broadcast-connections', '10')
+
     config.conf().setDefaultValue('services/customer/enabled', 'true')
     config.conf().setDefaultValue('services/customer/needed-space', 
                                   diskspace.MakeStringFromBytes(DefaultNeededBytes()))
     config.conf().setDefaultValue('services/customer/suppliers-number', DefaultDesiredSuppliers())
+
     config.conf().setDefaultValue('services/customer-patrol/enabled', 'true')
+
     config.conf().setDefaultValue('services/data-motion/enabled', 'true')
+
     config.conf().setDefaultValue('services/gateway/enabled', 'true')
+
     config.conf().setDefaultValue('services/id-server/enabled', 'false')
     config.conf().setDefaultValue('services/id-server/host', '')
     config.conf().setDefaultValue('services/id-server/tcp-port', IdentityServerPort())
     config.conf().setDefaultValue('services/id-server/web-port', IdentityWebPort())
+
     config.conf().setDefaultValue('services/identity-propagate/enabled', 'true')
+
     config.conf().setDefaultValue('services/ip-port-responder/enabled', 'true')
+
     config.conf().setDefaultValue('services/list-files/enabled', 'true')
+
+    config.conf().setDefaultValue('services/miner/enabled', 'false')
+
     config.conf().setDefaultValue('services/my-ip-port/enabled', 'true')
+
     config.conf().setDefaultValue('services/network/enabled', 'true')
     config.conf().setDefaultValue('services/network/proxy/enabled', 'false')
     config.conf().setDefaultValue('services/network/proxy/host', '')
@@ -2044,12 +2082,17 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/network/proxy/username', '')
     config.conf().setDefaultValue('services/network/receive-limit', DefaultBandwidthInLimit())
     config.conf().setDefaultValue('services/network/send-limit', DefaultBandwidthOutLimit())
+
     config.conf().setDefaultValue('services/nodes-lookup/enabled', 'true')
+
     config.conf().setDefaultValue('services/p2p-hookups/enabled', 'true')
+
     config.conf().setDefaultValue('services/private-messages/enabled', 'false')
+
     config.conf().setDefaultValue('services/proxy-server/enabled', 'false')
     config.conf().setDefaultValue('services/proxy-server/routes-limit', 10)
     config.conf().setDefaultValue('services/proxy-server/current-routes', '{}')
+
     config.conf().setDefaultValue('services/proxy-transport/enabled', 'false')
     config.conf().setDefaultValue('services/proxy-transport/sending-enabled', 'true')
     config.conf().setDefaultValue('services/proxy-transport/receiving-enabled', 'false')
@@ -2058,20 +2101,27 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/proxy-transport/current-router', '')
     config.conf().setDefaultValue('services/proxy-transport/preferred-routers', '')
     config.conf().setDefaultValue('services/proxy-transport/router-lifetime-seconds', 600)
+
     config.conf().setDefaultValue('services/rebuilding/enabled', 'true')
+
     config.conf().setDefaultValue('services/restores/enabled', 'true')
+
     config.conf().setDefaultValue('services/supplier/enabled', 'true')
     config.conf().setDefaultValue('services/supplier/donated-space', 
                                   diskspace.MakeStringFromBytes(DefaultDonatedBytes()))
+
     config.conf().setDefaultValue('services/tcp-connections/enabled', 'true')
     config.conf().setDefaultValue('services/tcp-connections/tcp-port', DefaultTCPPort())
     config.conf().setDefaultValue('services/tcp-connections/upnp-enabled', 'true')
+
     config.conf().setDefaultValue('services/tcp-transport/enabled', 'true')
     config.conf().setDefaultValue('services/tcp-transport/receiving-enabled', 'true')
     config.conf().setDefaultValue('services/tcp-transport/sending-enabled', 'true')
     config.conf().setDefaultValue('services/tcp-transport/priority', 10)
+
     config.conf().setDefaultValue('services/udp-datagrams/enabled', 'true')
     config.conf().setDefaultValue('services/udp-datagrams/udp-port', DefaultUDPPort())
+
     config.conf().setDefaultValue('services/udp-transport/enabled', 'true')
     config.conf().setDefaultValue('services/udp-transport/receiving-enabled', 'true')
     config.conf().setDefaultValue('services/udp-transport/sending-enabled', 'true')

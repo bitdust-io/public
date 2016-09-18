@@ -1,7 +1,24 @@
 #!/usr/bin/env python
 #p2p_connector.py
 #
-# <<<COPYRIGHT>>>
+# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+#
+# This file (p2p_connector.py) is part of BitDust Software.
+#
+# BitDust is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# BitDust Software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Please contact us if you have any questions at bitdust.io@gmail.com
 #
 #
 #
@@ -128,6 +145,8 @@ def A(event=None, arg=None):
     Access method to interact with the state machine.
     """    
     global _P2PConnector
+    if event is None and arg is None:
+        return _P2PConnector
     if _P2PConnector is None:
         _P2PConnector = P2PConnector(
             'p2p_connector', 'AT_STARTUP', _DebugLevel, _Debug)

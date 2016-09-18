@@ -1,3 +1,24 @@
+#!/usr/bin/env python
+#broadcasters_finder.py
+#
+# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+#
+# This file (broadcasters_finder.py) is part of BitDust Software.
+#
+# BitDust is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# BitDust Software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Please contact us if you have any questions at bitdust.io@gmail.com
 
 
 """
@@ -14,8 +35,8 @@ EVENTS:
     * :red:`service-denied`
     * :red:`shutdown`
     * :red:`start`
+    * :red:`timer-10sec`
     * :red:`timer-3sec`
-    * :red:`timer-5sec`
     * :red:`users-not-found`
 """
 
@@ -68,8 +89,8 @@ class BroadcastersFinder(automat.Automat):
     """
 
     timers = {
-        'timer-3sec': (3.0, ['SERVICE?']),
-        'timer-5sec': (5.0, ['ACK?']),
+        'timer-3sec': (3.0, ['ACK?']),
+        'timer-10sec': (10.0, ['ACK?','SERVICE?']),
         }
 
     def init(self):
@@ -93,9 +114,11 @@ class BroadcastersFinder(automat.Automat):
             elif event == 'ack-received':
                 self.state = 'SERVICE?'
                 self.doSendRequestService(arg)
-            elif event == 'timer-5sec' and self.Attempts<5:
+            elif event == 'timer-10sec' and self.Attempts<5:
                 self.state = 'RANDOM_USER'
-                self.doDHTFindRandomUser(arg)
+                self.doLookupRandomUser(arg)
+            elif event == 'timer-3sec':
+                self.doSendMyIdentity(arg)
         elif self.state == 'RANDOM_USER':
             if event == 'found-one-user':
                 self.state = 'ACK?'
@@ -112,21 +135,21 @@ class BroadcastersFinder(automat.Automat):
             if event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
-            elif self.Attempts==5 and ( event == 'timer-3sec' or event == 'service-denied' ):
-                self.state = 'READY'
-                self.doNotifyLookupFailed(arg)
             elif event == 'service-accepted':
                 self.state = 'READY'
                 self.doNotifyLookupSuccess(arg)
-            elif ( event == 'timer-3sec' or event == 'service-denied' ) and self.Attempts<5:
+            elif self.Attempts==5 and ( event == 'timer-10sec' or event == 'service-denied' ):
+                self.state = 'READY'
+                self.doNotifyLookupFailed(arg)
+            elif ( event == 'timer-10sec' or event == 'service-denied' ) and self.Attempts<5:
                 self.state = 'RANDOM_USER'
-                self.doDHTFindRandomUser(arg)
+                self.doLookupRandomUser(arg)
         elif self.state == 'READY':
             if event == 'start':
                 self.state = 'RANDOM_USER'
                 self.doSetNotifyCallback(arg)
                 self.Attempts=0
-                self.doDHTFindRandomUser(arg)
+                self.doLookupRandomUser(arg)
         elif self.state == 'CLOSED':
             pass
         return None
@@ -143,7 +166,7 @@ class BroadcastersFinder(automat.Automat):
         """
         self.result_callback, self.request_service_params, self.current_broadcasters = arg
 
-    def doDHTFindRandomUser(self, arg):
+    def doLookupRandomUser(self, arg):
         """
         Action method.
         """
@@ -221,10 +244,10 @@ class BroadcastersFinder(automat.Automat):
 
     def _node_acked(self, response, info):
         if _Debug:
-            lg.out(_DebugLevel, 'broadcasters_finder._supplier_acked %r %r' % (response, info))
+            lg.out(_DebugLevel, 'broadcasters_finder._node_acked %r %r' % (response, info))
         if not response.Payload.startswith('accepted'):
             if _Debug:
-                lg.out(_DebugLevel, 'broadcasters_finder._node_failed %r %r' % (response, info))
+                lg.out(_DebugLevel, 'broadcasters_finder._node_acked with service denied %r %r' % (response, info))
             self.automat('service-denied')
             return
         if _Debug:

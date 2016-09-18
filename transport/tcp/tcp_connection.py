@@ -1,3 +1,24 @@
+#!/usr/bin/env python
+#tcp_connection.py
+#
+# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+#
+# This file (tcp_connection.py) is part of BitDust Software.
+#
+# BitDust is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# BitDust Software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+# 
+# You should have received a copy of the GNU Affero General Public License
+# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Please contact us if you have any questions at bitdust.io@gmail.com
 
 
 """
@@ -15,22 +36,17 @@ EVENTS:
 
 """
 
+#------------------------------------------------------------------------------ 
 
 import os
-import sys
 import time
 
-try:
-    from twisted.internet import reactor
-except:
-    sys.exit('Error initializing twisted.internet.reactor in tcp_node.py')
-
-from twisted.internet import protocol
 from twisted.protocols import basic
+
+#------------------------------------------------------------------------------ 
 
 from logs import lg
 
-from system import bpio
 from automats import automat
 
 import tcp_node
@@ -314,7 +330,11 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
             tcp_node.decrease_connections_counter()
         else:
             raise Exception('not found %s in the opened connections' % self.peer_address)
-
+        self.stream = None
+        self.peer_address = None
+        self.peer_external_address = None
+        self.peer_idurl = None
+        self.outboxQueue = []
 
     def getTransportAddress(self):
         peer = self.transport.getPeer()
