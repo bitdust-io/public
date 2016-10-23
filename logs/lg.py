@@ -143,10 +143,12 @@ def err(message, level=0):
     out(level, message)
 
 
-def exc(msg='', level=0, maxTBlevel=100):
+def exc(msg='', level=0, maxTBlevel=100, exc_info=None, exc_value=None):
     if msg:
         out(level, msg)
-    return exception(level, maxTBlevel, None)
+    if exc_value:
+        return exception(level, maxTBlevel, exc_info=('', exc_value, []))
+    return exception(level, maxTBlevel, exc_info)
 
 
 def exception(level, maxTBlevel, exc_info):
@@ -156,14 +158,17 @@ def exception(level, maxTBlevel, exc_info):
     """
     global _LogFileName
     if exc_info is None:
-        cla, value, trbk = sys.exc_info()
+        _, value, trbk = sys.exc_info()
     else:
-        cla, value, trbk = exc_info
+        _, value, trbk = exc_info
     try:
         excArgs = value.__dict__["args"]
     except KeyError:
         excArgs = ''
-    excTb = traceback.format_tb(trbk, maxTBlevel)    
+    if trbk:
+        excTb = traceback.format_tb(trbk, maxTBlevel)
+    else:
+        excTb = []
     s = 'Exception: <' + exception_name(value) + '>\n'
     out(level, s.strip())
     if excArgs:
@@ -175,9 +180,9 @@ def exception(level, maxTBlevel, exc_info):
         out(level, l.replace('\n', ''))
         s += l + '\n'
     try:
-        file = open(os.path.join(os.path.dirname(_LogFileName), 'exception.log'), 'w')
-        file.write(s)
-        file.close()
+        fo = open(os.path.join(os.path.dirname(_LogFileName), 'exception.log'), 'w')
+        fo.write(s)
+        fo.close()
     except:
         pass
     return s
@@ -188,9 +193,9 @@ def format_exception(maxTBlevel=100, exc_info=None):
     Return string with detailed info about last exception.  
     """
     if exc_info is None:
-        cla, value, trbk = sys.exc_info()
+        _, value, trbk = sys.exc_info()
     else:
-        cla, value, trbk = exc_info
+        _, value, trbk = exc_info
     try:
         excArgs = value.__dict__["args"]
     except KeyError:
@@ -329,12 +334,12 @@ def print_total_time():
         out(2, 'total=%f sec. count=%d, avarage=%f: %s' % (total, counts, total/counts, t))
 
 
-def exception_hook(type, value, traceback):
+def exception_hook(typ, value, traceback):
     """
     Callback function to print last exception.
     """
     out(0, 'uncaught exception:')
-    exc(exc_info=(type, value, traceback))
+    exc(exc_info=(typ, value, traceback))
 
 
 def open_log_file(filename, append_mode=False):
