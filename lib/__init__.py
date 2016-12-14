@@ -11,7 +11,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -21,9 +21,8 @@
 #
 
 """
-.. module:: lib
+.. module:: lib.
 
-Contains various functions related to the Client side code, 
-Identity server and other stuff.
+Contains various functions related to the Client side code, Identity
+server and other stuff.
 """
-

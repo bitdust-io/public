@@ -11,10 +11,13 @@ Copyright (C) 2004 Anthony Baxter
 Licensed under the GNU LGPL.
 """
 
+
 class _DeferredCache:
-    """ Wraps a call that returns a deferred in a cache. Any subsequent
-        calls with the same argument will wait for the first call to
-        finish and return the same result (or errback).
+    """
+    Wraps a call that returns a deferred in a cache.
+
+    Any subsequent calls with the same argument will wait for the first
+    call to finish and return the same result (or errback).
     """
 
     hashableArgs = False
@@ -29,7 +32,7 @@ class _DeferredCache:
             self.inProgressOnly = inProgressOnly
 
     def cb_triggerUserCallback(self, res, deferred):
-        #print "triggering", deferred
+        # print "triggering", deferred
         deferred.callback(res)
         return res
 
@@ -43,8 +46,7 @@ class _DeferredCache:
             arghash = hash(args)
         except TypeError:
             return None
-        kwit = kwargs.items()
-        kwit.sort()
+        kwit = sorted(kwargs.items())
         try:
             kwhash = hash(tuple(kwit))
         except TypeError:
@@ -60,11 +62,11 @@ class _DeferredCache:
 
     def call(self, *args, **kwargs):
         # Currently not in progress - start it
-        #print "called with", args
+        # print "called with", args
         cacheVal = self._genCache(args, kwargs)
         if cacheVal is None and self.hashableArgs:
-            raise TypeError('DeferredCache(%s) arguments must be hashable'%(
-                                self.op.func_name))
+            raise TypeError('DeferredCache(%s) arguments must be hashable' % (
+                self.op.func_name))
 
         opdef = self.cache.get(cacheVal)
         if not opdef:
@@ -83,17 +85,19 @@ class _DeferredCache:
 
 
 def DeferredCache(op=None, hashableArgs=None, inProgressOnly=None):
-    """ Use this as a decorator for a function or method that returns a
-        deferred. Any subsequent calls using the same arguments will
-        be all triggered off the original deferred, all returning the
-        same result.
+    """
+    Use this as a decorator for a function or method that returns a deferred.
+
+    Any subsequent calls using the same arguments will be all triggered
+    off the original deferred, all returning the same result.
     """
     if op is None:
         return lambda x: DeferredCache(x, hashableArgs, inProgressOnly)
     c = _DeferredCache(op, hashableArgs, inProgressOnly)
+
     def func(*args, **kwargs):
         return c.call(*args, **kwargs)
-    if sys.version_info > (2,4):
+    if sys.version_info > (2, 4):
         func.func_name = op.func_name
     func.clearCache = c.clearCache
     func.cache_hashableArgs = c.hashableArgs

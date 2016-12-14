@@ -13,7 +13,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -23,15 +23,15 @@
 #
 #
 """
-.. module:: commands
+.. module:: commands.
 
 This module describes all commands in the BitDust p2p communication protocol.
-The command is stored as a string in the packet.Command field. 
+The command is stored as a string in the packet.Command field.
 If all commands are repeatable, then sequence numbers are not so critical,
 though we would want date so time for replay trouble was limited.
 If backups are write, read, delete (and never write again), then replay
 is not an issue here and we use PacketID that identifies data.
-So we want things like "replace supplier Vincecate"  not "replace supplier 5" 
+So we want things like "replace supplier Vincecate"  not "replace supplier 5"
 where seeing command an extra time would not hurt.
 
 These are the valid values for the command field of a packet:
@@ -43,11 +43,12 @@ These are the valid values for the command field of a packet:
     - Coin/Ack                  (for contracts publishing/management)
 """
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
-P2PCommandAcks={}
+P2PCommandAcks = {}
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def init():
     """
@@ -74,8 +75,10 @@ def init():
     P2PCommandAcks[RequestService()] = Ack()
     P2PCommandAcks[CancelService()] = Ack()
     P2PCommandAcks[Broadcast()] = None
+    P2PCommandAcks[Relay()] = None
 
-def IsCommand(s):                 
+
+def IsCommand(s):
     """
     Check to see if ``s`` is a valid command.
     """
@@ -84,13 +87,15 @@ def IsCommand(s):
         init()
     return s in P2PCommandAcks
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def Data():
     """
-    Data packet, may be Data, Parity, Backup database, may be more
+    Data packet, may be Data, Parity, Backup database, may be more.
     """
     return "Data"
+
 
 def Ack():
     """
@@ -98,15 +103,20 @@ def Ack():
     """
     return "Ack"
 
+
 def RequestService():
     """
+    
     """
     return "RequestService"
 
+
 def CancelService():
     """
+    
     """
     return "CancelService"
+
 
 def Retrieve():
     """
@@ -115,16 +125,25 @@ def Retrieve():
     # TODO: rename to RetreiveData
     return "Retrieve"
 
+
 def Fail():
     """
-    Used to report an error in response, 
-    for example when requested file is not found on remote machine.
+    Used to report an error in response, for example when requested file is not
+    found on remote machine.
     """
     return "Fail"
+
+
+def Relay():
+    """
+    Used by proxy transport to route packets in/out via third node.
+    """
+    return "Relay"
 
 # for case when local scrubber has detected some bitrot and asks customer to resend
 # def Resend():
 #    return("Resend")
+
 
 def ListFiles():
     """
@@ -132,43 +151,50 @@ def ListFiles():
     """
     return "ListFiles"
 
+
 def Files():
     """
     Request a list of my files from remote peer.
     """
     return "Files"
 
+
 def ListContacts():
     """
-    Response with a list of my contacts, 
-    may be suppliers, customers or correspondents. 
+    Response with a list of my contacts, may be suppliers, customers or
+    correspondents.
     """
     return "ListContacts"
 
+
 def Contacts():
     """
-    Request a list of my contacts
+    Request a list of my contacts.
     """
     return "Contacts"
 
+
 def NearnessCheck():
     """
-    Used to detect how far is peers
-    """ 
+    Used to detect how far is peers.
+    """
     return "NearnessCheck"
+
 
 def Nearness():
     """
-    Used to detect how far is peers
-    """ 
+    Used to detect how far is peers.
+    """
     return "Nearness"
+
 
 def RequestIdentity():
     """
-    Not used right now, probably can be used to request 
-    latest version of peer's identity.
+    Not used right now, probably can be used to request latest version of
+    peer's identity.
     """
     return "RequestIdentity"
+
 
 def Identity():
     """
@@ -176,11 +202,13 @@ def Identity():
     """
     return "Identity"
 
+
 def DeleteFile():
     """
     Request to delete a single file or list of my files from remote machine.
     """
     return "DeleteFile"
+
 
 def DeleteBackup():
     """
@@ -188,17 +216,20 @@ def DeleteBackup():
     """
     return "DeleteBackup"
 
+
 def Transfer():
     """
     Transfer funds to remote peer.
     """
     return "Transfer"
 
+
 def Receipt():
     """
-    Some billing report. 
+    Some billing report.
     """
     return "Receipt"
+
 
 def Message():
     """
@@ -206,33 +237,42 @@ def Message():
     """
     return "Message"
 
+
 def Correspondent():
     """
-    Remote user should send you this to be included
-    in your correspondents (friends) list.
+    Remote user should send you this to be included in your correspondents
+    (friends) list.
     """
     return "Correspondent"
 
+
 def Broadcast():
     """
-    This message type is for delivering some piece of data to all peers in the network.
+    This message type is for delivering some piece of data to all peers in the
+    network.
+
     It is used to broadcast "crypto-coins" between peers.
     """
     return "Broadcast"
 
+
 def Coin():
     """
     Every "contract" store a list of "coin" as a separate chain in global DB.
-    This is similar to well-known "blockchain" technology. 
-    """    
+
+    This is similar to well-known "blockchain" technology.
+    """
     return "Coin"
+
 
 def RetreiveCoin():
     """
+    
     """
     return "RetreiveCoin"
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def Register():
     """
@@ -240,11 +280,13 @@ def Register():
     """
     return "Register"
 
+
 def RequestSuppliers():
     """
     Request a list of my suppliers.
     """
     return "RequestSuppliers"
+
 
 def Suppliers():
     """
@@ -252,11 +294,13 @@ def Suppliers():
     """
     return "Suppliers"
 
+
 def RequestCustomers():
     """
     Request a list of my customers.
     """
     return "RequestCustomers"
+
 
 def Settings():
     """
@@ -264,10 +308,9 @@ def Settings():
     """
     return 'Settings'
 
+
 def BandwidthReport():
     """
     Used to daily reports of users bandwidh stats.
     """
     return 'BandwidthReport'
-
-

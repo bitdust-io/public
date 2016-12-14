@@ -1,5 +1,5 @@
 #!/usr/bin/python
-#tcp_connection.py
+# tcp_connection.py
 #
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
@@ -15,7 +15,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -26,20 +26,16 @@
 #
 
 
-
 """
-.. module:: tcp_process
+.. module:: tcp_process.
 
-This is a 
-This is a sub process to send/receive files between users over TCP protocol.
-1) listen for incoming connections on a port 7771 (by default) 
-2) establish connections to remote peers
-3) keeps TCP session opened to be able to send asap 
+This is a This is a sub process to send/receive files between users over
+TCP protocol. 1) listen for incoming connections on a port 7771 (by
+default) 2) establish connections to remote peers 3) keeps TCP session
+opened to be able to send asap
 """
 
-import os
 import sys
-import time
 import optparse
 
 try:
@@ -47,24 +43,15 @@ try:
 except:
     sys.exit('Error initializing twisted.internet.reactor in tcp_connection.py')
 
-from twisted.web import xmlrpc
-from twisted.internet import task
 from twisted.internet import protocol
-from twisted.protocols import basic
-from twisted.web import server
-from twisted.internet.defer import Deferred, succeed 
-from twisted.internet.error import ConnectionDone
+from twisted.internet.defer import Deferred
 from twisted.internet.error import CannotListenError
 
 from logs import lg
 
-from system import bpio
+from transport.tcp import tcp_stream
 
-import tcp_interface
-import tcp_connection
-import tcp_stream
-
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 _MyIDURL = None
 _MyHost = None
@@ -75,59 +62,73 @@ _OpenedConnections = {}
 _StartedConnections = {}
 _ConnectionsCounter = 0
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def started_connections():
     global _StartedConnections
     return _StartedConnections
 
+
 def opened_connections():
     global _OpenedConnections
     return _OpenedConnections
+
 
 def opened_connections_count():
     global _ConnectionsCounter
     return _ConnectionsCounter
 
+#------------------------------------------------------------------------------
+
+
 def increase_connections_counter():
     global _ConnectionsCounter
     _ConnectionsCounter += 1
 
+
 def decrease_connections_counter():
     global _ConnectionsCounter
     _ConnectionsCounter -= 1
-    
+
+#------------------------------------------------------------------------------
+
+
 def get_internal_port():
     global _InternalPort
     return _InternalPort
 
-def my_idurl(): 
+
+def my_idurl():
     global _MyIDURL
     return _MyIDURL
+
 
 def my_host():
     global _MyHost
     return _MyHost
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def receive(options):
     global _MyIDURL
     global _MyHost
     global _InternalPort
     global _Listener
+    from transport.tcp import tcp_interface
     if _Listener:
         tcp_interface.interface_receiving_failed('already listening')
         return None
     try:
         _MyIDURL = options['idurl']
         _InternalPort = int(options['tcp_port'])
-        _Listener = reactor.listenTCP(_InternalPort, TCPFactory(None))
-        _MyHost = options['host'].split(':')[0]+':'+str(_InternalPort)
+        _Listener = reactor.listenTCP(_InternalPort, TCPFactory(None, keep_alive=True))
+        _MyHost = options['host'].split(':')[0] + ':' + str(_InternalPort)
         tcp_interface.interface_receiving_started(_MyHost, options)
-    except CannotListenError, ex:
+    except CannotListenError as ex:
         tcp_interface.interface_receiving_failed('port is busy')
-    except Exception, ex:
+    except Exception as ex:
         # print err, dir(err)
         try:
             e = ex.getErrorMessage()
@@ -138,8 +139,9 @@ def receive(options):
     return _Listener
 
 
-def connect_to(host):
+def connect_to(host, keep_alive=True):
     """
+    
     """
     if host in started_connections():
         return False
@@ -150,14 +152,15 @@ def connect_to(host):
             if connection.getConnectionAddress():
                 if connection.getConnectionAddress() == host:
                     return True
-    connection = TCPFactory(host)
+    connection = TCPFactory(host, keep_alive=keep_alive)
     connection.connector = reactor.connectTCP(host[0], host[1], connection)
     started_connections()[host] = connection
     return False
-    
+
 
 def disconnect_from(host):
     """
+    
     """
     ok = False
     for peeraddr, connections in opened_connections().items():
@@ -174,12 +177,14 @@ def disconnect_from(host):
                     connection.automat('disconnect')
                     return True
     return ok
-    
+
 
 def disconnect():
     """
+    
     """
     global _Listener
+    from transport.tcp import tcp_interface
     if not _Listener:
         tcp_interface.interface_disconnected(None)
         return True
@@ -190,6 +195,7 @@ def disconnect():
 
 def close_connections():
     """
+    
     """
     for sc in started_connections().values():
         sc.connector.disconnect()
@@ -201,6 +207,7 @@ def close_connections():
 
 def send(filename, remoteaddress, description=None, single=False):
     """
+    
     """
     result_defer = Deferred()
     if remoteaddress in started_connections():
@@ -224,7 +231,7 @@ def send(filename, remoteaddress, description=None, single=False):
                         lg.out(6, 'tcp_node.send single, use opened(2) connection to %s, %d already started and %d opened' % (
                             str(remoteaddress), len(started_connections()), len(opened_connections())))
                     return result_defer
-    connection = TCPFactory(remoteaddress)
+    connection = TCPFactory(remoteaddress, keep_alive=not single)
     connection.add_outbox_file(filename, description, result_defer, single)
     connection.connector = reactor.connectTCP(remoteaddress[0], remoteaddress[1], connection)
     started_connections()[remoteaddress] = connection
@@ -236,30 +243,52 @@ def send(filename, remoteaddress, description=None, single=False):
 
 def start_streams():
     """
+    
     """
     return tcp_stream.start_process_streams()
 
 
 def stop_streams():
     """
+    
     """
     return tcp_stream.stop_process_streams()
 
 
+def list_input_streams(sorted_by_time=True):
+    """
+    
+    """
+    return tcp_stream.list_input_streams(sorted_by_time)
+
+
+def list_output_streams(sorted_by_time=True):
+    """
+    
+    """
+    return tcp_stream.list_output_streams(sorted_by_time)
+
+
 def cancel_file_receiving(transferID):
     """
+    
     """
-    for connections in opened_connections().vaues():
-        for connection in connections:
-            for in_file in connection.inboxFiles.vaues():
-                if in_file.transfer_id and in_file.transfer_id == transferID:
-                    connection.automat('disconnect')
-                    return True
-    lg.warn('%r not found' % transferID)
+    # at the moment for TCP transport we can not stop particular file transfer
+    # we can only close connection itself, which is not we really want
     return False
+#     for connections in opened_connections().values():
+#         for connection in connections:
+#             for in_file in connection.stream.inboxFiles.values():
+#                 if in_file.transfer_id and in_file.transfer_id == transferID:
+#                     connection.automat('disconnect')
+#                     return True
+#     lg.warn('%r not found' % transferID)
+#     return False
+
 
 def cancel_file_sending(transferID):
     """
+    
     """
     for connections in opened_connections().values():
         for connection in connections:
@@ -270,14 +299,17 @@ def cancel_file_sending(transferID):
                         return True
     lg.warn('%r not found' % transferID)
     return False
-   
+
+
 def cancel_outbox_file(host, filename):
     """
+    
     """
+    from transport.tcp import tcp_interface
     for connections in opened_connections().values():
         for connection in connections:
             if  connection.peer_address and connection.peer_address == host or \
-                connection.peer_external_address and connection.peer_external_address == host:
+                    connection.peer_external_address and connection.peer_external_address == host:
                 i = 0
                 while i < len(connection.outboxQueue):
                     fn, description, result_defer, single = connection.outboxQueue[i]
@@ -300,26 +332,26 @@ def cancel_outbox_file(host, filename):
                         result_defer.callback((filename, description, 'failed', 'cancelled'))
                     continue
                 i += 1
-                
 
-def list_sessions():
-    """
-    """
+#------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------ 
 
 class TCPFactory(protocol.ClientFactory):
-    protocol = tcp_connection.TCPConnection
+    protocol = None
 
-    def __init__(self, connection_address):
+    def __init__(self, connection_address, keep_alive=True):
+        from transport.tcp import tcp_connection
+        self.protocol = tcp_connection.TCPConnection
         self.connection_address = connection_address
+        self.keep_alive = keep_alive
         self.pendingoutboxfiles = []
         self.connector = None
 
     def __repr__(self):
-        return 'TCPFactory(%s)' % str(self.connection_address) 
+        return 'TCPFactory(%s)' % str(self.connection_address)
 
     def clientConnectionFailed(self, connector, reason):
+        from transport.tcp import tcp_interface
         protocol.ClientFactory.clientConnectionFailed(self, connector, reason)
         destaddress = (connector.getDestination().host, int(connector.getDestination().port))
         connection = started_connections().pop(self.connection_address, None)
@@ -334,12 +366,13 @@ class TCPFactory(protocol.ClientFactory):
         self.pendingoutboxfiles = []
         # lg.out(18, 'tcp_node.clientConnectionFailed from %s  :   %s closed, %d more started' % (
         #     str(destaddress), self, len(started_connections())))
-        
+
     def add_outbox_file(self, filename, description='', result_defer=None, single=False):
         self.pendingoutboxfiles.append((filename, description, result_defer, single))
         tcp_stream.process_streams()
-        
-#------------------------------------------------------------------------------ 
+
+#------------------------------------------------------------------------------
+
 
 def parseCommandLine():
     oparser = optparse.OptionParser()
@@ -359,10 +392,7 @@ def parseCommandLine():
 
 def main():
     pass
-    
+
 if __name__ == "__main__":
     main()
-    reactor.run()    
-    
-    
-
+    reactor.run()

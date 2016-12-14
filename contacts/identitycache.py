@@ -1,5 +1,5 @@
 #!/usr/bin/python
-#identitycache.py
+# identitycache.py
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
 #
@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -24,54 +24,57 @@
 #
 
 """
-.. module:: identitycache
+.. module:: identitycache.
 
-Here we store a local copies of identities.
-This fetches identities off the web and stores an XML copy in file and an identity object in a dictionary.  
-Other parts of BitDust call this to get an identity using an IDURL.
-So this is a local cache of user ID's.
+Here we store a local copies of identities. This fetches identities off
+the web and stores an XML copy in file and an identity object in a
+dictionary. Other parts of BitDust call this to get an identity using an
+IDURL. So this is a local cache of user ID's.
 """
 
 #------------------------------------------------------------------------------
 
-_Debug = True 
+_Debug = False
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 from twisted.internet.defer import Deferred
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 from logs import lg
 
 from lib import net_misc
 
-from userid import identity 
+from userid import identity
 import identitydb
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 _CachingTasks = {}
 _OverriddenIdentities = {}
 
 #-------------------------------------------------------------------------------
 
+
 def init():
     """
     This should be called before all other things.
+
     Call to initialize identitydb and cache several important IDs.
     """
     if _Debug:
         lg.out(4, 'identitycache.init')
     # identitydb.clear()
     identitydb.init()
-        
+
 
 def shutdown():
     if _Debug:
         lg.out(4, 'identitycache.shutdown')
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def Clear(excludeList=None):
     """
@@ -103,13 +106,14 @@ def PrintCacheKeys():
 
 def PrintAllInCache():
     """
-    For debug, print completely all cache. 
+    For debug, print completely all cache.
     """
     identitydb.print_cache()
-    
-    
+
+
 def Items():
     """
+    
     """
     return identitydb.cache()
 
@@ -118,7 +122,7 @@ def HasKey(idurl):
     """
     Check for some user IDURL in the cache.
     """
-    return identitydb.has_key(idurl) or IsOverridden(idurl)
+    return identitydb.has_idurl(idurl) or IsOverridden(idurl)
 
 
 def HasFile(idurl):
@@ -140,16 +144,20 @@ def FromCache(idurl):
 
 def GetIDURLsByContact(contact):
     """
-    In the ``identitydb`` code we keep track of all identity objects and prepare an index of all known contacts.
-    So we can try to detect who is sending us a packet when got a packet from known contact address. 
-    This is to get a list of known ID's in the cache for that contact.
+    In the ``identitydb`` code we keep track of all identity objects and
+    prepare an index of all known contacts.
+
+    So we can try to detect who is sending us a packet when got a packet
+    from known contact address. This is to get a list of known ID's in
+    the cache for that contact.
     """
     return identitydb.get_idurls_by_contact(contact)
 
 
 def GetIDURLByIPPort(ip, port):
     """
-    Same as previous method but the index is created from IP:PORT parts of identities contacts.
+    Same as previous method but the index is created from IP:PORT parts of
+    identities contacts.
     """
     return identitydb.get_idurl_by_ip_port(ip, port)
 
@@ -158,7 +166,7 @@ def GetContacts(idurl):
     """
     This is another one index - return a set of contacts for given IDURL.
     Instead of read identity object and parse it every time - this method can be used.
-    This is a "cached" info. 
+    This is a "cached" info.
     """
     return identitydb.idcontacts(idurl)
 
@@ -172,7 +180,8 @@ def Remove(idurl):
 
 def UpdateAfterChecking(idurl, xml_src):
     """
-    Need to call that method to update the cache when some identity sources is changed.
+    Need to call that method to update the cache when some identity sources is
+    changed.
     """
     #out(12, 'identitycache.UpdateAfterChecking ' + url)
     return identitydb.update(idurl, xml_src)
@@ -180,10 +189,11 @@ def UpdateAfterChecking(idurl, xml_src):
 
 def RemapContactAddress(address):
     """
-    For local peers in same sub network we need to use local IP, not external IP.
-    We pass local IP to transports to send packets inside sub network. 
-    TODO: Would be great to get rid of that - transport must keep track of local and external situations.  
-    So this is another index - IDURL to local IP, see identitydb.  
+    For local peers in same sub network we need to use local IP, not external
+    IP. We pass local IP to transports to send packets inside sub network.
+
+    TODO: Would be great to get rid of that - transport must keep track of local and external situations.
+    So this is another index - IDURL to local IP, see identitydb.
     """
     idurl = GetIDURLByIPPort(address[0], address[1])
     if idurl is not None and HasLocalIP(idurl):
@@ -193,8 +203,10 @@ def RemapContactAddress(address):
         return newaddress
     return address
 
+
 def OverrideIdentity(idurl, xml_src):
     """
+    
     """
     global _OverriddenIdentities
     _OverriddenIdentities[idurl] = xml_src
@@ -202,8 +214,10 @@ def OverrideIdentity(idurl, xml_src):
         lg.out(4, 'identitycache.OverrideIdentity a new identity source saved for %s' % idurl)
         lg.out(4, '            total number of overrides is %d' % len(_OverriddenIdentities))
 
+
 def StopOverridingIdentity(idurl):
     """
+    
     """
     global _OverriddenIdentities
     return _OverriddenIdentities.pop(idurl, None)
@@ -211,19 +225,24 @@ def StopOverridingIdentity(idurl):
         lg.out(4, 'identitycache.OverrideIdentity   removed overridden source for %s' % idurl)
         lg.out(4, '            total number of overrides is %d' % len(_OverriddenIdentities))
 
+
 def IsOverridden(idurl):
     """
+    
     """
     global _OverriddenIdentities
-    return _OverriddenIdentities.has_key(idurl)
+    return idurl in _OverriddenIdentities
+
 
 def ReadOverriddenIdentityXMLSource(idurl):
     """
+    
     """
     global _OverriddenIdentities
     return _OverriddenIdentities.get(idurl, None)
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def getPageSuccess(src, idurl):
     """
@@ -235,7 +254,7 @@ def getPageSuccess(src, idurl):
 
 def getPageFail(x, idurl):
     """
-    This is called when identity request is failed. 
+    This is called when identity request is failed.
     """
     if _Debug:
         lg.out(6, "identitycache.getPageFail NETERROR in request to " + idurl)
@@ -258,15 +277,17 @@ def scheduleForCaching(idurl, timeout=0):
     """
     return pageRequestTwisted(idurl, timeout)
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def immediatelyCaching(idurl, timeout=0):
     """
     A smart method to start caching some identity and get results in callbacks.
     """
     global _CachingTasks
-    if _CachingTasks.has_key(idurl):
+    if idurl in _CachingTasks:
         return _CachingTasks[idurl]
+
     def _getPageSuccess(src, idurl, res):
         global _CachingTasks
         _CachingTasks.pop(idurl)
@@ -279,6 +300,7 @@ def immediatelyCaching(idurl, timeout=0):
             if _Debug:
                 lg.out(14, '    [cache error] %s' % idurl)
         return src
+
     def _getPageFail(x, idurl, res):
         global _CachingTasks
         _CachingTasks.pop(idurl)
@@ -295,7 +317,8 @@ def immediatelyCaching(idurl, timeout=0):
         lg.out(14, 'identitycache.immediatelyCaching %s' % idurl)
     return result
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def SetLocalIPs(local_ips):
     """
@@ -306,7 +329,7 @@ def SetLocalIPs(local_ips):
 
 def GetLocalIP(idurl):
     """
-    If known, return a local IP for given user IDURL. 
+    If known, return a local IP for given user IDURL.
     """
     return identitydb.get_local_ip(idurl)
 
@@ -324,6 +347,4 @@ def SearchLocalIP(ip):
     """
     return identitydb.search_local_ip(ip)
 
-#------------------------------------------------------------------------------ 
-
-
+#------------------------------------------------------------------------------

@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -23,7 +23,8 @@
 # the GNU Lesser General Public License Version 3, or any later version.
 # See the COPYING file included in this archive
 
-""" Kademlia DHT implementation
+"""
+Kademlia DHT implementation.
 
 This package contains Entangled's implementation of the Kademlia
 distributed hash table (DHT).
@@ -44,7 +45,7 @@ with a TCP-based protocol, instead of the provided UDP-based one.
 
 Client applications should also modify the values found in
 C{entangled.kademlia.constants} to suit their needs. Refer to the C{constants}
-module for documentation on what these values control. 
+module for documentation on what these values control.
 """
 
 from node import Node

@@ -1,5 +1,5 @@
 #!/usr/bin/python
-#my_id.py
+# my_id.py
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
 #
@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -25,8 +25,9 @@
 #
 
 """
-.. module:: my_id
+..
 
+module:: my_id
 """
 
 import os
@@ -34,7 +35,7 @@ import sys
 import string
 import time
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 if __name__ == '__main__':
     import os.path as _p
@@ -51,26 +52,29 @@ from main import settings
 from lib import misc
 from lib import nameurl
 
-from crypt import key 
+from crypt import key
 
 import identity
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 _LocalIdentity = None
 _LocalIDURL = None
 _LocalName = None
-_ValidTransports = ['tcp', 'udp', 'proxy',]
+_ValidTransports = ['tcp', 'udp', 'proxy', ]
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def init():
     """
     Will be called in main thread at start up.
+
     Can put here some minor things if needed.
     """
     lg.out(4, 'my_id.init')
     loadLocalIdentity()
+
 
 def shutdown():
     lg.out(4, 'my_id.shutdown')
@@ -78,16 +82,19 @@ def shutdown():
 
 #-------------------------------------------------------------------------------
 
+
 def isLocalIdentityReady():
     """
-    Return True if local identity object already initialized and stored in memory. 
+    Return True if local identity object already initialized and stored in
+    memory.
     """
     global _LocalIdentity
     return _LocalIdentity is not None
 
+
 def setLocalIdentity(ident):
     """
-    Set local identity object in the memory.  
+    Set local identity object in the memory.
     """
     global _LocalIdentity
     global _LocalIDURL
@@ -98,11 +105,13 @@ def setLocalIdentity(ident):
     _LocalIDURL = _LocalIdentity.getIDURL()
     _LocalName = _LocalIdentity.getIDName()
 
+
 def setLocalIdentityXML(idxml):
     """
     Construct identity object from XML string and save it to the memory.
     """
     setLocalIdentity(identity.identity(xmlsrc=idxml))
+
 
 def getLocalIdentity():
     """
@@ -113,16 +122,18 @@ def getLocalIdentity():
         loadLocalIdentity()
     return _LocalIdentity
 
+
 def getLocalID():
     """
     Return my IDURL.
-    """ 
+    """
     global _LocalIDURL
     if _LocalIDURL is None:
         localIdent = getLocalIdentity()
         if localIdent:
             _LocalIDURL = localIdent.getIDURL()
     return _LocalIDURL
+
 
 def getIDName():
     """
@@ -135,13 +146,16 @@ def getIDName():
             _LocalName = localIdent.getIDName()
     return _LocalName
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def loadLocalIdentity():
     """
     The core method.
-    The file [BitDust data dir]/metadata/localidentity keeps the user identity in XML format.
-    Do read the local file and set into object in memory.  
+
+    The file [BitDust data dir]/metadata/localidentity keeps the user
+    identity in XML format. Do read the local file and set into object
+    in memory.
     """
     global _LocalIdentity
     global _LocalIDURL
@@ -167,9 +181,11 @@ def loadLocalIdentity():
     setTransportOrder(getOrderFromContacts(_LocalIdentity))
     lg.out(6, "my_id.loadLocalIdentity my name is [%s]" % lid.getIDName())
 
+
 def saveLocalIdentity():
     """
     Save identity object from memory into local file.
+
     Do sign the identity than serialize to write to the file.
     """
     global _LocalIdentity
@@ -182,8 +198,10 @@ def saveLocalIdentity():
     bpio.WriteFile(filename, xmlid)
     lg.out(6, "my_id.saveLocalIdentity %d bytes wrote to %s" % (len(xmlid), filename))
 
+
 def forgetLocalIdentity():
     """
+    
     """
     global _LocalIdentity
     if not isLocalIdentityReady():
@@ -191,6 +209,7 @@ def forgetLocalIdentity():
         return
     lg.out(6, "my_id.saveLocalIdentity")
     _LocalIdentity = None
+
 
 def eraseLocalIdentity():
     filename = bpio.portablePath(settings.LocalIdentityFilename())
@@ -201,18 +220,22 @@ def eraseLocalIdentity():
         return False
     lg.out(6, "my_id.eraseLocalIdentity file %s was deleted" % filename)
     return True
-    
-#------------------------------------------------------------------------------ 
+
+#------------------------------------------------------------------------------
+
 
 def getValidTransports():
     """
+    
     """
     global _ValidTransports
     return _ValidTransports
 
+
 def isValidTransport(transport):
     """
     Check string to be a valid transport.
+
     See ``lib.transport_control' for more details.
     """
     global _ValidTransports
@@ -220,6 +243,7 @@ def isValidTransport(transport):
         return True
     else:
         return False
+
 
 def validateTransports(orderL):
     """
@@ -239,16 +263,20 @@ def validateTransports(orderL):
 #        lg.out(1, 'my_id.validateTransports ERROR Transports contained an invalid entry, need to figure out where it came from.')
     return transports
 
+
 def setTransportOrder(orderL):
     """
-    Validate transports and save the list in the [BitDust data dir]\metadata\torder.
-    It is useful to remember the priority of used transports. 
+    Validate transports and save the list in the [BitDust data
+    dir]\metadata\torder.
+
+    It is useful to remember the priority of used transports.
     """
     orderl = orderL
     orderL = validateTransports(orderL)
     orderTxt = string.join(orderl, ' ')
     lg.out(8, 'my_id.setTransportOrder: ' + str(orderTxt))
     bpio.WriteFile(settings.DefaultTransportOrderFilename(), orderTxt)
+
 
 def getTransportOrder():
     """
@@ -265,18 +293,21 @@ def getTransportOrder():
     setTransportOrder(orderL)
     return orderL
 
+
 def getOrderFromContacts(ident):
     """
     A wrapper for ``identity.getProtoOrder`` method.
     """
     return ident.getProtoOrder()
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def buildProtoContacts(id_obj):
     """
-    Create a full list of needed transport methods
-    to be able to accept incoming traffic from other nodes.
+    Create a full list of needed transport methods to be able to accept
+    incoming traffic from other nodes.
+
     Make calls to transport services to build a list of my contacts.
     """
     from services import driver
@@ -288,14 +319,14 @@ def buildProtoContacts(id_obj):
     lg.out(4, '    current order: %s' % str(current_order))
     new_contacts = {}
     new_order_correct = []
-    # prepare list of active transports 
+    # prepare list of active transports
     active_transports = []
     for proto in getValidTransports():
         if not settings.transportIsEnabled(proto):
             continue
-        # if not driver.is_started('service_%s_transport' % proto):
-        #     continue
         if not settings.transportReceivingIsEnabled(proto):
+            continue
+        if not driver.is_started('service_%s_transport' % proto):
             continue
         active_transports.append(proto)
     # sort active transports by priority
@@ -313,7 +344,7 @@ def buildProtoContacts(id_obj):
             clist = gateway.transport(proto).interface.build_contacts(id_obj)
             cdict = {}
             corder = []
-            for contact in clist: 
+            for contact in clist:
                 cproto, cdata = contact.split('://')
                 cdict[cproto] = contact
                 corder.append(cproto)
@@ -322,18 +353,18 @@ def buildProtoContacts(id_obj):
                 if cproto not in new_order:
                     new_order.append(cproto)
         new_order_correct = list(new_order)
-        for nproto in new_order: 
+        for nproto in new_order:
             if nproto not in new_contacts.keys():
                 new_order_correct.remove(nproto)
-                    
+
 #            cset = set(corder)
 #            cdiff = cset.intersection(current_set)
 #            if cset.isdisjoint()
-#            
-#            
+#
+#
 #            if len(clist) > 1:
 #                # clist.reverse()
-#                for contact in clist: 
+#                for contact in clist:
 #                    cproto, cdata = contact.split('://')
 #                    cdict[cproto] = contact
 #                    if cproto in new_order:
@@ -341,10 +372,10 @@ def buildProtoContacts(id_obj):
 #                    new_order.insert(0, cproto)
 #            else:
 ##                 current_order = []
-#                for contact in clist: 
+#                for contact in clist:
 #                    cproto, cdata = contact.split('://')
 #                    cdict[cproto] = contact
-##                     current_order.append(cproto)
+# current_order.append(cproto)
 #                    new_index = -1
 #                    if cproto in new_order:
 #                        new_index = new_order.index(cproto)
@@ -354,7 +385,7 @@ def buildProtoContacts(id_obj):
 #                    if new_index < 0:
 #                        new_order.insert(0, cproto)
 #                    else:
-#                        if old_index < new_index: 
+#                        if old_index < new_index:
 #                            new_order.remove(cproto)
 #                            new_order.insert(0, cproto)
 #                        else:
@@ -364,41 +395,43 @@ def buildProtoContacts(id_obj):
 
     lg.out(4, '    new contacts: %s' % str(new_contacts))
     lg.out(4, '    new order: %s' % str(new_order_correct))
-    
+
 #    new_list = []
 #    for nproto in new_order_correct:
 #        new_list.append(new_contacts[nproto])
-    
+
     return new_contacts, new_order_correct
 
 
 def buildDefaultIdentity(name='', ip='', idurls=[]):
     """
     Use some local settings and config files to create some new identity.
-    Nice to provide a user name or it will have a form like: [ip address]_[date].     
+
+    Nice to provide a user name or it will have a form like: [ip
+    address]_[date].
     """
     if ip == '':
-        ip = misc.readExternalIP() # bpio.ReadTextFile(settings.ExternalIPFilename())
+        ip = misc.readExternalIP()  # bpio.ReadTextFile(settings.ExternalIPFilename())
     if name == '':
         name = ip.replace('.', '-') + '_' + time.strftime('%M%S')
     lg.out(4, 'my_id.buildDefaultIdentity: %s %s' % (name, ip))
     # create a new identity object
-    # it is stored in memory and another copy on disk drive 
+    # it is stored in memory and another copy on disk drive
     ident = identity.identity(xmlsrc=identity.default_identity_src)
     # this is my IDURL address
     # you can have many IDURL locations for same identity
     # just need to keep all them synchronized
     # this is identity propagate procedure, see p2p/propagate.py
     if len(idurls) == 0:
-        idurls.append('http://localhost/'+name.lower()+'.xml')
-    for idurl in idurls: 
+        idurls.append('http://localhost/' + name.lower() + '.xml')
+    for idurl in idurls:
         ident.sources.append(idurl.encode("ascii").strip())
     # create a full list of needed transport methods
     # to be able to accept incoming traffic from other nodes
     new_contacts, new_order = buildProtoContacts(ident)
     if len(new_contacts) == 0:
         if settings.enableTCP() and settings.enableTCPreceiving():
-            new_contacts['tcp'] = 'tcp://'+ip+':'+str(settings.getTCPPort())
+            new_contacts['tcp'] = 'tcp://' + ip + ':' + str(settings.getTCPPort())
             new_order.append('tcp')
         if settings.enableUDP() and settings.enableUDPreceiving():
             x, servername, x, x = nameurl.UrlParse(ident.sources[0])
@@ -432,19 +465,21 @@ def buildDefaultIdentity(name='', ip='', idurls=[]):
     ident.sign()
     # validate new identity
     if not ident.Valid():
-        lg.warn('generated identity is not valid !!!') 
+        lg.warn('generated identity is not valid !!!')
     return ident
 
-    
+
 def rebuildLocalIdentity():
     """
-    If some transports was enabled or disabled we want to update identity contacts.
-    Just empty all of the contacts and create it again in the same order.
+    If some transports was enabled or disabled we want to update identity
+    contacts. Just empty all of the contacts and create it again in the same
+    order.
+
     Also increase revision number by one - others may keep track of my modifications.
     """
     # getting current copy of local identity
     lid = getLocalIdentity()
-    # remember the current identity - full XML source code   
+    # remember the current identity - full XML source code
     current_identity_xmlsrc = lid.serialize()
     lg.out(4, 'my_id.rebuildLocalIdentity current identity is %d bytes long' % len(current_identity_xmlsrc))
     # create a full list of needed transport methods
@@ -462,7 +497,7 @@ def rebuildLocalIdentity():
 #        lid.setProtoContact(proto, contact)
     # update software version number
     vernum = bpio.ReadTextFile(settings.VersionNumberFile())
-    repo, location = misc.ReadRepoLocation()
+    repo, _ = misc.ReadRepoLocation()
     lid.version = (vernum.strip() + ' ' + repo.strip() + ' ' + bpio.osinfo().strip()).strip()
     # generate signature with changed content
     lid.sign()
@@ -473,10 +508,10 @@ def rebuildLocalIdentity():
         lg.out(4, '    same revision: %s' % lid.revision)
     else:
         try:
-            lid.revision = str(int(lid.revision)+1)
+            lid.revision = str(int(lid.revision) + 1)
         except:
             lg.exc()
-            return False   
+            return False
         # generate signature again because revision were changed !!!
         lid.sign()
         lg.out(4, '    add revision: %s' % lid.revision)
@@ -493,5 +528,3 @@ def rebuildLocalIdentity():
     lg.out(4, '    my identity HAS %sBEEN changed !!!' % (('' if changed else 'NOT ')))
     lg.out(4, '\n' + new_xmlsrc + '\n')
     return changed
-
-

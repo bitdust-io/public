@@ -1,5 +1,5 @@
 #!/usr/bin/python
-#events.py
+# events.py
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
 #
@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -25,22 +25,22 @@
 #
 
 """
-.. module:: events
+.. module:: events.
 
-A very simple "event" system, just to show and remember what is going on.
-TODO:
-need to store events on the local HDD
+A very simple "event" system, just to show and remember what is going
+on. TODO: need to store events on the local HDD
 """
 
 import os
 import sys
 import time
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 _OutputFunc = None
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def init(output_func):
     global _OutputFunc
@@ -53,9 +53,10 @@ def call(typ, module, message, text=''):
         return
     _OutputFunc('event %s (((%s))) [[[%s]]] %s' % (typ, module, message, text))
 
+
 def info(module, message, text=''):
     call('info', module, message, text)
-    
+
 
 def notify(module, message, text=''):
     call('notify', module, message, text)
@@ -63,6 +64,3 @@ def notify(module, message, text=''):
 
 def warning(module, message, text=''):
     call('warning', module, message, text)
-
-    
-   

@@ -1,5 +1,5 @@
 #!/usr/bin/python
-#proxy_interface.py
+# proxy_interface.py
 #
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
@@ -15,7 +15,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -26,16 +26,16 @@
 #
 
 """
-.. module:: proxy_interface
+.. module:: proxy_interface.
 
-This is a client side part of the PROXY transport plug-in. 
+This is a client side part of the PROXY transport plug-in.
 """
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 _Debug = True
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 
 from twisted.web import xmlrpc
@@ -47,29 +47,32 @@ from main import settings
 
 from contacts import identitycache
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 _GateProxy = None
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def proxy():
     global _GateProxy
     return _GateProxy
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 class GateInterface():
-    
+
     def init(self, xml_rpc_url_or_object):
         """
+        
         """
         global _GateProxy
         if _Debug:
             lg.out(4, 'proxy_interface.init')
-        import proxy_receiver
-        import proxy_sender
-        if type(xml_rpc_url_or_object) == str:
+        from transport.proxy import proxy_receiver
+        from transport.proxy import proxy_sender
+        if isinstance(xml_rpc_url_or_object, str):
             _GateProxy = xmlrpc.Proxy(xml_rpc_url_or_object, allowNone=True)
         else:
             _GateProxy = xml_rpc_url_or_object
@@ -80,11 +83,12 @@ class GateInterface():
 
     def shutdown(self):
         """
+        
         """
         if _Debug:
             lg.out(4, 'proxy_interface.shutdown')
-        import proxy_receiver
-        import proxy_sender
+        from transport.proxy import proxy_receiver
+        from transport.proxy import proxy_sender
         ret = self.disconnect()
         proxy_receiver.A('shutdown')
         proxy_sender.A('shutdown')
@@ -95,56 +99,80 @@ class GateInterface():
 
     def connect(self, options):
         """
+        
         """
         if _Debug:
             lg.out(4, 'proxy_interface.connect %s' % str(options))
-        import proxy_receiver
-        import proxy_sender
+        from transport.proxy import proxy_receiver
+        from transport.proxy import proxy_sender
         if settings.enablePROXYreceiving():
             proxy_receiver.A('start', options)
+        else:
+            lg.warn('proxy transport receiving is disabled')
+            interface_receiving_failed()
+            return False
         if settings.enablePROXYsending():
             proxy_sender.A('start', options)
         return succeed(True)
 
     def disconnect(self):
         """
+        
         """
         if _Debug:
             lg.out(4, 'proxy_interface.disconnect')
-        import proxy_receiver
-        import proxy_sender
-        proxy_receiver.A('stop')
+        from transport.proxy import proxy_receiver
+        from transport.proxy import proxy_sender
+        if not proxy_receiver.A():
+            lg.warn('proxy_receiver is not ready')
+            interface_disconnected()
+        elif proxy_receiver.A().state != 'LISTEN':
+            lg.warn('proxy_receiver is not listening now')
+            interface_disconnected()
+        else:
+            proxy_receiver.A('stop')
         proxy_sender.A('stop')
         return succeed(True)
-    
+
     def build_contacts(self, id_obj):
         """
+        
         """
-        import proxy_receiver
+        from transport.proxy import proxy_receiver
         if not proxy_receiver.GetRouterIdentity():
             # if not yet found one node to route your traffic - do nothing
             if _Debug:
                 lg.out(4, 'proxy_interface.build_contacts SKIP, router not yet found')
             return []
-        # switch contacts - use router contacts instead of my 
-        # he will get all packets sent to my and redirect to my
+        if not proxy_receiver.ReadMyOriginalIdentitySource():
+            # if we did not save our original identity we will have troubles contacting remote node
+            if _Debug:
+                lg.out(4, 'proxy_interface.build_contacts SKIP, original identity was not saved')
+            return []
+        # switch contacts - use router contacts instead of my
+        # he will receive all packets addressed to me and redirect to me
         result = proxy_receiver.GetRouterIdentity().getContacts()
         if _Debug:
             lg.out(4, 'proxy_interface.build_contacts %s : %s' % (
                 proxy_receiver.GetRouterIdentity().getIDName(), str(result)))
         return result
-    
+
     def verify_contacts(self, id_obj):
         """
-        Check if router is ready and his contacts exists in that identity. 
+        Check if router is ready and his contacts exists in that identity.
         """
-        import proxy_receiver
-        if not proxy_receiver.GetRouterIDURL() or not proxy_receiver.GetRouterIdentity():
-            # if not yet found one node to route your traffic - do nothing
+        from transport.proxy import proxy_receiver
+        if not proxy_receiver.A() or not proxy_receiver.GetRouterIDURL() or not proxy_receiver.GetRouterIdentity():
+            # if not yet found any node to route your traffic - do nothing
             if _Debug:
                 lg.out(4, 'proxy_interface.verify_contacts returning True : router not yet found')
             return True
+        if not proxy_receiver.ReadMyOriginalIdentitySource():
+            if _Debug:
+                lg.out(4, 'proxy_interface.verify_contacts returning False : my original identity is empty')
+            return False
         result = Deferred()
+
         def _finish_verification(res):
             if _Debug:
                 lg.out(4, 'proxy_interface._finish_verification')
@@ -153,65 +181,71 @@ class GateInterface():
                 if not cached_id:
                     if _Debug:
                         lg.out(4, '    returning False: router identity is not cached')
-                    res.callback(False) 
+                    res.callback(False)
                     return False
+                if not proxy_receiver.GetRouterIdentity():
+                    if _Debug:
+                        lg.out(4, '    returning False : router identity is None or router is not ready yet')
+                    return True
                 if cached_id.serialize() != proxy_receiver.GetRouterIdentity().serialize():
                     if _Debug:
                         lg.out(4, 'proxy_interface.verify_contacts return False: cached copy is different')
                         lg.out(20, '\n%s\n' % cached_id.serialize())
                         lg.out(20, '\n%s\n' % proxy_receiver.GetRouterIdentity().serialize())
-                    res.callback(False) 
+                    res.callback(False)
                     return
                 router_contacts = proxy_receiver.GetRouterIdentity().getContactsByProto()
                 if len(router_contacts) != id_obj.getContactsNumber():
                     if _Debug:
-                        lg.out(4, '    returning False: router contacts is different') 
-                    res.callback(False) 
+                        lg.out(4, '    returning False: router contacts is different')
+                    res.callback(False)
                     return False
                 for proto, contact in id_obj.getContactsByProto().items():
                     if proto not in router_contacts.keys():
                         if _Debug:
-                            lg.out(4, '    returning False: [%s] is not present in router contacts' % proto) 
-                        res.callback(False) 
+                            lg.out(4, '    returning False: [%s] is not present in router contacts' % proto)
+                        res.callback(False)
                         return False
                     if router_contacts[proto] != contact:
                         if _Debug:
-                            lg.out(4, '    returning False: [%s] contact is different in router id' % proto) 
-                        res.callback(False) 
+                            lg.out(4, '    returning False: [%s] contact is different in router id' % proto)
+                        res.callback(False)
                         return False
                 if _Debug:
-                    lg.out(4, '    returning True : my contacts and router contacts is same') 
-                res.callback(True) 
+                    lg.out(4, '    returning True : my contacts and router contacts is same')
+                res.callback(True)
                 return True
             except:
                 lg.exc()
-                res.callback(True) 
+                res.callback(True)
                 return True
         d = identitycache.immediatelyCaching(proxy_receiver.GetRouterIDURL())
         d.addCallback(lambda src: _finish_verification(result))
         d.addErrback(lambda err: result.callback(False))
         return result
-    
-#    def send_file(self, remote_idurl, filename, host, description='', single=False):
-#        """
-#        """
-#        if _Debug:
-#            lg.out(4, 'proxy_interface.send_file')
-#        proxy_sender.A('send-file', (remote_idurl, filename, host, description, single))
-#        return succeed(True)
-#
-#    def send_file_single(self, remote_idurl, filename, host, description='', single=True):
-#        return self.send_file(remote_idurl, filename, host, description, single)
 
-#------------------------------------------------------------------------------ 
+    def list_sessions(self):
+        """
+        
+        """
+        return []
+
+    def list_streams(self, sorted_by_time=True):
+        """
+        
+        """
+        return []
+
+#------------------------------------------------------------------------------
+
 
 def interface_transport_initialized(xmlrpcurl):
     if proxy():
         return proxy().callRemote('transport_initialized', 'proxy', xmlrpcurl)
     lg.warn('transport_proxy is not ready')
     return fail('transport_proxy is not ready')
-    
-    
+
+
 def interface_receiving_started(host, new_options={}):
     if proxy():
         return proxy().callRemote('receiving_started', 'proxy', host, new_options)
@@ -235,6 +269,7 @@ def interface_disconnected(result=None):
 
 def interface_register_file_sending(host, receiver_idurl, filename, size=0, description=''):
     """
+    
     """
     if proxy():
         return proxy().callRemote('register_file_sending', 'proxy', '%s:%d' % host, receiver_idurl, filename, size, description)
@@ -244,6 +279,7 @@ def interface_register_file_sending(host, receiver_idurl, filename, size=0, desc
 
 def interface_register_file_receiving(host, sender_idurl, filename, size=0):
     """
+    
     """
     if proxy():
         return proxy().callRemote('register_file_receiving', 'proxy', '%s:%d' % host, sender_idurl, filename, size)
@@ -253,6 +289,7 @@ def interface_register_file_receiving(host, sender_idurl, filename, size=0):
 
 def interface_unregister_file_sending(transfer_id, status, size=0, error_message=None):
     """
+    
     """
     if proxy():
         return proxy().callRemote('unregister_file_sending', transfer_id, status, size, error_message)
@@ -262,6 +299,7 @@ def interface_unregister_file_sending(transfer_id, status, size=0, error_message
 
 def interface_unregister_file_receiving(transfer_id, status, size=0, error_message=None):
     """
+    
     """
     if proxy():
         return proxy().callRemote('unregister_file_receiving', transfer_id, status, size, error_message)
@@ -271,12 +309,9 @@ def interface_unregister_file_receiving(transfer_id, status, size=0, error_messa
 
 def interface_cancelled_file_sending(host, filename, size=0, description=None, error_message=None):
     """
+    
     """
     if proxy():
         return proxy().callRemote('cancelled_file_sending', 'proxy', '%s:%d' % host, filename, size, description, error_message)
     lg.warn('transport_proxy is not ready')
     return fail('transport_proxy is not ready')
-
-
-
-

@@ -1,5 +1,5 @@
 #!/usr/bin/python
-#backup_tar.py
+# backup_tar.py
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
 #
@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -25,7 +25,7 @@
 #
 
 """
-.. module:: backup_tar
+.. module:: backup_tar.
 
 We want a pipe output or input so we don't need to store intermediate data.
 Our backup code only takes data from this pipe when it is ready and form blocks one by one.
@@ -35,33 +35,36 @@ The class ``lib.nonblocking.Popen`` starts another process - that process can bl
 We call that "tar" because standard TAR utility is used
 to read data from files and folders and create a single data stream.
 This data stream is passed via ``Pipe`` to the main process.
- 
-This module execute a sub process "bppipe" - pretty simple TAR compressor, 
+
+This module execute a sub process "bppipe" - pretty simple TAR compressor,
 see ``p2p.bppipe`` module.
 """
 
 import os
 import sys
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import os.path as _p
     sys.path.append(_p.join(_p.dirname(_p.abspath(sys.argv[0])), '..'))
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 from logs import lg
 
 from system import bpio
 from system import child_process
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def backuptar(directorypath, recursive_subfolders=True, compress=None):
     """
     Returns file descriptor for process that makes tar archive.
-    In other words executes a child process and create a Pipe to communicate with it.
+
+    In other words executes a child process and create a Pipe to
+    communicate with it.
     """
     if not bpio.pathIsDir(directorypath):
         lg.out(1, 'backup_tar.backuptar ERROR %s not found' % directorypath)
@@ -147,11 +150,12 @@ def extracttar(tarfile, outdir):
     return p
 
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 def main():
     lg.set_debug_level(20)
     fout = open('out.tar', 'wb')
+
     def _read(p):
         from system import nonblocking
         # print 'read', p.state()
@@ -169,6 +173,7 @@ def main():
                 reactor.stop()
                 return
         reactor.callLater(0, _read, p)
+
     def _go():
         p = backuptar(sys.argv[1])
         p.make_nonblocking()

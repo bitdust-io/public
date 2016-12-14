@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -23,7 +23,8 @@
 # the GNU Lesser General Public License Version 3, or any later version.
 # See the COPYING file included in this archive
 
-""" Entangled DHT and distributed tuple space
+"""
+Entangled DHT and distributed tuple space.
 
 The distributed hash table (DHT) used by Entangled is based on Kademlia,
 and be accessed by the C{entangled.kademlia package}, or by simply

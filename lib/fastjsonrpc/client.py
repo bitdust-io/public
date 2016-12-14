@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Copyright 2012 Tadeas Moravec
+Copyright 2012 Tadeas Moravec.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -42,10 +42,12 @@ import jsonrpc
 
 class ReceiverProtocol(Protocol):
     """
-    Protocol for receiving the server response. It's only purpose is to get the
-    HTTP request body. Instance of this will be passed to the Response's
-    deliverBody method.
+    Protocol for receiving the server response.
+
+    It's only purpose is to get the HTTP request body. Instance of this
+    will be passed to the Response's deliverBody method.
     """
+
     def __init__(self, finished):
         """
         @type finished: t.i.d.Deferred
@@ -83,9 +85,9 @@ class ReceiverProtocol(Protocol):
 
 class StringProducer(object):
     """
-    There's no FileBodyProducer in Twisted < 12.0.0
-    See http://twistedmatrix.com/documents/current/web/howto/client.html for
-    details about this class
+    There's no FileBodyProducer in Twisted < 12.0.0 See
+    http://twistedmatrix.com/documents/current/web/howto/client.html for
+    details about this class.
     """
     implements(IBodyProducer)
 
@@ -106,9 +108,10 @@ class StringProducer(object):
 
 class ProxyFactory(object):
     """
-    A factory to create Proxy objects. Passed parameters are used to create
-    all proxies. Supports creating proxies with a connection pool shared between
-    them.
+    A factory to create Proxy objects.
+
+    Passed parameters are used to create all proxies. Supports creating
+    proxies with a connection pool shared between them.
     """
 
     def __init__(self, **kwargs):
@@ -194,12 +197,11 @@ class ProxyFactory(object):
         elif self._persistent:
             pool = self._getConnectionPool()
 
-
-        kwargs = {'version':        self._version,
+        kwargs = {'version': self._version,
                   'connectTimeout': self._connectTimeout,
-                  'credentials':    self._credentials,
+                  'credentials': self._credentials,
                   'contextFactory': self._contextFactory,
-                  'pool':           pool}
+                  'pool': pool}
 
         proxy = Proxy(url, **kwargs)
 
@@ -224,9 +226,10 @@ class ProxyFactory(object):
 
 class Proxy(object):
     """
-    A proxy to one specific JSON-RPC server. Pass the server URL to the
-    constructor and call proxy.callRemote('method', *args) to call 'method'
-    with *args.
+    A proxy to one specific JSON-RPC server.
+
+    Pass the server URL to the constructor and call
+    proxy.callRemote('method', *args) to call 'method' with *args.
     """
 
     def __init__(self, url, version=jsonrpc.VERSION_1, connectTimeout=None,
@@ -302,7 +305,7 @@ class Proxy(object):
 
     def bodyFromResponse(self, response):
         """
-        Parses out the body from the response
+        Parses out the body from the response.
 
         @type response: t.w.c.Response
         @param response: Response object from the call

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#tcp_connection.py
+# tcp_connection.py
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
 #
@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -22,7 +22,8 @@
 
 
 """
-.. module:: tcp_connection
+.. module:: tcp_connection.
+
 .. role:: red
 
 BitDust tcp_connection() Automat
@@ -33,31 +34,26 @@ EVENTS:
     * :red:`data-received`
     * :red:`disconnect`
     * :red:`timer-10sec`
-
 """
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
-_Debug = False
-_DebugLevel = 24
+_Debug = True
+_DebugLevel = 18
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 import os
 import time
 
 from twisted.protocols import basic
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 from logs import lg
 
 from automats import automat
 
-import tcp_node
-import tcp_interface
-import tcp_stream
-
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 MAX_SIMULTANEOUS_CONNECTIONS = 250
 
@@ -67,14 +63,15 @@ CMD_DATA = 'd'
 CMD_OK = 'o'
 CMD_ABORT = 'a'
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 class TCPConnection(automat.Automat, basic.Int32StringReceiver):
     SoftwareVersion = '1'
 
     timers = {
-        'timer-10sec': (10.0, ['CLIENT?','SERVER?']),
-        }
+        'timer-10sec': (10.0, ['CLIENT?', 'SERVER?']),
+    }
 
     def __init__(self):
         self.stream = None
@@ -87,59 +84,60 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
 
     def init(self):
         """
-        Method to initialize additional variables and flags at creation of the state machine.
+        Method to initialize additional variables and flags at creation of the
+        state machine.
         """
 
     def A(self, event, arg):
         #---CONNECTED---
         if self.state == 'CONNECTED':
-            if event == 'data-received' :
+            if event == 'data-received':
                 self.doReceiveData(arg)
-            elif event == 'connection-lost' :
+            elif event == 'connection-lost':
                 self.state = 'CLOSED'
                 self.doStopInOutFiles(arg)
                 self.doCloseStream(arg)
                 self.doDestroyMe(arg)
-            elif event == 'disconnect' :
+            elif event == 'disconnect':
                 self.state = 'DISCONNECT'
                 self.doStopInOutFiles(arg)
                 self.doCloseStream(arg)
                 self.doDisconnect(arg)
         #---AT_STARTUP---
         elif self.state == 'AT_STARTUP':
-            if event == 'connection-made' and not self.isOutgoing(arg) :
+            if event == 'connection-made' and not self.isOutgoing(arg):
                 self.state = 'SERVER?'
                 self.doInit(arg)
-            elif event == 'connection-made' and self.isOutgoing(arg) :
+            elif event == 'connection-made' and self.isOutgoing(arg):
                 self.state = 'CLIENT?'
                 self.doInit(arg)
                 self.doCloseOutgoing(arg)
                 self.doSendHello(arg)
         #---CLIENT?---
         elif self.state == 'CLIENT?':
-            if event == 'connection-lost' :
+            if event == 'connection-lost':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
-            elif event == 'data-received' and self.isWazap(arg) and self.isSomePendingFiles(arg) :
+            elif event == 'data-received' and self.isWazap(arg) and self.isSomePendingFiles(arg):
                 self.state = 'CONNECTED'
                 self.doReadWazap(arg)
                 self.doOpenStream(arg)
                 self.doStartPendingFiles(arg)
-            elif event == 'timer-10sec' or event == 'disconnect' or ( event == 'data-received' and not ( self.isWazap(arg) and self.isSomePendingFiles () ) ) :
+            elif event == 'timer-10sec' or event == 'disconnect' or (event == 'data-received' and not (self.isWazap(arg) and self.isSomePendingFiles())):
                 self.state = 'DISCONNECT'
                 self.doDisconnect(arg)
         #---SERVER?---
         elif self.state == 'SERVER?':
-            if event == 'connection-lost' :
+            if event == 'connection-lost':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
-            elif event == 'data-received' and self.isHello(arg) :
+            elif event == 'data-received' and self.isHello(arg):
                 self.state = 'CONNECTED'
                 self.doReadHello(arg)
                 self.doSendWazap(arg)
                 self.doOpenStream(arg)
                 self.doStartPendingFiles(arg)
-            elif event == 'timer-10sec' or event == 'disconnect' or ( event == 'data-received' and not self.isHello(arg) ) :
+            elif event == 'timer-10sec' or event == 'disconnect' or (event == 'data-received' and not self.isHello(arg)):
                 self.state = 'DISCONNECT'
                 self.doDisconnect(arg)
         #---CLOSED---
@@ -147,7 +145,7 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
             pass
         #---DISCONNECT---
         elif self.state == 'DISCONNECT':
-            if event == 'connection-lost' :
+            if event == 'connection-lost':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
         return None
@@ -159,7 +157,7 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         try:
             command, payload = arg
             peeraddress, peeridurl = payload.split(' ')
-            peerip, peerport = peeraddress.split(':') 
+            peerip, peerport = peeraddress.split(':')
             peerport = int(peerport)
             peeraddress = (peerip, peerport)
         except:
@@ -180,10 +178,11 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         """
         Condition method.
         """
+        from transport.tcp import tcp_node
         if self.getConnectionAddress() is not None:
-            if self.getConnectionAddress() in tcp_node.started_connections().keys(): 
+            if self.getConnectionAddress() in tcp_node.started_connections().keys():
                 return True
-        return False 
+        return False
 
     def isSomePendingFiles(self, arg):
         """
@@ -195,6 +194,7 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         """
         Action method.
         """
+        from transport.tcp import tcp_node
         self.peer_address = self.getTransportAddress()
         self.peer_external_address = self.peer_address
         self.connected = time.time()
@@ -207,6 +207,7 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         """
         Action method.
         """
+        from transport.tcp import tcp_node
         conn = tcp_node.started_connections().pop(self.getConnectionAddress())
         conn.connector = None
         # lg.out(18, 'tcp_connection.doCloseOutgoing    %s closed, %d more started' % (
@@ -216,10 +217,11 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         """
         Action method.
         """
+        from transport.tcp import tcp_node
         try:
             command, payload = arg
             peeraddress, peeridurl = payload.split(' ')
-            peerip, peerport = peeraddress.split(':') 
+            peerip, peerport = peeraddress.split(':')
             peerport = int(peerport)
             peeraddress = (peerip, peerport)
         except:
@@ -266,21 +268,23 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
             self.stream.abort_received(payload)
         else:
             pass
-            
+
     def doSendHello(self, arg):
         """
         Action method.
         """
+        from transport.tcp import tcp_node
         host = tcp_node.my_host() or '127.0.0.1:7771'
         idurl = tcp_node.my_idurl() or 'None'
         payload = host + ' ' + idurl
-        self.sendData(CMD_HELLO, payload) 
+        self.sendData(CMD_HELLO, payload)
 
     def doSendWazap(self, arg):
         """
         Action method.
         """
-        payload = tcp_node.my_idurl() or 'None' 
+        from transport.tcp import tcp_node
+        payload = tcp_node.my_idurl() or 'None'
         self.sendData(CMD_WAZAP, payload)
 
     def doStartPendingFiles(self, arg):
@@ -301,8 +305,9 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         """
         Action method.
         """
+        from transport.tcp import tcp_stream
         self.stream = tcp_stream.TCPFileStream(self)
-                
+
     def doCloseStream(self, arg):
         """
         Action method.
@@ -315,16 +320,18 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         """
         Action method.
         """
-        # lg.out(18, 'tcp_connection.doDisconnect with %s' % str(self.peer_address))
+        if _Debug:
+            lg.out(_DebugLevel, 'tcp_connection.doDisconnect with %s' % str(self.peer_address))
         try:
             self.transport.abortConnection()
         except:
             self.transport.loseConnection()
-            
+
     def doDestroyMe(self, arg):
         """
         Action method.
         """
+        from transport.tcp import tcp_node
         # lg.out(18, 'tcp_connection.doDestroyMe %s' % str(self))
         self.destroy()
         if self.peer_address in tcp_node.opened_connections():
@@ -343,36 +350,38 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
     def getTransportAddress(self):
         peer = self.transport.getPeer()
         return (peer.host, int(peer.port))
-    
+
     def getConnectionAddress(self):
         return self.factory.connection_address
-    
+
     def getAddress(self):
         addr = self.getConnectionAddress()
         if not addr:
             addr = self.getTransportAddress()
         return addr
-    
+
     def connectionMade(self):
-        # lg.out(18, 'tcp_connection.connectionMade %s:%d' % self.getTransportAddress())
+        if _Debug:
+            lg.out(_DebugLevel, 'tcp_connection.connectionMade %s:%d' % self.getTransportAddress())
         address = self.getAddress()
-        name = 'tcp_connection[%s:%d]' % (address[0], address[1])  
+        name = 'tcp_connection[%s:%d]' % (address[0], address[1])
         automat.Automat.__init__(self, name, 'AT_STARTUP', _DebugLevel, _Debug)
         self.automat('connection-made')
-    
+
     def connectionLost(self, reason):
-        # lg.out(18, 'tcp_connection.connectionLost with %s:%d' % self.getTransportAddress())
+        if _Debug:
+            lg.out(_DebugLevel, 'tcp_connection.connectionLost with %s:%d' % self.getTransportAddress())
         self.automat('connection-lost')
 
     def sendData(self, command, payload):
-        # print '<<<<<< [%s], %d bytes' % (command, len(payload))
         try:
             data = self.SoftwareVersion + str(command.lower())[0] + payload
             self.sendString(data)
         except:
             return False
+        self.automat('data-sent', data)
         return True
-    
+
     def stringReceived(self, data):
         try:
             version = data[0]
@@ -387,12 +396,15 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
 
     def append_outbox_file(self, filename, description='', result_defer=None, single=False):
         self.outboxQueue.append((filename, description, result_defer, single))
-     
+
     def process_outbox_queue(self):
+        if self.state != 'CONNECTED':
+            return False
         if self.stream is None:
             return False
+        from transport.tcp import tcp_stream
         has_reads = False
-        while len(self.outboxQueue) > 0 and len(self.stream.outboxFiles) < tcp_stream.MAX_SIMULTANEOUS_OUTGOING_FILES:        
+        while len(self.outboxQueue) > 0 and len(self.stream.outboxFiles) < tcp_stream.MAX_SIMULTANEOUS_OUTGOING_FILES:
             filename, description, result_defer, single = self.outboxQueue.pop(0)
             has_reads = True
             # we have a queue of files to be sent
@@ -414,7 +426,7 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         return has_reads
 
     def failed_outbox_queue_item(self, filename, description='', error_message=''):
+        from transport.tcp import tcp_interface
         lg.out(6, 'tcp_connection.failed_outbox_queue_item %s because %s' % (filename, error_message))
         tcp_interface.interface_cancelled_file_sending(
-            self.getAddress(), filename, 0, description, error_message)        
-
+            self.getAddress(), filename, 0, description, error_message)

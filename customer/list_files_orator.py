@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#list_files_orator.py
+# list_files_orator.py
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
 #
@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -26,14 +26,14 @@
 #
 
 """
-.. module:: list_files_orator
+.. module:: list_files_orator.
 
 .. raw:: html
 
     <a href="http://bitdust.io/automats/list_files_orator/list_files_orator.png" target="_blank">
     <img src="http://bitdust.io/automats/list_files_orator/list_files_orator.png" style="max-width:100%;">
     </a>
-    
+
 This simple state machine requests a list of files stored on remote machines.
 
 Before that, it scans the local backup folder and prepare an index of existing data pieces.
@@ -44,8 +44,7 @@ EVENTS:
     * :red:`init`
     * :red:`local-files-done`
     * :red:`need-files`
-    * :red:`timer-15sec`
-    
+    * :red:`timer-10sec`
 """
 
 import os
@@ -58,7 +57,7 @@ except:
 from twisted.internet.defer import maybeDeferred
 from twisted.internet.task import LoopingCall
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 from logs import lg
 
@@ -69,13 +68,16 @@ from p2p import p2p_service
 from p2p import contact_status
 from p2p import p2p_connector
 
-#------------------------------------------------------------------------------ 
+from services import driver
+
+#------------------------------------------------------------------------------
 
 _ListFilesOrator = None
 _RequestedListFilesPacketIDs = set()
 _RequestedListFilesCounter = 0
 
 #------------------------------------------------------------------------------
+
 
 def A(event=None, arg=None):
     """
@@ -99,48 +101,51 @@ def Destroy():
     _ListFilesOrator.destroy()
     del _ListFilesOrator
     _ListFilesOrator = None
-    
-    
+
+
 class ListFilesOrator(automat.Automat):
     """
-    A class to request list of my files from my suppliers and also scan the local files.
+    A class to request list of my files from my suppliers and also scan the
+    local files.
     """
-    
+
     timers = {
-        'timer-15sec': (15.0, ['REMOTE_FILES']),
-        }
+        'timer-10sec': (10.0, ['REMOTE_FILES']),
+    }
 
     def state_changed(self, oldstate, newstate, event, arg):
         #global_state.set_global_state('ORATOR ' + newstate)
-        from storage import backup_monitor
-        backup_monitor.A('list_files_orator.state', newstate)
+        if driver.is_started('service_backups'):
+            from storage import backup_monitor
+            backup_monitor.A('list_files_orator.state', newstate)
 
     def A(self, event, arg):
         #---NO_FILES---
         if self.state == 'NO_FILES':
-            if event == 'need-files' :
+            if event == 'need-files':
                 self.state = 'LOCAL_FILES'
                 self.doReadLocalFiles(arg)
-            elif event == 'init' :
+            elif event == 'init':
                 pass
         #---LOCAL_FILES---
         elif self.state == 'LOCAL_FILES':
-            if event == 'local-files-done' and p2p_connector.A().state is 'CONNECTED' :
+            if event == 'local-files-done' and p2p_connector.A().state is 'CONNECTED':
                 self.state = 'REMOTE_FILES'
                 self.doRequestRemoteFiles(arg)
-            elif event == 'local-files-done' and p2p_connector.A().state is not 'CONNECTED' :
+            elif event == 'local-files-done' and p2p_connector.A().state is not 'CONNECTED':
                 self.state = 'NO_FILES'
         #---REMOTE_FILES---
         elif self.state == 'REMOTE_FILES':
-            if ( event == 'timer-15sec' and self.isSomeListFilesReceived(arg) ) or ( event == 'inbox-files' and self.isAllListFilesReceived(arg) ) :
+            if (event == 'timer-10sec' and self.isSomeListFilesReceived(arg)) or (event == 'inbox-files' and self.isAllListFilesReceived(arg)):
                 self.state = 'SAW_FILES'
-            elif event == 'timer-15sec' and not self.isSomeListFilesReceived(arg) :
+            elif event == 'timer-10sec' and not self.isSomeListFilesReceived(arg):
                 self.state = 'NO_FILES'
         #---SAW_FILES---
         elif self.state == 'SAW_FILES':
-            if event == 'need-files' :
+            if event == 'need-files':
                 self.state = 'LOCAL_FILES'
                 self.doReadLocalFiles(arg)
+        return None
 
     def isAllListFilesReceived(self, arg):
         global _RequestedListFilesPacketIDs
@@ -156,7 +161,7 @@ class ListFilesOrator(automat.Automat):
         from storage import backup_matrix
         maybeDeferred(backup_matrix.ReadLocalFiles).addBoth(
             lambda x: self.automat('local-files-done'))
-    
+
     def doRequestRemoteFiles(self, arg):
         global _RequestedListFilesCounter
         global _RequestedListFilesPacketIDs
@@ -165,23 +170,21 @@ class ListFilesOrator(automat.Automat):
         for idurl in contactsdb.suppliers():
             if idurl:
                 if contact_status.isOnline(idurl):
-                    p2p_service.RequestListFiles(idurl)
+                    p2p_service.SendRequestListFiles(idurl)
                     _RequestedListFilesPacketIDs.add(idurl)
                 else:
                     lg.out(6, 'list_files_orator.doRequestRemoteFiles SKIP %s is not online' % idurl)
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def IncomingListFiles(newpacket):
     """
-    Called from ``p2p.backup_control`` to pass incoming "ListFiles" packet here.
+    Called from ``p2p.backup_control`` to pass incoming "ListFiles" packet
+    here.
     """
     global _RequestedListFilesPacketIDs
     global _RequestedListFilesCounter
     _RequestedListFilesCounter += 1
     _RequestedListFilesPacketIDs.discard(newpacket.OwnerID)
     A('inbox-files', newpacket)
-    
-    
-
-

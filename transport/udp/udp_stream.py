@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#udp_stream.py
+# udp_stream.py
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
 #
@@ -14,16 +14,15 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
 # Please contact us if you have any questions at bitdust.io@gmail.com
- 
-
 
 """
-.. module:: udp_stream
+.. module:: udp_stream.
+
 .. role:: red
 
 BitDust udp_stream() Automat
@@ -41,31 +40,31 @@ EVENTS:
     * :red:`consume`
     * :red:`init`
     * :red:`iterate`
+    * :red:`pause`
     * :red:`resume`
     * :red:`set-limits`
     * :red:`timeout`
-
 """
 
 """
-TODO: Need to put small explanation here. 
+TODO: Need to put small explanation here.
 
 Datagrams format:
 
     DATA packet:
-    
+
         bytes:
           0        software version number
           1        command identifier, see ``lib.udp`` module
-          2-5      stream_id 
-          6-9      total data size to be transferred, 
+          2-5      stream_id
+          6-9      total data size to be transferred,
                    peer must know when to stop receiving
           10-13    block_id, outgoing blocks are counted from 1
           from 14  payload data
-      
-      
+
+
     ACK packet:
-        
+
         bytes:
           0        software version number
           1        command identifier, see ``lib.udp`` module
@@ -74,16 +73,16 @@ Datagrams format:
           10-13    block_id2
           14-17    block_id3
           ...
-          
-      
+
+
 """
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 20
+_DebugLevel = 16
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 import time
 import cStringIO
@@ -94,56 +93,71 @@ from twisted.internet import reactor
 
 from logs import lg
 
-from lib import misc
-
 from automats import automat
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
-UDP_DATAGRAM_SIZE = 500 # depend on device it can be 504 or bigger
-BLOCK_SIZE = UDP_DATAGRAM_SIZE - 14 # 14 bytes - BitDust header
+POOLING_INTERVAL = 0.1   # smaller pooling size will increase CPU load
+UDP_DATAGRAM_SIZE = 508  # largest safe datagram size
+BLOCK_SIZE = UDP_DATAGRAM_SIZE - 14  # 14 bytes - BitDust header
 
-BLOCKS_PER_ACK = 4  # need to verify delivery get success
-                    # ack packets will be sent as response,
-                    # one output ack per every N data blocks received 
+BLOCKS_PER_ACK = 8  # need to verify delivery get success
+# ack packets will be sent as response,
+# one output ack per every N data blocks received
+WINDOW_SIZE = 10  # do not send next group of blocks
+# until current group will be delivered
 
-OUTPUT_BUFFER_SIZE = 16*1024 # how many bytes to read from file at once
-CHUNK_SIZE = BLOCK_SIZE * BLOCKS_PER_ACK # so we know how much to read now
-# BLOCK_SIZE * int(float(BLOCKS_PER_ACK)*0.8) - 20% extra space in ack packet
+OUTPUT_BUFFER_SIZE = 16 * 1024  # how many bytes to read from file at once
+CHUNK_SIZE = BLOCK_SIZE * BLOCKS_PER_ACK  # so we know how much to read now
 
-RTT_MIN_LIMIT = 0.004 # round trip time, this adjust how fast we try to send
-RTT_MAX_LIMIT = 4 # also affect pooling, but also set a time out for responses
+RTT_MIN_LIMIT = 0.004  # round trip time, this adjust how fast we try to send
+RTT_MAX_LIMIT = 3.0    # set ack response timeout for sending
+MAX_RTT_COUNTER = 100  # used to calculate avarage RTT for this stream
 
-MAX_BLOCKS_INTERVAL = 5     
-MAX_ACK_TIMEOUTS = 3
-MAX_ACKS_INTERVAL = 5
-RECEIVING_TIMEOUT = 20
+MAX_BLOCKS_INTERVAL = 3  # resending blocks at lease every N seconds
+MAX_ACK_TIMEOUTS = 5  # if we get too much errors - connection will be closed
 
-#------------------------------------------------------------------------------ 
+# CHECK_ERRORS_INTERVAL = 20  # will verify sending errors every N iterations
+ACCEPTABLE_ERRORS_RATE = 0.02  # 2% errors considered to be acceptable quality
+SENDING_LIMIT_FACTOR_ON_START = 1.0  # idea was to decrease sending speed with factor
+
+# decide about the moment to kill the stream
+RECEIVING_TIMEOUT = RTT_MAX_LIMIT * (MAX_ACK_TIMEOUTS + 1)
+SENDING_TIMEOUT = RTT_MAX_LIMIT * (MAX_ACK_TIMEOUTS + 1)
+
+#------------------------------------------------------------------------------
 
 _Streams = {}
-_GlobalLimitReceiveBytesPerSec = 100.0 * 125000
-_GlobalLimitSendBytesPerSec = 100.0 * 125000
+_ProcessStreamsTask = None
+_ProcessStreamsIterations = 0
 
-#------------------------------------------------------------------------------ 
+_GlobalLimitReceiveBytesPerSec = 1000.0 * 125000  # default receiveing limit bps
+_GlobalLimitSendBytesPerSec = 1000.0 * 125000  # default sending limit bps
+_CurrentSendingAvarageRate = 0.0
+
+#------------------------------------------------------------------------------
 
 def streams():
     global _Streams
     return _Streams
 
+
 def create(stream_id, consumer, producer):
     """
+    Creates a new UDP stream.
     """
     if _Debug:
-        lg.out(_DebugLevel-6, 'udp_stream.create stream_id=%s' % str(stream_id))
+        lg.out(_DebugLevel, 'udp_stream.create stream_id=%s' % str(stream_id))
     s = UDPStream(stream_id, consumer, producer)
     streams()[s.stream_id] = s
     s.automat('init')
     reactor.callLater(0, balance_streams_limits)
     return s
 
+
 def close(stream_id):
     """
+    Close existing UDP stream.
     """
     s = streams().get(stream_id, None)
     if s is None:
@@ -151,169 +165,241 @@ def close(stream_id):
         return False
     s.automat('close')
     if _Debug:
-        lg.out(_DebugLevel-6, 'udp_stream.close send "close" to stream %s' % str(stream_id))
-    return True    
+        lg.out(_DebugLevel, 'udp_stream.close send "close" to stream %s' % str(stream_id))
+    return True
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
-def get_global_limit_receive_bytes_per_sec():
+def get_global_input_limit_bytes_per_sec():
     global _GlobalLimitReceiveBytesPerSec
     return _GlobalLimitReceiveBytesPerSec
 
-def set_global_limit_receive_bytes_per_sec(bps):
+
+def set_global_input_limit_bytes_per_sec(bps):
     global _GlobalLimitReceiveBytesPerSec
     _GlobalLimitReceiveBytesPerSec = bps
+    balance_streams_limits()
 
-def get_global_limit_send_bytes_per_sec():
+
+def get_global_output_limit_bytes_per_sec():
     global _GlobalLimitSendBytesPerSec
     return _GlobalLimitSendBytesPerSec
 
-def set_global_limit_send_bytes_per_sec(bps):
+
+def set_global_output_limit_bytes_per_sec(bps):
     global _GlobalLimitSendBytesPerSec
     _GlobalLimitSendBytesPerSec = bps
-    
+    balance_streams_limits()
+
+#------------------------------------------------------------------------------
+
 def balance_streams_limits():
-    receive_limit_per_stream = get_global_limit_receive_bytes_per_sec()
-    send_limit_per_stream = get_global_limit_send_bytes_per_sec()
+    global _CurrentSendingAvarageRate
+    receive_limit_per_stream = float(get_global_input_limit_bytes_per_sec())
+    send_limit_per_stream = float(get_global_output_limit_bytes_per_sec())
     num_streams = len(streams())
     if num_streams > 0:
-        receive_limit_per_stream /= num_streams
-        send_limit_per_stream /= num_streams
+        receive_limit_per_stream /= float(num_streams)
+        send_limit_per_stream /= float(num_streams)
     if _Debug:
-        lg.out(_DebugLevel, 'udp_stream.balance_streams_limits in:%r out:%r total:%d' % (
-            receive_limit_per_stream, send_limit_per_stream, num_streams))
+        lg.out(_DebugLevel, 'udp_stream.balance_streams_limits in:%r out:%r avarage:%r streams:%d' % (
+            receive_limit_per_stream,
+            send_limit_per_stream,
+            int(_CurrentSendingAvarageRate),
+            num_streams))
     for s in streams().values():
         s.automat('set-limits', (receive_limit_per_stream, send_limit_per_stream))
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
+def sort_method(stream_instance):
+    if stream_instance.state == 'SENDING':
+        return stream_instance.output_bytes_per_sec_current
+    return stream_instance.input_bytes_per_sec_current
+
+def process_streams():
+    global _ProcessStreamsTask
+    global _ProcessStreamsIterations
+    global _CurrentSendingAvarageRate
+
+    for s in streams().values():
+        if s.state != 'RECEIVING':
+            continue
+        s.event('iterate')
+
+    sending_streams_count = 0.0
+    total_sending_rate = 0.0
+    for s in sorted(streams().values(), key=lambda s: s.output_blocks_last_delta):
+        if s.state != 'SENDING':
+            continue
+        s.event('iterate')
+        if s.get_output_limit_from_remote() > 0:
+            continue
+        total_sending_rate += s.get_current_output_speed()
+        sending_streams_count += 1.0
+
+    if sending_streams_count > 0.0:
+        _CurrentSendingAvarageRate = total_sending_rate / sending_streams_count
+    else:
+        _CurrentSendingAvarageRate = 0.0
+
+    if _ProcessStreamsTask is None or _ProcessStreamsTask.called:
+        _ProcessStreamsTask = reactor.callLater(
+            POOLING_INTERVAL, process_streams)
+
+
+def stop_process_streams():
+    global _ProcessStreamsTask
+    if _ProcessStreamsTask:
+        if _ProcessStreamsTask.active():
+            _ProcessStreamsTask.cancel()
+        _ProcessStreamsTask = None
+
+#------------------------------------------------------------------------------
 
 class BufferOverflow(Exception):
     pass
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 class UDPStream(automat.Automat):
     """
-    This class implements all the functionality of the ``udp_stream()`` state machine.
+    This class implements all the functionality of the ``udp_stream()`` state
+    machine.
     """
 
     fast = True
-    
+
     post = True
 
     def __init__(self, stream_id, consumer, producer):
         self.stream_id = stream_id
         self.consumer = consumer
         self.producer = producer
+        self.started = time.time()
         self.consumer.set_stream_callback(self.on_consume)
         if _Debug:
             lg.out(_DebugLevel, 'udp_stream.__init__ %d peer_id:%s session:%s' % (
                 self.stream_id, self.producer.session.peer_id, self.producer.session))
         name = 'udp_stream[%s]' % (self.stream_id)
-        automat.Automat.__init__(self, name, 'AT_STARTUP', _DebugLevel, _Debug)
-        
-#    def __del__(self):
-#        """
-#        """
-#        if _Debug:
-#            lg.out(18, 'udp_stream.__del__ %d' % self.stream_id)
-#        automat.Automat.__del__(self)
+        automat.Automat.__init__(self, name, 'AT_STARTUP',
+                                 _DebugLevel,
+                                 _Debug and lg.is_debug(_DebugLevel + 8),
+                                 )
+        self.log_transitions = False
+
+    def __del__(self):
+        if _Debug:
+            lg.out(_DebugLevel, 'udp_stream.__del__ %d' % self.stream_id)
+        automat.Automat.__del__(self)
 
     def init(self):
-        """
-        """
-        self.output_buffer_size = 0
+        self.output_acks_counter = 0
+        self.output_acks_reasons = {}
+        self.output_iterations_results = {}
+        self.output_ack_last_time = 0
+        self.output_block_id_current = 0
+        self.output_acked_block_id_current = 0
+        self.output_acked_blocks_ids = set()
+        self.output_block_last_time = 0
         self.output_blocks = {}
         self.output_blocks_ids = []
-        self.output_block_id = 0
         self.output_blocks_counter = 0
-        self.output_acks_counter = 0
-        self.input_blocks = {}
-        self.input_block_id = 0
-        self.input_blocks_counter = 0
+        self.output_blocks_last_delta = 0
+        self.output_blocks_reasons = {}
+        self.output_blocks_acked = 0
+        self.output_blocks_success_counter = 0.0
+        self.output_blocks_errors_counter = 0
+        self.output_quality_counter = 0.0
+        self.output_error_last_time = 0.0
+        self.output_bytes_in_acks = 0
+        self.output_bytes_sent = 0
+        self.output_bytes_sent_period = 0
+        self.output_bytes_acked = 0
+        self.output_bytes_per_sec_current = 0
+        self.output_bytes_per_sec_last = 0
+        self.output_buffer_size = 0
+        self.output_limit_bytes_per_sec = 0
+        self.output_limit_factor = SENDING_LIMIT_FACTOR_ON_START
+        self.output_limit_bytes_per_sec_from_remote = 0.0
+        self.output_limit_iteration_last_time = 0
+        self.output_rtt_avarage = 0.0
+        self.output_rtt_counter = 1.0
+        self.input_ack_last_time = 0
+        self.input_ack_error_last_check = 0
         self.input_acks_counter = 0
         self.input_acks_timeouts_counter = 0
         self.input_acks_garbage_counter = 0
+        self.input_blocks = {}
+        self.input_block_id_current = 0
+        self.input_block_last_time = 0
+        self.input_block_id_last = 0
+        self.input_blocks_counter = 0
+        self.input_blocks_to_ack = []
+        self.input_bytes_received = 0
+        self.input_bytes_received_period = 0
+        self.input_bytes_per_sec_current = 0
         self.input_duplicated_blocks = 0
         self.input_duplicated_bytes = 0
-        self.blocks_to_ack = []
-        self.bytes_in = 0
-        self.bytes_in_acks = 0
-        self.bytes_sent = 0
-        self.bytes_acked = 0
-        self.blocks_acked = 0
-        self.resend_blocks = 0
-        self.last_ack_moment = 0
-        self.last_ack_received_time = 0
-        self.last_received_block_time = 0
-        self.last_received_block_id = 0
-        self.last_block_sent_time = 0
-        self.rtt_avarage = 0.0 
-        self.rtt_counter = 0.0
-        self.loop = None
-        self.resend_inactivity_counter = 1
-        self.current_send_bytes_per_sec = 0
-        self.current_receive_bytes_per_sec = 0
-        self.eof = False
+        self.input_old_blocks = 0
+        self.input_limit_bytes_per_sec = 0
+        self.input_limit_iteration_last_time = 0
         self.last_progress_report = 0
+        self.eof = False
 
     def A(self, event, arg):
         newstate = self.state
         #---SENDING---
         if self.state == 'SENDING':
-            if event == 'iterate' :
+            if event == 'iterate':
                 self.doResendBlocks(arg)
                 self.doSendingLoop(arg)
-            elif event == 'consume' :
+            elif event == 'consume':
                 self.doPushBlocks(arg)
                 self.doResendBlocks(arg)
-                self.doSendingLoop(arg)
-            elif event == 'set-limits' :
+            elif event == 'set-limits':
                 self.doUpdateLimits(arg)
-            elif event == 'ack-received' and not self.isEOF(arg) and not self.isPaused(arg) :
+            elif event == 'ack-received' and not self.isEOF(arg) and not self.isPaused(arg):
                 self.doResendBlocks(arg)
-                self.doSendingLoop(arg)
-            elif event == 'ack-received' and self.isEOF(arg) :
+            elif event == 'ack-received' and self.isEOF(arg):
                 self.doReportSendDone(arg)
                 self.doCloseStream(arg)
                 newstate = 'COMPLETION'
-            elif event == 'ack-received' and self.isPaused(arg) :
+            elif event == 'pause' or ( event == 'ack-received' and self.isPaused(arg) ):
                 self.doResumeLater(arg)
                 newstate = 'PAUSE'
-            elif event == 'timeout' :
+            elif event == 'timeout':
                 self.doReportSendTimeout(arg)
                 self.doCloseStream(arg)
                 newstate = 'COMPLETION'
-            elif event == 'close' :
+            elif event == 'close':
                 self.doReportClosed(arg)
                 self.doCloseStream(arg)
                 self.doDestroyMe(arg)
                 newstate = 'CLOSED'
         #---DOWNTIME---
         elif self.state == 'DOWNTIME':
-            if event == 'set-limits' :
+            if event == 'set-limits':
                 self.doUpdateLimits(arg)
-            elif event == 'block-received' :
+            elif event == 'consume':
+                self.doPushBlocks(arg)
+                self.doResendBlocks(arg)
+                newstate = 'SENDING'
+            elif event == 'block-received':
                 self.doResendAck(arg)
-                self.doReceivingLoop(arg)
                 newstate = 'RECEIVING'
-            elif event == 'close' :
+            elif event == 'ack-received':
+                self.doReportError(arg)
+                self.doCloseStream(arg)
+                newstate = 'COMPLETION'
+            elif event == 'close':
                 self.doReportClosed(arg)
                 self.doCloseStream(arg)
                 self.doDestroyMe(arg)
                 newstate = 'CLOSED'
-            elif event == 'ack-received' :
-                self.doReportError(arg)
-                self.doCloseStream(arg)
-                newstate = 'COMPLETION'
-            elif event == 'consume' :
-                self.doPushBlocks(arg)
-                self.doResendBlocks(arg)
-                self.doSendingLoop(arg)
-                newstate = 'SENDING'
         #---AT_STARTUP---
         elif self.state == 'AT_STARTUP':
-            if event == 'init' :
+            if event == 'init':
                 self.doInit(arg)
                 newstate = 'DOWNTIME'
         #---CLOSED---
@@ -321,50 +407,48 @@ class UDPStream(automat.Automat):
             pass
         #---RECEIVING---
         elif self.state == 'RECEIVING':
-            if event == 'set-limits' :
+            if event == 'set-limits':
                 self.doUpdateLimits(arg)
-            elif event == 'iterate' :
+            elif event == 'iterate':
                 self.doResendAck(arg)
                 self.doReceivingLoop(arg)
-            elif event == 'block-received' and not self.isEOF(arg) :
+            elif event == 'block-received' and not self.isEOF(arg):
                 self.doResendAck(arg)
-                self.doReceivingLoop(arg)
-            elif event == 'timeout' :
+            elif event == 'timeout':
                 self.doReportReceiveTimeout(arg)
                 self.doCloseStream(arg)
                 newstate = 'COMPLETION'
-            elif event == 'close' :
+            elif event == 'close':
                 self.doReportClosed(arg)
                 self.doCloseStream(arg)
                 self.doDestroyMe(arg)
                 newstate = 'CLOSED'
-            elif event == 'block-received' and self.isEOF(arg) :
+            elif event == 'block-received' and self.isEOF(arg):
                 self.doResendAck(arg)
                 self.doReportReceiveDone(arg)
                 self.doCloseStream(arg)
                 newstate = 'COMPLETION'
         #---COMPLETION---
         elif self.state == 'COMPLETION':
-            if event == 'close' :
+            if event == 'close':
                 self.doDestroyMe(arg)
                 newstate = 'CLOSED'
         #---PAUSE---
         elif self.state == 'PAUSE':
-            if event == 'consume' :
+            if event == 'consume':
                 self.doPushBlocks(arg)
-            elif event == 'timeout' :
+            elif event == 'timeout':
                 self.doReportSendTimeout(arg)
                 self.doCloseStream(arg)
                 newstate = 'COMPLETION'
-            elif event == 'ack-received' and self.isEOF(arg) :
+            elif event == 'ack-received' and self.isEOF(arg):
                 self.doReportSendDone(arg)
                 self.doCloseStream(arg)
                 newstate = 'COMPLETION'
-            elif event == 'resume' :
+            elif event == 'resume':
                 self.doResendBlocks(arg)
-                self.doSendingLoop(arg)
                 newstate = 'SENDING'
-            elif event == 'close' :
+            elif event == 'close':
                 self.doReportClosed(arg)
                 self.doCloseStream(arg)
                 self.doDestroyMe(arg)
@@ -381,7 +465,7 @@ class UDPStream(automat.Automat):
         """
         Condition method.
         """
-        acks, pause = arg
+        _, pause, _ = arg
         return pause > 0
 
     def doInit(self, arg):
@@ -389,304 +473,103 @@ class UDPStream(automat.Automat):
         Action method.
         """
         self.creation_time = time.time()
-        self.limit_send_bytes_per_sec = get_global_limit_send_bytes_per_sec() / len(streams())
-        self.limit_receive_bytes_per_sec = get_global_limit_receive_bytes_per_sec() / len(streams())
+        self.period_time = time.time()
+        self.output_limit_bytes_per_sec = get_global_output_limit_bytes_per_sec() / \
+            len(streams())
+        self.input_limit_bytes_per_sec = get_global_input_limit_bytes_per_sec() / \
+            len(streams())
         if self.producer.session.min_rtt is not None:
-            self.rtt_avarage = self.producer.session.min_rtt
+            self.output_rtt_avarage = self.producer.session.min_rtt
         else:
-            self.rtt_avarage = (RTT_MIN_LIMIT + RTT_MAX_LIMIT) / 2.0
-        self.rtt_counter = 1.0
+            self.output_rtt_avarage = (RTT_MIN_LIMIT + RTT_MAX_LIMIT) / 2.0
         if _Debug:
             lg.out(self.debug_level, 'udp_stream.doInit %d with %s limits: (in=%r|out=%r)  rtt=%r' % (
-                self.stream_id, self.producer.session.peer_id,
-                self.limit_receive_bytes_per_sec, self.limit_send_bytes_per_sec,
-                self.rtt_avarage))
+                self.stream_id,
+                self.producer.session.peer_id,
+                self.input_limit_bytes_per_sec,
+                self.output_limit_bytes_per_sec,
+                self.output_rtt_avarage))
 
     def doPushBlocks(self, arg):
         """
         Action method.
         """
-        data = arg
-        outp = cStringIO.StringIO(data)
-        while True:
-            piece = outp.read(BLOCK_SIZE)
-            if not piece:
-                break
-            self.output_block_id += 1
-            bisect.insort(self.output_blocks_ids, self.output_block_id)
-            # data, time_sent, acks_missed
-            self.output_blocks[self.output_block_id] = [piece, -1, 0]
-            self.output_buffer_size += len(piece)
-        outp.close()
-        if _Debug:
-            lg.out(self.debug_level+6, 'PUSH %r' % self.output_blocks_ids)
-
-#    def doPopBlocks(self, arg):
-#        """
-#        Action method.
-#        """
+        self._push_blocks(arg)
 
     def doResendBlocks(self, arg):
         """
         Action method.
         """
-#        lg.out(24, 'doResendBlocks %d %d %r %r %s' % (
-#            self.input_acks_counter,
-#            self.output_blocks_counter,
-#            self.last_block_sent_time,
-#            self.last_ack_received_time,
-#            self.output_blocks.keys(), 
-#            ))
-        relative_time = time.time() - self.creation_time
-        if len(self.output_blocks) == 0:
-        #--- nothing to send
-            self.resend_inactivity_counter +=1
-            self.resend_blocks += 1
-            self._send_blocks([]) 
-            return
-        if self.limit_send_bytes_per_sec > 0:
-        #--- skip sending : limit reached 
-            if relative_time > 0.0: 
-                current_rate = self.bytes_sent / relative_time
-                if current_rate > self.limit_send_bytes_per_sec:
-                    if _Debug:
-                        lg.out(self.debug_level, 'SKIP BLOCK LIMIT SENDING %d : %r>%r' % (
-                            self.stream_id, current_rate, self.limit_send_bytes_per_sec))
-                    self.resend_inactivity_counter += 1
-                    return
-        if self.input_acks_counter > 0:
-        #--- got some response!
-            if self.output_blocks_counter / self.input_acks_counter > BLOCKS_PER_ACK * 2:
-        #--- too many blocks sent but few acks - check time out sending
-                if self.state == 'SENDING' or self.state == 'PAUSE':
-                    if relative_time - self.last_ack_received_time > RTT_MAX_LIMIT * 4:
-        #--- no responding activity at all
-                        if _Debug:
-                            lg.out(self.debug_level, 'TIMEOUT SENDING rtt=%r, last ack at %r, last block was %r, reltime is %r' % (
-                                self.rtt_avarage / self.rtt_counter,
-                                self.last_ack_received_time, self.last_block_sent_time, relative_time))
-                        reactor.callLater(0, self.automat, 'timeout')
-                        return
-        #--- skip sending : too few acks (seems like sending too fast)
-                if _Debug:
-                    lg.out(self.debug_level+6, 'SKIP SENDING %d, too few acks:%d blocks:%d' % (
-                        self.stream_id, self.input_acks_counter, self.output_blocks_counter))
-                self.resend_inactivity_counter += 1
-                self.resend_blocks += 1
-                self._send_blocks([]) 
-                return
-        if self.last_block_sent_time - self.last_ack_received_time > RTT_MAX_LIMIT * 2:
-        #--- last ack is timed out
-            self.input_acks_timeouts_counter += 1
-            if self.input_acks_timeouts_counter >= MAX_ACK_TIMEOUTS:
-        #--- timeout sending : too many timed out acks
-                if _Debug:
-                    lg.out(self.debug_level, 'SENDING BROKEN %d rtt=%r, last ack at %r, last block was %r' % (
-                        self.stream_id, self.rtt_avarage / self.rtt_counter, 
-                        self.last_ack_received_time, self.last_block_sent_time))
-                reactor.callLater(0, self.automat, 'timeout')
-            else:
-        #--- resend one "oldest" block
-                latest_block_id = self.output_blocks_ids[0]
-                # self.output_blocks[latest_block_id][1] = -2
-                # self.last_ack_received_time = relative_time # fake ack
-                self.resend_inactivity_counter += 1
-                self.resend_blocks += 1
-                if _Debug:
-                    lg.out(self.debug_level, 'RESEND ONE %d %d' % (self.stream_id, latest_block_id))
-                self._send_blocks([latest_block_id,])
-            return
-        #--- no activity at all
-#            if _Debug:
-#                lg.out(18, 'TIMEOUT SENDING %d rtt=%r, last ack at %r, last block was %r, reltime is %r' % (
-#                    self.stream_id, self.rtt_avarage / self.rtt_counter, 
-#                    self.last_ack_received_time, self.last_block_sent_time, relative_time))
-#            reactor.callLater(0, self.automat, 'timeout')
-#            return
-        #--- normal sending, check all pending blocks
-        rtt_current = self.rtt_avarage / self.rtt_counter
-        resend_time_limit = BLOCKS_PER_ACK * rtt_current
-        blocks_to_send_now = []
-        for block_id in self.output_blocks_ids:
-            time_sent, acks_missed = self.output_blocks[block_id][1:3]
-            timed_out = time_sent >= 0 and (relative_time - time_sent > resend_time_limit)
-        #--- decide to send the block now
-            if time_sent == -1 or timed_out or (acks_missed > 2 and ((acks_missed % 3) == 0)):
-                blocks_to_send_now.append(block_id)
-                if time_sent > 0:
-                    self.resend_blocks += 1
-                # if _Debug:
-                #     lg.out(24, 'SENDING BLOCK %d %r %r %r' % (
-                #         block_id, time_sent, relative_time - time_sent, acks_missed))
-            # else:
-                # if _Debug:
-                #     lg.out(24, 'SKIP SENDING BLOCK %d %r %r %r' % (
-                #         block_id, time_sent, relative_time - time_sent, acks_missed))
-                    # this block is not yet timed out ...
-                    # and just a fiew acks were received after it was sent ... 
-                    # skip now, not need to resend
-        self.resend_inactivity_counter = 1
-        self._send_blocks(blocks_to_send_now)
-        del blocks_to_send_now
+        current_blocks = self.output_blocks_counter
+        self._resend_blocks()
+        self.output_blocks_last_delta = self.output_blocks_counter - current_blocks
 
     def doResendAck(self, arg):
         """
         Action method.
         """
-        some_blocks_to_ack = len(self.blocks_to_ack) > 0
-        relative_time = time.time() - self.creation_time
-        period_avarage = self._block_period_avarage()
-        first_block_in_group = (self.last_received_block_id % BLOCKS_PER_ACK) == 1
-        pause_time = 0.0
-        if relative_time > 0:
-            self.current_receive_bytes_per_sec = self.bytes_in / relative_time
-        #--- limit receiving, calculate pause time
-        if self.limit_receive_bytes_per_sec > 0 and relative_time > 0:
-            #current_rate = self.bytes_in / relative_time
-            max_receive_available = self.limit_receive_bytes_per_sec * relative_time
-            if self.bytes_in > max_receive_available:
-                #pause_time = ( self.bytes_in / self.limit_receive_bytes_per_sec ) - relative_time
-                pause_time = (self.bytes_in - max_receive_available) / self.limit_receive_bytes_per_sec
-                if pause_time < 0:
-                    lg.warn('pause is %r, stream_id=%d' % (pause_time, self.stream_id)) 
-                    pause_time = 0.0
-        # if not some_blocks_to_ack and pause_time == 0.0 and not self.eof:
-        #--- no blocks to ack now, no need to pause and not rich EOF
-        if relative_time - self.last_received_block_time > RECEIVING_TIMEOUT:
-        #--- and last block has been long ago
-                if _Debug:
-                    lg.out(self.debug_level, 'TIMEOUT RECEIVING %d rtt=%r, last block in %r, reltime: %r, eof: %r, blocks to ack: %d' % (
-                        self.stream_id, self._rtt_current(), self.last_received_block_time,
-                        relative_time, self.eof, len(self.blocks_to_ack),))
-                reactor.callLater(0, self.automat, 'timeout')
-                return
-            # self.resend_inactivity_counter += 1
-        activity = False
-        #--- need to send some acks
-        if period_avarage == 0 or self.output_acks_counter == 0:
-        #--- nothing was send, do send first ack now
-            activity = self._send_ack(self.blocks_to_ack)
-        else:
-        #--- last ack has been long ago or
-        # need to send ack now because too many blocks was received at once
-            last_ack_timeout = self._last_ack_timed_out()
-        #--- EOF state
-            if last_ack_timeout or first_block_in_group or self.eof:
-                activity = self._send_ack(self.blocks_to_ack, pause_time)
-        if activity:
-            self.resend_inactivity_counter = 1
-        else:
-            self.resend_inactivity_counter += 1
+        self._resend_ack()
 
     def doSendingLoop(self, arg):
         """
         Action method.
         """
-        if lg.is_debug(self.debug_level):
-            relative_time = time.time() - self.creation_time
-            if relative_time - self.last_progress_report > 1.0:
-                self.last_progress_report = relative_time
-                if _Debug:
-                    lg.out(self.debug_level, 'udp_stream[%d] | %r%% sent | %d/%d/%d | %r bps | %r sec dt' % (
-                        self.stream_id, round(100.0*(float(self.bytes_acked)/self.consumer.size),2),
-                        self.bytes_sent, self.bytes_acked,
-                        self.consumer.size, int(self.current_send_bytes_per_sec),
-                        round(relative_time-self.last_ack_received_time,4)))
-        if self.loop is None:
-            next_iteration = min(MAX_BLOCKS_INTERVAL, 
-                                 self._rtt_current() * self.resend_inactivity_counter)
-            self.loop = reactor.callLater(next_iteration, self.automat, 'iterate') 
-            return
-        if self.loop.called:
-            next_iteration = min(MAX_BLOCKS_INTERVAL, 
-                                 self._rtt_current() * self.resend_inactivity_counter)
-            self.loop = reactor.callLater(next_iteration, self.automat, 'iterate') 
-            return
-        if self.loop.cancelled:
-            self.loop = None
-            return
+        self._sending_loop()
 
     def doReceivingLoop(self, arg):
         """
         Action method.
         """
-        if lg.is_debug(self.debug_level):
-            relative_time = time.time() - self.creation_time
-            if relative_time - self.last_progress_report > 1.0:
-                self.last_progress_report = relative_time
-                if _Debug:
-                    lg.out(self.debug_level, 'udp_stream[%d] | %r%% received | %d/%d/%d | %dbps | %r sec dt | from %s' % (self.stream_id, 
-                        round(100.0*(float(self.consumer.bytes_received)/self.consumer.size),2), 
-                        self.bytes_in, self.consumer.bytes_received, 
-                        self.consumer.size, int(self.current_receive_bytes_per_sec),
-                        round(relative_time-self.last_received_block_time, 4),
-                        self.producer.session.peer_id))
-        if self.loop is None:
-            next_iteration = min(MAX_ACKS_INTERVAL, 
-                             max(RTT_MIN_LIMIT/2.0, 
-                             self._block_period_avarage() * self.resend_inactivity_counter))
-            self.loop = reactor.callLater(next_iteration, self.automat, 'iterate') 
-            return
-        if self.loop.called:
-            next_iteration = min(MAX_ACKS_INTERVAL, 
-                             max(RTT_MIN_LIMIT/2.0, 
-                             self._block_period_avarage() * self.resend_inactivity_counter))
-            self.loop = reactor.callLater(next_iteration, self.automat, 'iterate') 
-            return
-        if self.loop.cancelled:
-            self.loop = None
-            return
+        self._receiving_loop()
 
     def doResumeLater(self, arg):
         """
         Action method.
         """
-        acks, pause = arg
+        if isinstance(arg, float):
+            reactor.callLater(arg, self.automat, 'resume')
+            return
+        _, pause, remote_side_limit_receiving = arg
         if pause > 0:
             reactor.callLater(pause, self.automat, 'resume')
+        if remote_side_limit_receiving > 0:
+            self.output_limit_bytes_per_sec_from_remote = remote_side_limit_receiving
+        else:
+            self.output_limit_bytes_per_sec_from_remote = 0.0
 
     def doReportSendDone(self, arg):
         """
         Action method.
         """
         if _Debug:
-            lg.out(self.debug_level, 'udp_stream.doReportSendDone %r %r' % (self.consumer, self.consumer.is_done()))
+            lg.out(
+                self.debug_level, 'udp_stream.doReportSendDone %r %r' %
+                (self.consumer, self.consumer.is_done()))
         if self.consumer.is_done():
             self.consumer.status = 'finished'
         else:
             self.consumer.status = 'failed'
             self.consumer.error_message = 'sending was not finished correctly'
-        # reactor.callLater(0, self.producer.on_outbox_file_done, self.stream_id)
         self.producer.on_outbox_file_done(self.stream_id)
-        # reactor.callLater(0, self.automat, 'close')
-        # self.automat('close')
 
     def doReportSendTimeout(self, arg):
         """
         Action method.
         """
-        if self.last_ack_received_time == 0:
+        if self.input_ack_last_time == 0:
             self.consumer.error_message = 'sending failed'
         else:
             self.consumer.error_message = 'remote side stopped responding'
         self.consumer.status = 'failed'
         self.consumer.timeout = True
-        # reactor.callLater(0, self.producer.on_timeout_sending, self.stream_id)
         self.producer.on_timeout_sending(self.stream_id)
-        # reactor.callLater(0, self.automat, 'close')        
-        # self.automat('close')
-        
+
     def doReportReceiveDone(self, arg):
         """
         Action method.
         """
-        # Send Zero ack
         self.consumer.status = 'finished'
-        # reactor.callLater(0, self.producer.on_inbox_file_done, self.stream_id)
-        self.producer.on_inbox_file_done(self.stream_id) 
-        # reactor.callLater(0, self.automat, 'close')
-        # self.automat('close')
-        
+        self.producer.on_inbox_file_done(self.stream_id)
 
     def doReportReceiveTimeout(self, arg):
         """
@@ -695,10 +578,7 @@ class UDPStream(automat.Automat):
         self.consumer.error_message = 'receiving timeout'
         self.consumer.status = 'failed'
         self.consumer.timeout = True
-        # reactor.callLater(0, self.producer.on_timeout_receiving, self.stream_id)
         self.producer.on_timeout_receiving(self.stream_id)
-        # reactor.callLater(0, self.automat, 'close')
-        # self.automat('close')
 
     def doReportClosed(self, arg):
         """
@@ -719,44 +599,53 @@ class UDPStream(automat.Automat):
         Action method.
         """
         if _Debug:
+            self.last_progress_report = 0
+            self._sending_loop()
+            self._receiving_loop()
             pir_id = self.producer.session.peer_id
             dt = time.time() - self.creation_time
             if dt == 0:
                 dt = 1.0
-            ratein = self.bytes_in / dt
-            rateout = self.bytes_sent / dt
-            extra_acks_perc = 100.0 * self.input_acks_garbage_counter / float(self.blocks_acked+1)
-            extra_blocks_perc = 100.0 * self.resend_blocks / float(self.output_block_id+1)
-            lg.out(self.debug_level, 'udp_stream.doCloseStream %d %s' % (self.stream_id, pir_id))
-            lg.out(self.debug_level, '    in:%d|%d acks:%d|%d dups:%d|%d out:%d|%d|%d|%d rate:%r|%r extra:A%s|B%s' % (
-                self.input_blocks_counter, self.bytes_in,
-                self.output_acks_counter, self.bytes_in_acks,
-                self.input_duplicated_blocks, self.input_duplicated_bytes,
-                self.output_blocks_counter, self.bytes_acked, 
-                self.resend_blocks, self.input_acks_garbage_counter,
+            ratein = self.input_bytes_received / dt
+            rateout = self.output_bytes_sent / dt
+            lg.out(
+                self.debug_level, 'udp_stream.doCloseStream %d %s' %
+                (self.stream_id, pir_id))
+            lg.out(self.debug_level, '    in:%d|%d|%r acks:%d|%d dups:%d|%d out:%d|%d|%d|%d rate:%r|%r' % (
+                self.input_blocks_counter,
+                self.input_bytes_received,
+                self._block_period_avarage(),
+                self.output_acks_counter,
+                self.output_bytes_in_acks,
+                self.input_duplicated_blocks,
+                self.input_duplicated_bytes,
+                self.output_blocks_counter,
+                self.output_bytes_acked,
+                self.output_blocks_errors_counter,
+                self.input_acks_garbage_counter,
                 int(ratein), int(rateout),
-                misc.percent2string(extra_acks_perc), misc.percent2string(extra_blocks_perc)))
+            ))
+            lg.out(self.debug_level, '    ACK REASONS: %r' % self.output_acks_reasons)
             del pir_id
-        self._stop_resending()
-        # self.consumer.clear_stream()
         self.input_blocks.clear()
-        self.blocks_to_ack = []
+        self.input_blocks_to_ack = []
         self.output_blocks.clear()
         self.output_blocks_ids = []
-        # reactor.callLater(0, self.automat, 'close')
-        # self.automat('close')
 
     def doUpdateLimits(self, arg):
         """
         Action method.
         """
         new_limit_receive, new_limit_send = arg
-#        if  new_limit_receive > self.limit_receive_bytes_per_sec or \
-#            new_limit_send > self.limit_send_bytes_per_sec: 
-#            reactor.callLater(0, self.automat, 'iterate')
-        self.limit_receive_bytes_per_sec = new_limit_receive
-        self.limit_send_bytes_per_sec = new_limit_send
-  
+        self.input_limit_bytes_per_sec = new_limit_receive
+        self.output_limit_bytes_per_sec = new_limit_send
+        self.output_limit_factor = SENDING_LIMIT_FACTOR_ON_START
+        if _Debug:
+            lg.out(self.debug_level + 6, 'udp_stream[%d].doUpdateLimits in=%r out=%r (remote=%r)' % (
+                self.stream_id,
+                self.input_limit_bytes_per_sec, self.output_limit_bytes_per_sec,
+                self.output_limit_bytes_per_sec_from_remote))
+
     def doDestroyMe(self, arg):
         """
         Action method.
@@ -770,253 +659,683 @@ class UDPStream(automat.Automat):
         streams().pop(self.stream_id)
         self.destroy()
         reactor.callLater(0, balance_streams_limits)
-        # lg.out(18, 'doDestroyMe %s' % (str(self.stream_id)))
 
     def on_block_received(self, inpt):
-        if self.consumer and getattr(self.consumer, 'on_received_raw_data', None):
-            block_id = inpt.read(4)
-            try:
-                block_id = struct.unpack('i', block_id)[0]
-            except:
-                lg.exc()
-                if _Debug:
-                    lg.out(self.debug_level, 'ERROR receiving, stream_id=%s' % self.stream_id)
-                return
-            data = inpt.read()
-            self.last_received_block_time = time.time() - self.creation_time
-            self.input_blocks_counter += 1
-            if block_id != -1:
-                self.bytes_in += len(data)
-                self.last_received_block_id = block_id
-                eof = False
-                raw_size = 0
-                if block_id in self.input_blocks.keys():
-                    self.input_duplicated_blocks += 1
-                    self.input_duplicated_bytes += len(data)
-                    # lg.warn('duplicated %d %d' % (self.stream_id, block_id))
-                elif block_id < self.input_block_id:
-                    self.input_duplicated_blocks += 1
-                    self.input_duplicated_bytes += len(data)
-                    # lg.warn('old %d %d current: %d' % (self.stream_id, block_id, self.input_block_id))
-                else:                
-                    self.input_blocks[block_id] = data
-                    bisect.insort(self.blocks_to_ack, block_id)
-                if block_id == self.input_block_id + 1:
-                    newdata = cStringIO.StringIO()
-                    while True:
-                        next_block_id = self.input_block_id + 1
-                        try:
-                            blockdata = self.input_blocks.pop(next_block_id)
-                        except KeyError:
-                            break
-                        newdata.write(blockdata)
-                        raw_size += len(blockdata)
-                        self.input_block_id = next_block_id
-                    try:
-                        eof = self.consumer.on_received_raw_data(newdata.getvalue())
-                    except:
-                        lg.exc()
-                    newdata.close()
-                if self.eof != eof:
-                    self.eof = eof
-                    if _Debug:
-                        lg.out(self.debug_level, '    EOF : %d' % self.stream_id)
-                if _Debug:
-                    lg.out(self.debug_level+6, 'in-> BLOCK %d %r %d-%d %d %d %d' % (
-                        self.stream_id, self.eof, block_id, self.input_block_id,
-                        self.bytes_in, self.input_blocks_counter, 
-                        len(self.blocks_to_ack)))
+        if not (self.consumer and getattr(self.consumer, 'on_received_raw_data', None)):
+            return
+            #--- RECEIVE DATA HERE!
+        block_id = inpt.read(4)
+        try:
+            block_id = struct.unpack('i', block_id)[0]
+        except:
+            lg.exc()
+            if _Debug:
+                lg.out(self.debug_level, 'ERROR receiving, stream_id=%s' % self.stream_id)
+            return
+            #--- read block data
+        data = inpt.read()
+        self.input_block_last_time = time.time() - self.creation_time
+        self.input_blocks_counter += 1
+        if block_id != -1:
+            #--- not empty block received
+            self.input_bytes_received += len(data)
+            self.input_block_id_last = block_id
+            eof = False
+            raw_size = 0
+            if block_id in self.input_blocks.keys():
+            #--- duplicated block received
+                self.input_duplicated_blocks += 1
+                self.input_duplicated_bytes += len(data)
+                bisect.insort(self.input_blocks_to_ack, block_id)
             else:
+                if block_id < self.input_block_id_current:
+            #--- old block (already processed) received
+                    self.input_old_blocks += 1
+                    self.input_duplicated_bytes += len(data)
+                    bisect.insort(self.input_blocks_to_ack, block_id)
+                else:
+            #--- GOOD BLOCK RECEIVED
+                    self.input_blocks[block_id] = data
+                    bisect.insort(self.input_blocks_to_ack, block_id)
+            if block_id == self.input_block_id_current + 1:
+            #--- receiving data and check every next block one by one
+                newdata = cStringIO.StringIO()
+                while True:
+                    next_block_id = self.input_block_id_current + 1
+                    try:
+                        blockdata = self.input_blocks.pop(next_block_id)
+                    except KeyError:
+                        break
+                    newdata.write(blockdata)
+                    raw_size += len(blockdata)
+                    self.input_block_id_current = next_block_id
+                try:
+            #--- consume data and get EOF state
+                    eof = self.consumer.on_received_raw_data(newdata.getvalue())
+                except:
+                    lg.exc()
+                newdata.close()
+            #--- remember EOF state
+            if eof and not self.eof:
+                self.eof = eof
                 if _Debug:
-                    lg.out(self.debug_level+6, 'in-> BLOCK %d %r EMPTY %d %d' % (
-                        self.stream_id, self.eof, 
-                        self.bytes_in, self.input_blocks_counter))
-            # self.automat('input-data-collected', (block_id, raw_size, eof_state))
-            # reactor.callLater(0, self.automat, 'block-received', (block_id, raw_size, eof_state))
-            self.automat('block-received', (block_id, data))
-            # self.event('block-received', inpt)
-    
+                    lg.out(self.debug_level, '    EOF flag set !!!!!!!! : %d' % self.stream_id)
+            if _Debug:
+                lg.out(self.debug_level + 6, 'in-> BLOCK %d %r %d-%d %d %d %d' % (
+                    self.stream_id,
+                    self.eof,
+                    block_id,
+                    self.input_block_id_current,
+                    self.input_bytes_received,
+                    self.input_blocks_counter,
+                    len(self.input_blocks_to_ack)))
+        else:
+            if _Debug:
+                lg.out(self.debug_level, 'in-> BLOCK %d %r EMPTY %d %d' % (
+                    self.stream_id, self.eof, self.input_bytes_received, self.input_blocks_counter))
+            #--- raise 'block-received' event
+        self.event('block-received', (block_id, data))
+
     def on_ack_received(self, inpt):
-        if self.consumer and getattr(self.consumer, 'on_sent_raw_data', None):
-            try:
-                eof_flag = None
-                acks = []
-                pause_time = 0.0
-                eof = False
-                raw_bytes = ''
-                self.last_ack_received_time = time.time() - self.creation_time
-                raw_bytes = inpt.read(1)
-                if len(raw_bytes) > 0:
-                    eof_flag = struct.unpack('?', raw_bytes)[0]
+        if not (self.consumer and getattr(self.consumer, 'on_sent_raw_data', None)):
+            return
+            #--- read ACK
+        eof = False
+        eof_flag = None
+        acks = []
+        pause_time = 0.0
+        remote_side_limit_receiving = -1
+        self.input_ack_last_time = time.time() - self.creation_time
+        raw_bytes = inpt.read(1)
+        if len(raw_bytes) > 0:
+            #--- read EOF state from ACK
+            eof_flag = struct.unpack('?', raw_bytes)[0]
+        if True:
+            while True:
+                raw_bytes = inpt.read(4)
+                if len(raw_bytes) == 0:
+                    break
+            #--- read block id from ACK
+                block_id = struct.unpack('i', raw_bytes)[0]
+                if block_id >= 0:
+                    acks.append(block_id)
+                elif block_id == -1:
+            #--- read PAUSE TIME from ACK
+                    raw_bytes = inpt.read(4)
+                    if not raw_bytes:
+                        lg.warn('wrong ack: not found pause time')
+                        break
+                    pause_time = struct.unpack('f', raw_bytes)[0]
+            #--- read remote bandwith limit from ACK
+                    raw_bytes = inpt.read(4)
+                    if not raw_bytes:
+                        lg.warn('wrong ack: not found remote bandwith limit')
+                        break
+                    remote_side_limit_receiving = struct.unpack('f', raw_bytes)[0]
                 else:
-                    eof_flag = True
-                if not eof_flag:
-                    while True:
-                        raw_bytes = inpt.read(4)
-                        if len(raw_bytes) == 0:
-                            break
-                        block_id = struct.unpack('i', raw_bytes)[0]
-                        if block_id >= 0:
-                            acks.append(block_id)
-                        else:
-                            raw_bytes = inpt.read(4)
-                            if not raw_bytes:
-                                lg.warn('wrong ack: not found pause time')
-                                break
-                            pause_time = struct.unpack('f', raw_bytes)[0]
-                            # lg.out(24, 'in-> ACK %d' % (self.stream_id))
-                            # self.sending_speed_factor *= 0.9
-                            # lg.out(18, 'SPEED DOWN: %r' % self.sending_speed_factor)
-                            # reactor.callLater(0, self.automat, 'iterate')
-                if len(acks) > 0:
-                    self.input_acks_counter += 1
-                else:
-                    if pause_time == 0.0 and eof_flag is not None and eof_flag:
-                        sum_not_acked_blocks = sum(map(lambda block: len(block[0]),
-                                                       self.output_blocks.values()))
-                        self.bytes_acked += sum_not_acked_blocks
-                        eof = self.consumer.on_sent_raw_data(sum_not_acked_blocks)
-                        if _Debug:
-                            lg.out(self.debug_level, '    ZERO FINISH %d eof:%r acked:%d tail:%d' % (
-                                self.stream_id, eof, self.bytes_acked, sum_not_acked_blocks))
-                for block_id in acks:                
-                    try:
-                        self.output_blocks_ids.remove(block_id)
-                        outblock = self.output_blocks.pop(block_id)
-                    except:
-                        self.input_acks_garbage_counter += 1
-                        if _Debug:
-                            lg.out(self.debug_level+6, '    ack received but block %d not found, stream_id=%d' % (block_id, self.stream_id))
-                        continue
-                    block_size = len(outblock[0])
-                    self.output_buffer_size -= block_size 
-                    self.bytes_acked += block_size
-                    self.blocks_acked += 1
-                    relative_time = time.time() - self.creation_time
-                    last_ack_rtt = relative_time - outblock[1]
-                    self.rtt_avarage += last_ack_rtt
-                    self.rtt_counter += 1.0
-                    if self.rtt_counter > BLOCKS_PER_ACK * 100:
-                        rtt = self.rtt_avarage / self.rtt_counter
-                        self.rtt_counter = BLOCKS_PER_ACK
-                        self.rtt_avarage = rtt * self.rtt_counter 
-                    eof = self.consumer.on_sent_raw_data(block_size)
-                for block_id in self.output_blocks_ids:
-                    self.output_blocks[block_id][2] += 1
-                if eof_flag is not None:
-                    eof = eof and eof_flag
-                if self.eof != eof:
-                    self.eof = eof
-                    if _Debug:
-                        lg.out(self.debug_level, '    EOF : %d' % self.stream_id)
+                    lg.warn('incorrect block_id received: %r' % block_id)
+        if len(acks) > 0:
+            #--- some blocks was received fine
+            self.input_acks_counter += 1
+        if pause_time == 0.0 and eof_flag:
+            #--- EOF state found in the ACK
+            if _Debug:
+                sum_not_acked_blocks = sum(map(lambda block: len(block[0]),
+                                               self.output_blocks.values()))
+                try:
+                    sz = self.consumer.size
+                except:
+                    sz = -1
+                lg.out(self.debug_level, '    EOF state found in ACK %d acked:%d not acked:%d total:%d' % (
+                    self.stream_id, self.output_bytes_acked, sum_not_acked_blocks, sz))
+        for block_id in acks:
+            #--- mark this block as acked
+            if block_id >= self.output_acked_block_id_current:
+                if block_id not in self.output_acked_blocks_ids:
+                    # bisect.insort(self.output_acked_blocks_ids, block_id)
+                    self.output_acked_blocks_ids.add(block_id)
+            if block_id not in self.output_blocks_ids or block_id not in self.output_blocks:
+            #--- garbage, block was already acked
+                self.input_acks_garbage_counter += 1
                 if _Debug:
-                    try:
-                        sz = self.consumer.size
-                    except:
-                        sz = -1
-                    if pause_time > 0:
-                        lg.out(self.debug_level+6, 'in-> ACK %d PAUSE:%r %s %d %s %d %d' % (
-                            self.stream_id, pause_time, acks, len(self.output_blocks), 
-                            eof, sz, self.bytes_acked))
-                    else:
-                        lg.out(self.debug_level+6, 'in-> ACK %d %s %d %s %d %d' % (
-                            self.stream_id, acks, len(self.output_blocks), eof, sz, self.bytes_acked))
-                # self.automat('output-data-acked', (acks, eof))
-                # reactor.callLater(0, self.automat, 'ack-received', (acks, eof))
-                self.automat('ack-received', (acks, pause_time))
-    #            if pause_time > 0:
-    #                self.automat('suspend')
-    #                reactor.callLater(pause_time, self.automat, 'resume')
+                    lg.out(self.debug_level + 6, '    GARBAGE ACK, block %d not found, stream_id=%d' % (
+                        block_id, self.stream_id))
+                continue
+            #--- mark block as acked
+            self.output_blocks_ids.remove(block_id)
+            outblock = self.output_blocks.pop(block_id)
+            block_size = len(outblock[0])
+            self.output_bytes_acked += block_size
+            self.output_buffer_size -= block_size
+            self.output_blocks_success_counter += 1.0
+            self.output_quality_counter += 1.0
+            relative_time = time.time() - self.creation_time
+            last_ack_rtt = relative_time - outblock[1]
+            self.output_rtt_avarage += last_ack_rtt
+            self.output_rtt_counter += 1.0
+            #--- drop avarage RTT
+            if self.output_rtt_counter > MAX_RTT_COUNTER:
+                rtt_avarage_dropped = self.output_rtt_avarage / self.output_rtt_counter
+                self.output_rtt_counter = round(MAX_RTT_COUNTER / 2.0, 0)
+                self.output_rtt_avarage = rtt_avarage_dropped * self.output_rtt_counter
+            #--- process delivered data
+            eof = self.consumer.on_sent_raw_data(block_size)
+        for block_id in self.output_blocks_ids:
+            #--- mark blocks was not acked at this time
+            self.output_blocks[block_id][2] += 1
+        while True:
+            next_block_id = self.output_acked_block_id_current + 1
+            try:
+                self.output_acked_blocks_ids.remove(next_block_id)
+            except KeyError:
+                break
+            self.output_acked_block_id_current = next_block_id
+            self.output_blocks_acked += 1
+        eof = eof or eof_flag
+        if not self.eof and eof:
+            #--- remember EOF state
+            self.eof = eof
+            if _Debug:
+                lg.out(self.debug_level, '    in-> ACK %d : EOF RICHED !!!!!!!!' % self.stream_id)
+        if eof_flag is None and len(acks) == 0 and pause_time == 0.0:
+            #--- stream was closed on remote side, probably EOF
+            self.eof = True
+            if _Debug:
+                lg.out(self.debug_level, '    in-> ACK %d : REMOTE SIDE CLOSED STREAM !!!!!!!!' % self.stream_id)
+        if _Debug:
+            try:
+                sz = self.consumer.size
             except:
-                lg.exc()
+                sz = -1
+            if pause_time > 0:
+                lg.out(self.debug_level + 6, 'in-> ACK %d PAUSE:%r %s %d %s %d %d %r' % (
+                    self.stream_id, pause_time, acks, len(self.output_blocks),
+                    eof, sz, self.output_bytes_acked, acks))
+                lg.out(self.debug_level + 6, '    %r' % self.output_acked_blocks_ids)
+            else:
+                lg.out(self.debug_level + 6, 'in-> ACK %d %d %d %s %d %d %r' % (
+                    self.stream_id, self.output_acked_block_id_current,
+                    len(self.output_blocks), eof, self.output_bytes_acked, sz, acks))
+        self.event('ack-received', (acks, pause_time, remote_side_limit_receiving))
 
     def on_consume(self, data):
         if self.consumer:
             if self.output_buffer_size + len(data) > OUTPUT_BUFFER_SIZE:
                 raise BufferOverflow(self.output_buffer_size)
+            if self.output_quality_counter > BLOCKS_PER_ACK * WINDOW_SIZE:
+                error_rate = float(self.output_blocks_errors_counter) / (self.output_quality_counter)
+                if error_rate > ACCEPTABLE_ERRORS_RATE:
+                    current_window = self.output_block_id_current - self.output_acked_block_id_current
+                    if current_window > BLOCKS_PER_ACK * WINDOW_SIZE:
+                        raise BufferOverflow(self.output_buffer_size)
             self.event('consume', data)
-        
+
     def on_close(self):
         if _Debug:
-            lg.out(self.debug_level, 
-                'udp_stream.UDPStream[%d].on_close, send "close" to self.A()' % self.stream_id)
+            lg.out(self.debug_level, 'udp_stream.UDPStream[%d].on_close, send "close" event to the stream, state=%s' % (self.stream_id, self.state))
+            lg.out(self.debug_level, '    %r' % self.output_iterations_results)
         if self.consumer:
             reactor.callLater(0, self.automat, 'close')
 
+    def _push_blocks(self, data):
+        outp = cStringIO.StringIO(data)
+        while True:
+            piece = outp.read(BLOCK_SIZE)
+            if not piece:
+                break
+            self.output_block_id_current += 1
+            #--- prepare block to be send
+            bisect.insort(self.output_blocks_ids, self.output_block_id_current)
+            # data, time_sent, acks missed, number of attempts
+            self.output_blocks[self.output_block_id_current] = [piece, -1, 0, 0]
+            self.output_buffer_size += len(piece)
+        outp.close()
+        if _Debug:
+            lg.out(self.debug_level + 6, 'PUSH %d [%s]' % (
+                self.output_block_id_current, ','.join(map(str, self.output_blocks_ids)), ))
+
+    def _sending_loop(self):
+        total_rate_out = 0.0
+        relative_time = time.time() - self.creation_time
+        if relative_time > 0:
+            total_rate_out = self.output_bytes_sent / float(relative_time)
+        if lg.is_debug(self.debug_level):
+            if self.output_quality_counter and relative_time - self.last_progress_report > POOLING_INTERVAL * 50.0:
+                if _Debug:
+                    lg.out(self.debug_level, 'udp_stream[%d]|%d/%r%%|garb.:%d/%d|err.:%r%%/%r%%|%rbps|pkt:%d/%d|RTT:%r|lag:%d|last:%r/%r|buf:%d|N:%d' % (
+                        self.stream_id,
+                        #--- current block acked/percent sent
+                        self.output_acked_block_id_current,
+                        round(100.0 * (float(self.output_bytes_acked) / self.consumer.size), 2),
+                        #--- garbage blocks out/garbacge acks in
+                        self.output_blocks_errors_counter,
+                        self.input_acks_garbage_counter,
+                        #--- errors timeouts/lagged/success %/error %
+                        round(100.0 * (self.output_blocks_errors_counter / self.output_quality_counter), 2),
+                        round(100.0 * (self.output_blocks_success_counter / self.output_quality_counter), 2),
+                        #--- sending speed current/total
+                        int(total_rate_out),
+                        #--- blocks out/acks in
+                        self.output_blocks_counter,
+                        self.input_acks_counter,
+                        #--- current avarage RTT
+                        round(self.output_rtt_avarage / self.output_rtt_counter, 4),
+                        #--- current lag
+                        (self.output_block_id_current - self.output_acked_block_id_current),
+                        #--- last BLOCK sent/ACK received
+                        round(relative_time - self.output_block_last_time, 4),
+                        round(relative_time - self.input_ack_last_time, 4),
+                        #--- packets in buffer/window size
+                        len(self.output_blocks),
+                        #--- number of streams
+                        len(streams()),
+                    ))
+                    lg.out(self.debug_level, '    %r' % self.output_iterations_results)
+                self.last_progress_report = relative_time
+
+    def _receiving_loop(self):
+        if lg.is_debug(self.debug_level):
+            relative_time = time.time() - self.creation_time
+            if relative_time - self.last_progress_report > POOLING_INTERVAL * 50.0:
+                if _Debug:
+                    lg.out(self.debug_level, 'udp_stream[%d] | %d/%r%% | garb.:%d/%d/%r%% | %d bps | b.:%d/%d | pkt.:%d/%d | last: %r | buf: %d | N:%d' % (
+                        self.stream_id,
+                        #--- percent received
+                        self.input_block_id_current,
+                        round(100.0 * (float(self.consumer.bytes_received) / self.consumer.size), 2),
+                        #--- garbage blocks duplicated/old/ratio
+                        self.input_duplicated_blocks,  # VARY BAD!!!
+                        self.input_old_blocks,  # not so bad
+                        round(100.0 * (float(self.input_duplicated_blocks + self.input_old_blocks) / float(self.input_block_id_current + 1)), 2),
+                        #--- receiving speed
+                        int(self.input_bytes_per_sec_current),
+                        #--- bytes in/consumed
+                        self.input_bytes_received,
+                        self.consumer.bytes_received,
+                        #--- blocks in/acks out
+                        self.input_blocks_counter,
+                        self.output_acks_counter,
+                        #--- last BLOCK received
+                        round(relative_time - self.input_block_last_time, 4),
+                        #--- input buffer
+                        len(self.input_blocks),
+                        #--- number of streams
+                        len(streams()),
+                    ))
+                self.last_progress_report = relative_time
+
+    def _add_iteration_result(self, result):
+        if _Debug and lg.is_debug(self.debug_level):
+            if result not in self.output_iterations_results:
+                self.output_iterations_results[result] = 1
+            else:
+                self.output_iterations_results[result] += 1
+
+    def _resend_blocks(self):
+        if len(self.output_blocks) == 0:
+            #--- nothing to send right now
+            return
+        relative_time = time.time() - self.creation_time
+        last_block_sent_delta = relative_time - self.output_block_last_time
+        current_limit = self.calculate_real_output_limit()
+        if current_limit > 0 and relative_time > 0:
+            possible_bytes_more = BLOCKS_PER_ACK * BLOCK_SIZE
+            current_rate = (self.output_bytes_sent + possible_bytes_more) / relative_time
+            if current_rate > current_limit and last_block_sent_delta < RTT_MAX_LIMIT / 2.0:
+            #--- skip sending : bandwidth limit reached
+                self.output_limit_iteration_last_time = relative_time
+                if _Debug:
+                    lg.out(self.debug_level + 6, 'SKIP RESENDING %d, bandwidth limit : %r>%r, factor: %r, remote: %r' % (
+                        self.stream_id,
+                        int(current_rate),
+                        int(self.output_limit_bytes_per_sec * self.output_limit_factor),
+                        self.output_limit_factor,
+                        self.output_limit_bytes_per_sec_from_remote))
+                self._add_iteration_result('limit')
+                return
+        if self.state == 'SENDING' or self.state == 'PAUSE':
+            sending_was_limited = relative_time - self.output_limit_iteration_last_time < SENDING_TIMEOUT
+            input_ack_timed_out = relative_time - self.input_ack_last_time > SENDING_TIMEOUT
+            if not sending_was_limited and input_ack_timed_out:
+            #--- no responding activity at all - TIMEOUT
+                if _Debug:
+                    lg.out(self.debug_level, 'TIMEOUT SENDING rtt=%r, last ack:%r, last block sent:%r, reltime:%r, avarage speed: %r' % (
+                        round(self.output_rtt_avarage / self.output_rtt_counter, 6),
+                        round(self.input_ack_last_time, 4),
+                        round(self.output_block_last_time, 4),
+                        relative_time,
+                        int(_CurrentSendingAvarageRate)))
+                    speeds = []
+                    for s in streams().values():
+                        stream_relative_time = time.time() - s.creation_time
+                        if stream_relative_time > 0:
+                            speeds.append(int(s.output_bytes_sent / float(relative_time)))
+                    lg.out(self.debug_level, '%r' % speeds)
+                reactor.callLater(0, self.automat, 'timeout')
+                return
+        if self.input_acks_counter > 0:
+            if last_block_sent_delta < RTT_MAX_LIMIT:
+                current_out_in_rate = self.output_blocks_counter / float(self.input_acks_counter)
+                if current_out_in_rate > float(BLOCKS_PER_ACK) * 1.5:
+                #--- too many blocks sent but few acks, skip sending
+                    if _Debug:
+                        lg.out(self.debug_level + 6, 'SKIP SENDING %d, too few acks:%d blocks:%d' % (
+                            self.stream_id, self.input_acks_counter, self.output_blocks_counter))
+                    self._add_iteration_result('fewacks')
+                    return
+            #--- normal sending, check all pending blocks
+        rtt_current = self._rtt_current()
+        blocks_to_send_now = []
+        for block_id in self.output_blocks_ids:
+            if len(blocks_to_send_now) >= BLOCKS_PER_ACK:
+            #--- do not send too much blocks at once
+                break
+            time_sent = self.output_blocks[block_id][1]
+            if time_sent != -1:
+                continue
+            #--- send this block first time
+            blocks_to_send_now.append(block_id)
+        if len(blocks_to_send_now) >= BLOCKS_PER_ACK:
+            #--- full group of blocks sending first time, GO!
+            self._send_blocks(blocks_to_send_now)
+            self._add_iteration_result('fullgroup')
+            return
+        bytes_left = self.consumer.size - self.output_bytes_acked
+        if len(blocks_to_send_now) > 0 and bytes_left < BLOCKS_PER_ACK * BLOCK_SIZE:
+            #--- not full group, but almost finished
+            self._send_blocks(blocks_to_send_now)
+            self._add_iteration_result('finishing')
+            return
+        if last_block_sent_delta < RTT_MAX_LIMIT:
+            if self.input_acks_counter == 0:
+            #--- no acks received yet, skip sending
+                self._add_iteration_result('noackyet')
+                return
+            possible_blocks_out = self.output_blocks_counter + len(blocks_to_send_now)
+            possible_out_in_ratio = float(possible_blocks_out) / float(self.input_acks_counter)
+            if possible_out_in_ratio > float(BLOCKS_PER_ACK) * (1.0 + ACCEPTABLE_ERRORS_RATE):
+            #--- sent more blocks, than needed, skip sending
+                self._add_iteration_result('needmoreacks')
+                return
+            #--- last block was sent long ago, need to resend now
+        blocks_not_acked = sorted(self.output_blocks_ids)
+        block_position = 0
+        too_much_errors = False
+        for block_id in blocks_not_acked:
+            block_position += 1
+            if block_id in blocks_to_send_now:
+                continue
+            if len(blocks_to_send_now) >= BLOCKS_PER_ACK:
+                # do not send too much blocks at once
+                break
+            time_sent = self.output_blocks[block_id][1]
+            if time_sent < 0:
+                continue
+            if relative_time - time_sent < block_position * rtt_current:
+                continue
+            error_rate = float(self.output_blocks_errors_counter + 1) / (self.output_quality_counter + 1.0)
+            if error_rate > ACCEPTABLE_ERRORS_RATE:
+                too_much_errors = True
+                break
+            #--- this block was timed out, resending
+            blocks_to_send_now.insert(0, block_id)
+            self.output_blocks_errors_counter += 1
+            self.output_quality_counter += 1.0
+            self.output_error_last_time = relative_time
+        if len(blocks_to_send_now) >= BLOCKS_PER_ACK:
+            #--- full group of blocks with timeouts
+            self._send_blocks(blocks_to_send_now)
+            self._add_iteration_result('fullgroup2')
+            return
+        if len(blocks_to_send_now) > 0 and bytes_left < BLOCKS_PER_ACK * BLOCK_SIZE:
+            #--- not full group, but almost finished
+            self._send_blocks(blocks_to_send_now)
+            self._add_iteration_result('finishing2')
+            return
+        if too_much_errors and last_block_sent_delta < RTT_MAX_LIMIT / 2.0:
+            #--- too much errors, send not full group
+            self._send_blocks(blocks_to_send_now)
+            self._add_iteration_result('errors')
+            return
+        blocks_not_acked = sorted(
+            self.output_blocks_ids,
+            key=lambda bid: self.output_blocks[bid][2],
+            reverse=True, )
+        for block_id in blocks_not_acked:
+            if block_id in blocks_to_send_now:
+                continue
+            if len(blocks_to_send_now) >= BLOCKS_PER_ACK:
+                # do not send too much blocks at once
+                break
+            missed_acks = self.output_blocks[block_id][2]
+            if missed_acks < int(WINDOW_SIZE):
+                continue
+            error_rate = float(self.output_blocks_errors_counter + 1) / float(self.output_quality_counter + 1.0)
+            if error_rate > ACCEPTABLE_ERRORS_RATE:
+                too_much_errors = True
+                break
+            blocks_to_send_now.insert(0, block_id)
+            self.output_blocks_errors_counter += 1
+            self.output_quality_counter += 1.0
+            self.output_error_last_time = relative_time
+        if len(blocks_to_send_now) >= BLOCKS_PER_ACK:
+            #--- full group of blocks with missed acks
+            self._send_blocks(blocks_to_send_now)
+            self._add_iteration_result('fullgroup3')
+            return
+            #--- no activity for some time, send some timed out blocks
+        if too_much_errors and last_block_sent_delta < RTT_MAX_LIMIT / 2.0:
+            #--- too much errors, send not full group
+            self._send_blocks(blocks_to_send_now)
+            self._add_iteration_result('errors2')
+            return
+        for block_id in blocks_not_acked:
+            if block_id in blocks_to_send_now:
+                continue
+            if len(blocks_to_send_now) >= BLOCKS_PER_ACK:
+                # do not send too much blocks at once
+                break
+            time_sent = self.output_blocks[block_id][1]
+            if time_sent < 0:
+                continue
+            if relative_time - time_sent < RTT_MAX_LIMIT:
+                continue
+            if self.output_error_last_time < RTT_MAX_LIMIT:
+                if self.output_quality_counter > BLOCKS_PER_ACK:
+                    error_rate = float(self.output_blocks_errors_counter) / float(self.output_quality_counter)
+                    if error_rate > ACCEPTABLE_ERRORS_RATE:
+                        too_much_errors = True
+                        break
+            blocks_to_send_now.insert(0, block_id)
+            self.output_blocks_errors_counter += 1
+            self.output_quality_counter += 1.0
+            self.output_error_last_time = relative_time
+        if len(blocks_to_send_now) >= BLOCKS_PER_ACK:
+            #--- full group of blocks with big timeouts
+            self._send_blocks(blocks_to_send_now)
+            self._add_iteration_result('fullgroup4')
+            return
+        if len(blocks_to_send_now) > 0:
+            #--- not full group, bad situation
+            self._send_blocks(blocks_to_send_now)
+            self._add_iteration_result('badgroup')
+            return
+        if last_block_sent_delta > RECEIVING_TIMEOUT / 3.0 and len(self.output_blocks_ids) > 0:
+            #--- keep alive, send one block
+            oldest_block_id = sorted(self.output_blocks_ids)[0]
+            self._send_blocks([oldest_block_id, ])
+            self._add_iteration_result('alive')
+            return
+            #--- skip sending, no blocks ready to be sent
+        self._add_iteration_result('skip')
+
     def _send_blocks(self, blocks_to_send):
         relative_time = time.time() - self.creation_time
+        current_limit = self.calculate_real_output_limit()
         new_blocks_counter = 0
         for block_id in blocks_to_send:
             piece = self.output_blocks[block_id][0]
             data_size = len(piece)
-            if self.limit_send_bytes_per_sec > 0 and relative_time > 0:
-                current_rate = (self.bytes_sent + data_size) / relative_time
-                if current_rate > self.limit_send_bytes_per_sec:
-                    continue
-            self.output_blocks[block_id][1] = relative_time
+            if current_limit > 0 and relative_time > 0:
+            #--- limit sending, current rate is too big
+                current_rate = (self.output_bytes_sent + data_size) / relative_time
+                if current_rate > current_limit:
+                    last_block_sent_delta = relative_time - self.output_block_last_time
+                    if new_blocks_counter > 0 and last_block_sent_delta < RTT_MAX_LIMIT / 2.0:
+                        self._add_iteration_result('limit1')
+                        break
+                    last_ack_received_delta = relative_time - self.output_ack_last_time
+                    if last_ack_received_delta < RTT_MAX_LIMIT:
+                        self._add_iteration_result('limit3')
+                        break
             output = ''.join((struct.pack('i', block_id), piece))
-            self.producer.do_send_data(self.stream_id, self.consumer, output)
-            self.bytes_sent += data_size
+            #--- SEND DATA HERE!
+            if not self.producer.do_send_data(self.stream_id, self.consumer, output):
+                self._add_iteration_result('limit4')
+                break
+            #--- mark block as sent
+            self.output_blocks[block_id][1] = relative_time
+            # erase acks missed for this block
+            self.output_blocks[block_id][2] = 0
+            # but increase number of attempts made
+            self.output_blocks[block_id][3] += 1
+            self.output_bytes_sent += data_size
+            self.output_bytes_sent_period += data_size
             self.output_blocks_counter += 1
             new_blocks_counter += 1
-            self.last_block_sent_time = relative_time
+            self.output_block_last_time = relative_time
             if _Debug:
-                lg.out(self.debug_level+6, '<-out BLOCK %d %r %r %d/%d' % (
-                    self.stream_id, self.eof, block_id, self.bytes_sent, self.bytes_acked))
-        if new_blocks_counter == 0:
-            if relative_time - self.last_block_sent_time > MAX_BLOCKS_INTERVAL:
-                output = ''.join((struct.pack('i', -1), ''))
-                self.producer.do_send_data(self.stream_id, self.consumer, output)
-                self.output_blocks_counter += 1
-                if _Debug:
-                    lg.out(self.debug_level+6, '<-out BLOCK %d %r EMPTY dt=%r' % (
-                        self.stream_id, self.eof, relative_time - self.last_block_sent_time))
-                self.last_block_sent_time = relative_time
+                lg.out(self.debug_level + 8, '<-out BLOCK %d %r %r %d/%d' % (
+                    self.stream_id,
+                    self.eof,
+                    block_id,
+                    self.output_bytes_sent,
+                    self.output_bytes_acked))
         if relative_time > 0:
-            self.current_send_bytes_per_sec = self.bytes_sent / relative_time
+            #--- recalculate current sending speed
+            self.output_bytes_per_sec_current = self.output_bytes_sent / relative_time
+        return new_blocks_counter > 0
 
-    def _send_ack(self, acks, pause_time=0.0):
-        if len(acks) == 0 and pause_time == 0.0 and not self.eof:
-#            if _Debug:
-#                lg.out(24, 'X-out ACK SKIP %d %d %r %r' % (
-#                    self.stream_id, len(acks), pause_time, self.eof))
+    def _resend_ack(self):
+        if self.output_acks_counter == 0:
+            #--- do send first ACK
+            self._send_ack(self.input_blocks_to_ack)
             return
+        if self._block_period_avarage() == 0:
+            #--- SKIP: block frequency is unknown
+            # that means no input block was received yet
+            return
+        relative_time = time.time() - self.creation_time
+        pause_time = 0.0
+        if relative_time > 0:
+            #--- calculate current receiving speed
+            self.input_bytes_per_sec_current = self.input_bytes_received / relative_time
+        if self.input_limit_bytes_per_sec > 0 and relative_time > 0:
+            max_receive_available = self.input_limit_bytes_per_sec * relative_time
+            if self.input_bytes_received > max_receive_available:
+            #--- limit receiving, calculate pause time
+                pause_time = (self.input_bytes_received - max_receive_available) / self.input_limit_bytes_per_sec
+                if pause_time < 0:
+                    lg.warn('pause is %r, stream_id=%d' % (pause_time, self.stream_id))
+                    pause_time = 0.0
+        if pause_time > 0:
+            self.input_limit_iteration_last_time = relative_time
+        receiving_was_limited = relative_time - self.input_limit_iteration_last_time < RECEIVING_TIMEOUT
+        input_block_timed_out = relative_time - self.input_block_last_time > RECEIVING_TIMEOUT
+        if not receiving_was_limited and input_block_timed_out:
+            #--- last block came long time ago, timeout receiving
+            if _Debug:
+                lg.out(self.debug_level, 'TIMEOUT RECEIVING %d rtt=%r, last block:%r, last limit:%r reltime:%r, eof:%r, blocks to ack:%d' % (
+                    self.stream_id, self._rtt_current(),
+                    round(relative_time - self.input_block_last_time, 4),
+                    round(relative_time - self.input_limit_iteration_last_time, 4),
+                    relative_time, self.eof, len(self.input_blocks_to_ack),))
+            reactor.callLater(0, self.automat, 'timeout')
+            return
+        if len(self.input_blocks_to_ack) >= BLOCKS_PER_ACK:
+            #--- received enough blocks to make a group, send ACK
+            self._send_ack(self.input_blocks_to_ack, pause_time, why=1)
+            return
+        if self.eof:
+            #--- at EOF state, send ACK
+            self._send_ack(self.input_blocks_to_ack, pause_time, why=3)
+            return
+        if self._last_ack_timed_out() and len(self.input_blocks_to_ack) > 0:
+            #--- last ack has been long time ago, send ACK
+            self._send_ack(self.input_blocks_to_ack, pause_time, why=4)
+            return
+        if _Debug and lg.is_debug(self.debug_level):
+            why = 6
+            if why not in self.output_acks_reasons:
+                self.output_acks_reasons[why] = 1
+            else:
+                self.output_acks_reasons[why] += 1
+
+    def _send_ack(self, acks, pause_time=0.0, why=0):
+        if _Debug and lg.is_debug(self.debug_level):
+            if why not in self.output_acks_reasons:
+                self.output_acks_reasons[why] = 1
+            else:
+                self.output_acks_reasons[why] += 1
+        if len(acks) == 0 and pause_time == 0.0 and not self.eof:
+        #--- SKIP: no pending ACKS, no PAUSE, no EOF
+            return
+        #--- prepare EOF state in ACK
         ack_data = struct.pack('?', self.eof)
+        #--- prepare ACKS
         ack_data += ''.join(map(lambda bid: struct.pack('i', bid), acks))
         if pause_time > 0:
+        #--- add extra "PAUSE REQUIRED" ACK
             ack_data += struct.pack('i', -1)
             ack_data += struct.pack('f', pause_time)
+            ack_data += struct.pack('f', self.input_limit_bytes_per_sec)
         ack_len = len(ack_data)
-        self.bytes_in_acks += ack_len 
+        self.output_bytes_in_acks += ack_len
         self.output_acks_counter += 1
-        self.blocks_to_ack = []
-        self.last_ack_moment = time.time()
+        self.input_blocks_to_ack = []
+        self.output_ack_last_time = time.time()
         if _Debug:
             if pause_time <= 0.0:
-                lg.out(self.debug_level+6, '<-out ACK %d %r %r %d/%d' % (
-                    self.stream_id, self.eof, acks, self.bytes_in, self.consumer.bytes_received))
+                lg.out(self.debug_level + 8, '<-out ACK %d %r %r %d/%d' % (
+                    self.stream_id, self.eof, acks,
+                    self.input_bytes_received,
+                    self.consumer.bytes_received))
             else:
-                lg.out(self.debug_level+6, '<-out ACK %d %r PAUSE:%r %r' % (
-                    self.stream_id, self.eof, pause_time, acks))
+                lg.out(self.debug_level + 8, '<-out ACK %d %r PAUSE:%r LIMIT:%r %r' % (
+                    self.stream_id, self.eof, pause_time, self.input_limit_bytes_per_sec, acks))
         self.producer.do_send_ack(self.stream_id, self.consumer, ack_data)
         return ack_len > 0
-            
-    def _stop_resending(self):
-        if self.loop:
-            if self.loop.active():
-                self.loop.cancel()
-            self.loop = None
 
     def _rtt_current(self):
-        rtt_current = self.rtt_avarage / self.rtt_counter
-        rtt_current = max(min(rtt_current, RTT_MAX_LIMIT), RTT_MIN_LIMIT)
+        rtt_current = self.output_rtt_avarage / self.output_rtt_counter
         return rtt_current
-    
+
     def _block_period_avarage(self):
         if self.input_blocks_counter == 0:
-            return 0  
-        return (time.time() - self.creation_time) / self.input_blocks_counter
+            return 0
+        return (time.time() - self.creation_time) / float(self.input_blocks_counter)
 
     def _last_ack_timed_out(self):
-        return time.time() - self.last_ack_moment > RTT_MAX_LIMIT
-        
+        return time.time() - self.output_ack_last_time > RTT_MAX_LIMIT / 2.0
+
+    def _last_block_timed_out(self):
+        return time.time() - self.input_block_last_time > RTT_MAX_LIMIT
+
+    def get_output_limit_from_remote(self):
+        return self.output_limit_bytes_per_sec_from_remote
+
+    def get_output_limit(self):
+        return self.output_limit_bytes_per_sec * self.output_limit_factor
+
+    def calculate_real_output_limit(self):
+        global _CurrentSendingAvarageRate
+        own_limit = self.get_output_limit()
+        avarage_limit = _CurrentSendingAvarageRate * 1.5
+        remote_limit = self.get_output_limit_from_remote()
+        return min(own_limit, avarage_limit, remote_limit)
+
+    def get_current_output_speed(self):
+        relative_time = time.time() - self.creation_time
+        if relative_time < 0.5:
+            return 0.0
+        return self.output_bytes_sent / relative_time

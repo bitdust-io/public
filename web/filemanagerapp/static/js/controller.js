@@ -164,7 +164,7 @@
             	debug.log('controller.upload.success', 
             		fullPath, $scope.fileNavigator.currentPath);
                 $scope.fileNavigator.request_stats();
-            	$scope.activeTasks.refresh();
+                $scope.activeTasks.refresh();
                 $scope.fileNavigator.refresh();
                 $('#localselector').modal('hide');
             }, function() {
@@ -269,6 +269,8 @@
             		$scope.fileNavigator.request_debug_info();
             	} else if (data.contact || data.supplier || data.customer) {
             		$scope.fileNavigator.request_stats_soft();
+            	} else if (data.stream || data.packet || data.connection) {
+                	$scope.activeTasks.refresh();
             	}
         	});
         	startUpdater();

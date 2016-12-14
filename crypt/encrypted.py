@@ -1,5 +1,5 @@
 #!/usr/bin/python
-#encrypted.py
+# encrypted.py
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
 #
@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -25,7 +25,7 @@
 #
 
 """
-.. module:: encrypted_block
+.. module:: encrypted_block.
 
 Higher level code interfaces with ``encrypted`` so that it does not have to deal
 with ECC stuff.  We write or read a large block at a time (maybe 64 MB say).
@@ -55,7 +55,12 @@ RAIDREAD:
     generate the read requests to get fetch the packets.
 """
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
+_Debug = False
+_DebugLevel = 12
+
+#------------------------------------------------------------------------------
 
 from logs import lg
 
@@ -66,13 +71,14 @@ from userid import my_id
 
 import key
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 class Block:
     """
-    A class to represent an encrypted Data block.
-    The only 2 things secret in here will be the ``EncryptedSessionKey`` and ``EncryptedData``.
-    Scrubbers may combine-packets/unserialize/inspect-blocks/check-signatures.
+    A class to represent an encrypted Data block. The only 2 things secret in
+    here will be the ``EncryptedSessionKey`` and ``EncryptedData``. Scrubbers
+    may combine-packets/unserialize/inspect-blocks/check-signatures.
 
     CreatorID              http://cate.com/id1.xml  - so people can check signature - says PK type too
     BackupID               Creator's ID for the backup this packet is part of
@@ -88,39 +94,42 @@ class Block:
     Signature              digital signature by Creator - verifiable by public key in creator identity
     """
 
-    def __init__ (self, 
-                  CreatorID,
-                  BackupID, 
-                  BlockNumber, 
-                  SessionKey, 
-                  SessionKeyType, 
-                  LastBlock, 
-                  Data, 
-                  EncryptFunc=key.EncryptLocalPK):
+    def __init__(self,
+                 CreatorID,
+                 BackupID,
+                 BlockNumber,
+                 SessionKey,
+                 SessionKeyType,
+                 LastBlock,
+                 Data,
+                 EncryptFunc=key.EncryptLocalPK):
         self.CreatorID = CreatorID
         self.BackupID = BackupID
         self.BlockNumber = BlockNumber
         self.EncryptedSessionKey = EncryptFunc(SessionKey)
         self.SessionKeyType = SessionKeyType
         self.Length = len(Data)
-        self.LastBlock = bool(LastBlock)               
-        self.EncryptedData = key.EncryptWithSessionKey(SessionKey, Data) # DataLonger
+        self.LastBlock = bool(LastBlock)
+        self.EncryptedData = key.EncryptWithSessionKey(SessionKey, Data)  # DataLonger
         self.Signature = None
         self.Sign()
-        lg.out(8, 'new data in %s' % self)
+        if _Debug:
+            lg.out(_DebugLevel, 'new data in %s' % self)
 
     def __repr__(self):
         return 'encrypted_block (BackupID=%s BlockNumber=%s Length=%s LastBlock=%s)' % (str(self.BackupID), str(self.BlockNumber), str(self.Length), self.LastBlock)
 
     def SessionKey(self):
         """
-        Return original SessionKey from ``EncryptedSessionKey`` using ``crypt.key.DecryptLocalPK()`` method.
+        Return original SessionKey from ``EncryptedSessionKey`` using
+        ``crypt.key.DecryptLocalPK()`` method.
         """
         return key.DecryptLocalPK(self.EncryptedSessionKey)
 
     def GenerateHashBase(self):
         """
-        Generate a single string with all data fields, used to create a hash for that ``encrypted_block``.
+        Generate a single string with all data fields, used to create a hash
+        for that ``encrypted_block``.
         """
         sep = "::::"
         StringToHash = self.CreatorID
@@ -176,7 +185,8 @@ class Block:
 
     def Data(self):
         """
-        Return an original data, decrypt using ``EnctryptedData`` and ``EncryptedSessionKey``.
+        Return an original data, decrypt using ``EnctryptedData`` and
+        ``EncryptedSessionKey``.
         """
         SessionKey = self.SessionKey()
         ClearLongData = key.DecryptWithSessionKey(SessionKey, self.EncryptedData)
@@ -184,12 +194,14 @@ class Block:
 
     def Serialize(self):
         """
-        Create a string that stores all data fields of that ``encrypted.Block`` object.
+        Create a string that stores all data fields of that ``encrypted.Block``
+        object.
         """
         e = misc.ObjectToString(self)
         return e
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def Unserialize(data):
     """
@@ -197,8 +209,3 @@ def Unserialize(data):
     """
     newobject = misc.StringToObject(data)
     return newobject
-
-
-
-
-

@@ -1,5 +1,5 @@
 #!/usr/bin/python
-#bpio.py
+# bpio.py
 #
 # Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
 #
@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -25,16 +25,16 @@
 #
 
 """
-.. module:: bpio
+.. module:: bpio.
 
 This module is for simple BitDust routines that do not require importing any of our code.:
     - print logs
     - file system IO operations
-    - pack/unpack lists and dictionaries into strings 
+    - pack/unpack lists and dictionaries into strings
     - some methods to operate with file system paths
     - list Linux mount points and Windows drives
     - methods to manage system processes
-    
+
 Most used method here is ``log`` - prints a log string.
 
 TODO: need to do some refactoring here
@@ -62,23 +62,29 @@ X11isRunning = None
 
 #------------------------------------------------------------------------------
 
+
 def init():
     """
     This method must be called firstly, before any logs will be printed.
-    This installs a system locale, so all output messages will have a correct encoding. 
+
+    This installs a system locale, so all output messages will have a
+    correct encoding.
     """
     InstallLocale()
     if Linux() or Mac():
         lg.setup_unbuffered_stdout()
     # StartCountingOpenedFiles()
-        
+
+
 def shutdown():
     """
-    This is the last method to be invoked by the program before main process will stop.
+    This is the last method to be invoked by the program before main process
+    will stop.
     """
     lg.restore_original_stdout()
     lg.close_log_file()
     lg.disable_logs()
+
 
 def InstallLocale():
     """
@@ -100,16 +106,19 @@ def InstallLocale():
         pass
     return LocaleInstalled
 
+
 def ostype():
     """
     Return current platform: "Linux", "Windows", "Darwin".
-    MacOS is not supported yet.
-    Don't print anything in ostype because used in bppipe.py and stdout goes to tar file.
+
+    MacOS is not supported yet. Don't print anything in ostype because
+    used in bppipe.py and stdout goes to tar file.
     """
     global PlatformInfo
     if PlatformInfo is None:
         PlatformInfo = platform.uname()
     return PlatformInfo[0]
+
 
 def osversion():
     """
@@ -120,11 +129,14 @@ def osversion():
         PlatformInfo = platform.uname()
     return PlatformInfo[2]
 
+
 def osinfo():
     """
-    Return full OS info, like: "Linux-2.6.32.9-rscloud-x86_64-with-Ubuntu-12.04-precise" or "Windows-XP-5.1.2600-SP3".
+    Return full OS info, like: "Linux-2.6.32.9-rscloud-x86_64-with-
+    Ubuntu-12.04-precise" or "Windows-XP-5.1.2600-SP3".
     """
     return str(platform.platform()).strip()
+
 
 def osinfofull():
     """
@@ -152,13 +164,15 @@ def osinfofull():
     o += '=====================================================\n'
     return o
 
+
 def windows_version():
     """
-    Useful to detect current Windows version: XP, Vista, 7 or 8.  
+    Useful to detect current Windows version: XP, Vista, 7 or 8.
     """
     if getattr(sys, 'getwindowsversion', None) is not None:
         return sys.getwindowsversion()[0]
     return 0
+
 
 def Linux():
     """
@@ -166,11 +180,13 @@ def Linux():
     """
     return ostype() == "Linux"
 
+
 def Windows():
     """
     Return True if current platform is Windows.
     """
     return ostype() == "Windows"
+
 
 def Mac():
     """
@@ -178,15 +194,17 @@ def Mac():
     """
     return ostype() == "Darwin"
 
+
 def isFrozen():
     """
     Return True if BitDust is running from exe, not from sources.
     """
     return main_is_frozen()
 
+
 def isConsoled():
     """
-    Return True if output can be sent to console
+    Return True if output can be sent to console.
     """
     if getExecutableFilename().count('pythonw.exe'):
         return False
@@ -196,18 +214,21 @@ def isConsoled():
 
 #-------------------------------------------------------------------------------
 
+
 def list_dir_safe(dirpath):
     """
-    A safe wrapper around built-in ``os.listdir()`` method. 
+    A safe wrapper around built-in ``os.listdir()`` method.
     """
     try:
         return os.listdir(dirpath)
     except:
         return []
 
+
 def list_dir_recursive(dirpath):
     """
-    Recursively scan files and folders under ``dirpath`` and return them in the list.
+    Recursively scan files and folders under ``dirpath`` and return them in the
+    list.
     """
     r = []
     for name in os.listdir(dirpath):
@@ -218,25 +239,30 @@ def list_dir_recursive(dirpath):
             r.append(full_name)
     return r
 
+
 def traverse_dir_recursive(callback, basepath, relpath=''):
     """
     Call ``callback`` method for every file and folder under ``basepath``.
-    If method ``callback`` can returns False traverse process will not go deeper.
-    Useful to count size of the whole folder. 
+
+    If method ``callback`` can returns False traverse process will not
+    go deeper. Useful to count size of the whole folder.
     """
     for name in os.listdir(basepath):
         realpath = os.path.join(basepath, name)
-        subpath = name if relpath == '' else relpath+'/'+name
+        subpath = name if relpath == '' else relpath + '/' + name
         go_down = callback(realpath, subpath, name)
         if os.path.isdir(realpath) and go_down:
             traverse_dir_recursive(callback, realpath, subpath)
 
+
 def rmdir_recursive(dirpath, ignore_errors=False, pre_callback=None):
     """
     Remove a directory, and all its contents if it is not already empty.
-        http://mail.python.org/pipermail/python-list/2000-December/060960.html
-    If ``ignore_errors`` is True process will continue even if some errors happens.
-    Method ``pre_callback`` can be used to decide before remove the file. 
+
+    http://mail.python.org/pipermail/python-
+    list/2000-December/060960.html If ``ignore_errors`` is True process
+    will continue even if some errors happens. Method ``pre_callback``
+    can be used to decide before remove the file.
     """
     for name in os.listdir(dirpath):
         full_name = os.path.join(dirpath, name)
@@ -244,7 +270,7 @@ def rmdir_recursive(dirpath, ignore_errors=False, pre_callback=None):
         # the file/directory either, so turn that on
         if not os.access(full_name, os.W_OK):
             try:
-                os.chmod(full_name, 0600)
+                os.chmod(full_name, 0o600)
             except:
                 continue
         if os.path.isdir(full_name):
@@ -252,8 +278,8 @@ def rmdir_recursive(dirpath, ignore_errors=False, pre_callback=None):
         else:
             if pre_callback:
                 if not pre_callback(full_name):
-                    continue   
-            if os.path.isfile(full_name):             
+                    continue
+            if os.path.isfile(full_name):
                 if not ignore_errors:
                     os.remove(full_name)
                 else:
@@ -273,6 +299,7 @@ def rmdir_recursive(dirpath, ignore_errors=False, pre_callback=None):
         except:
             lg.out(6, 'bpio.rmdir_recursive can not remove dir ' + dirpath)
 
+
 def getDirectorySize(directory, include_subfolders=True):
     """
     Platform dependent way to calculate folder size.
@@ -285,11 +312,12 @@ def getDirectorySize(directory, include_subfolders=True):
         MASK = win32con.FILE_ATTRIBUTE_DIRECTORY | win32con.FILE_ATTRIBUTE_SYSTEM
         REQUIRED = win32con.FILE_ATTRIBUTE_DIRECTORY
         FindFilesW = win32file.FindFilesW
+
         def _get_dir_size(path):
             total_size = 0
             try:
                 items = FindFilesW(path + r'\*')
-            except pywintypes.error, ex:
+            except pywintypes.error as ex:
                 return total_size
             for item in items:
                 total_size += item[5]
@@ -300,7 +328,7 @@ def getDirectorySize(directory, include_subfolders=True):
             return total_size
         return _get_dir_size(directory)
     dir_size = 0
-    if  not include_subfolders:
+    if not include_subfolders:
         for filename in os.listdir(directory):
             filepath = os.path.abspath(os.path.join(directory, filename))
             if os.path.isfile(filepath):
@@ -321,31 +349,32 @@ def getDirectorySize(directory, include_subfolders=True):
 
 #-------------------------------------------------------------------------------
 
-### AtomicSave:  Save either all of data to file, or don't make file
-##def AtomicSave(filename, data):
+# AtomicSave:  Save either all of data to file, or don't make file
+# def AtomicSave(filename, data):
 ##    tmp = '%s.tmp' % filename
 ##    f = file(tmp, 'wb')
-##    f.write(data)
-##    os.fsync(f)
-##    f.close()
+# f.write(data)
+# os.fsync(f)
+# f.close()
 ##    os.rename(tmp, filename)
+
 
 def AtomicWriteFile(filename, data):
     """
-    A smart way to write data to binary file. 
-    Return True if success.
-    This should be atomic operation - data is written to another temporary file and than renamed. 
+    A smart way to write data to binary file. Return True if success.
+
+    This should be atomic operation - data is written to another temporary file and than renamed.
     """
     try:
         tmpfilename = filename + ".new"
         f = open(tmpfilename, "wb")
         f.write(data)
         f.flush()
-        #from http://docs.python.org/library/os.html on os.fsync
+        # from http://docs.python.org/library/os.html on os.fsync
         os.fsync(f.fileno())
         f.close()
-        #in Unix the rename will overwrite an existing file,
-        #but in Windows it fails, so have to remove existing
+        # in Unix the rename will overwrite an existing file,
+        # but in Windows it fails, so have to remove existing
         if Windows() and os.path.exists(filename):
             os.remove(filename)
         os.rename(tmpfilename, filename)
@@ -353,15 +382,17 @@ def AtomicWriteFile(filename, data):
         lg.out(1, 'bpio.AtomicWriteFile ERROR ' + str(filename))
         lg.exc()
         try:
-            f.close() # make sure file gets closed
+            f.close()  # make sure file gets closed
         except:
             pass
         return False
     return True
 
-def AtomicAppendFile(filename, data, mode='a'): 
+
+def AtomicAppendFile(filename, data, mode='a'):
     """
     Same as AtomicWriteFile but do not erase previous data in the file.
+
     TODO: this is not atomic right now
     """
     try:
@@ -374,18 +405,21 @@ def AtomicAppendFile(filename, data, mode='a'):
         lg.out(1, 'bpio.AtomicAppendFile ERROR ' + str(filename))
         lg.exc()
         try:
-            f.close() # make sure file gets closed
+            f.close()  # make sure file gets closed
         except:
             lg.exc()
         return False
     return True
 
+
 def WriteFile(filename, data):
     """
     Calls ``AtomicWriteFile``, just an interface.
+
     PREPRO - probably all writes should be Atomic, so we should write to temp file then rename.
     """
     return AtomicWriteFile(filename, data)
+
 
 def WriteFileSimple(filename, data, mode="w"):
     """
@@ -400,14 +434,15 @@ def WriteFileSimple(filename, data, mode="w"):
         return False
     return True
 
+
 def ReadBinaryFile(filename):
     """
-    A smart way to read binary file.
-    Return empty string in case of:
-        - path not exist 
-        - process got no read access to the file
-        - some read error happens
-        - file is really empty
+    A smart way to read binary file. Return empty string in case of:
+
+    - path not exist
+    - process got no read access to the file
+    - some read error happens
+    - file is really empty
     """
     if not os.path.isfile(filename):
         return ''
@@ -421,10 +456,12 @@ def ReadBinaryFile(filename):
     except:
         lg.exc()
         return ''
-    
+
+
 def ReadTextFile(filename):
     """
     Read text file and return its content.
+
     Also replace line endings: \r\n with \n - convert to Linux file format.
     """
     if not os.path.isfile(filename):
@@ -432,20 +469,22 @@ def ReadTextFile(filename):
     if not os.access(filename, os.R_OK):
         return ''
     try:
-        file=open(filename,"r")
-        data=file.read()
+        file = open(filename, "r")
+        data = file.read()
         file.close()
         # Windows/Linux trouble with text files
-        return data.replace('\r\n','\n')
+        return data.replace('\r\n', '\n')
     except:
         lg.exc()
     return ''
 
 #-------------------------------------------------------------------------------
 
+
 def _read_data(path):
     """
-    Another way to read text file, return None if path not exist or have no read access to the file. 
+    Another way to read text file, return None if path not exist or have no
+    read access to the file.
     """
     if not os.path.exists(path):
         return None
@@ -456,9 +495,11 @@ def _read_data(path):
     fin.close()
     return src
 
+
 def _write_data(path, src):
     """
     Write data to binary file.
+
     Very close to ``AtomicWriteFile`` but do some checking before write.
     """
     temp_path = path + '.tmp'
@@ -483,6 +524,7 @@ def _write_data(path, src):
         lg.out(1, 'bpio._write_data ERROR renaming %s to %s' % (str(temp_path), str(path)))
     return True
 
+
 def _append_data(path, src):
     """
     Append data to text file.
@@ -499,19 +541,23 @@ def _append_data(path, src):
 
 #-------------------------------------------------------------------------------
 
+
 def _pack_list(lst):
     """
     The core method, convert list of strings to one big string.
-    Every line in the string will store a single item from list.
-    First line will keep a number of items.
-    So items in the list should be a strings and not contain "\n".\
-    This is useful to store a list of users IDs in the local file.
+
+    Every line in the string will store a single item from list. First
+    line will keep a number of items. So items in the list should be a
+    strings and not contain "\n".\ This is useful to store a list of
+    users IDs in the local file.
     """
-    return str(len(lst))+'\n'+'\n'.join(lst)
+    return str(len(lst)) + '\n' + '\n'.join(lst)
+
 
 def _unpack_list(src):
     """
     The core method, read a list from string.
+
     Return a tuple : (resulted list, list with lines from rest string or None).
     First line of the ``src`` should contain a number of items in the list.
     """
@@ -531,6 +577,7 @@ def _unpack_list(src):
         return res[:length], res[length:]
     return res, None
 
+
 def _read_list(path):
     """
     Read list from file on disk.
@@ -540,19 +587,22 @@ def _read_list(path):
         return None
     return _unpack_list(src)[0]
 
+
 def _write_list(path, lst):
     """
     Write a list to the local file.
     """
     return _write_data(path, _pack_list(lst))
 
+
 def _pack_dict(dictionary, sort=False):
     """
     The core method, convert dictionary to the string.
-    Every line in resulted string will contain a key, value pair, separated with single space.
-    So keys and must not contain spaces.
-    Values must not contain new lines.
-    If ``sort`` is True the resulted string will be sorted by keys.
+
+    Every line in resulted string will contain a key, value pair,
+    separated with single space. So keys and must not contain spaces.
+    Values must not contain new lines. If ``sort`` is True the resulted
+    string will be sorted by keys.
     """
     if sort:
         seq = sorted(dictionary.keys())
@@ -560,9 +610,11 @@ def _pack_dict(dictionary, sort=False):
         seq = dictionary.keys()
     return '\n'.join(map(lambda k: '%s %s' % (k, str(dictionary[k])), seq))
 
+
 def _unpack_dict_from_list(lines):
     """
-    Read dictionary from list, every item in the list is a string with (key, value) pair, separated with space.
+    Read dictionary from list, every item in the list is a string with (key,
+    value) pair, separated with space.
     """
     dct = {}
     for line in lines:
@@ -572,6 +624,7 @@ def _unpack_dict_from_list(lines):
         dct[words[0]] = ' '.join(words[1:])
     return dct
 
+
 def _unpack_dict(src):
     """
     The core method, creates dictionary from string.
@@ -579,15 +632,18 @@ def _unpack_dict(src):
     lines = src.split('\n')
     return _unpack_dict_from_list(lines)
 
+
 def _read_dict(path, default=None):
     """
     Read dictionary from local file.
-    If file not exist or no read access - returns ``default`` value. 
+
+    If file not exist or no read access - returns ``default`` value.
     """
     src = _read_data(path)
     if src is None:
         return default
     return _unpack_dict(src.strip())
+
 
 def _write_dict(path, dictionary, sort=False):
     """
@@ -596,23 +652,31 @@ def _write_dict(path, dictionary, sort=False):
     data = _pack_dict(dictionary, sort)
     return _write_data(path, data)
 
+
 def _dir_exist(path):
     """
     Just calls os.path.isdir() method.
     """
     return os.path.isdir(path)
 
+
 def _dir_make(path):
     """
-    Creates a new folder on disk, call built-in os.mkdir() method. Set access mode to 0777.
+    Creates a new folder on disk, call built-in os.mkdir() method.
+
+    Set access mode to 0777.
     """
-    os.mkdir(path, 0777)
+    os.mkdir(path, 0o777)
+
 
 def _dirs_make(path):
     """
-    Create a new folder and all sub dirs, call built-in os.makedirs() method. Set access mode to 0777.
+    Create a new folder and all sub dirs, call built-in os.makedirs() method.
+
+    Set access mode to 0777.
     """
-    os.makedirs(path, 0777)
+    os.makedirs(path, 0o777)
+
 
 def _dir_remove(path):
     """
@@ -620,13 +684,16 @@ def _dir_remove(path):
     """
     rmdir_recursive(path)
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def backup_and_remove(path):
     """
-    Backup and remove the file. Backed up file will have ".backup" at the end.
-    In fact it just tries to rename the original file, but also do some checking before.
-    If file with ".backup" already exist it will try to remove it before. 
+    Backup and remove the file.
+
+    Backed up file will have ".backup" at the end. In fact it just tries
+    to rename the original file, but also do some checking before. If
+    file with ".backup" already exist it will try to remove it before.
     """
     bkpath = path + '.backup'
     if not os.path.exists(path):
@@ -649,9 +716,11 @@ def backup_and_remove(path):
             lg.out(1, 'bpio.backup_and_remove ERROR can not remove file ' + path)
             lg.exc()
 
-def restore_and_remove(path, overwrite_existing = False):
+
+def restore_and_remove(path, overwrite_existing=False):
     """
-    Restore file and remove the backed up copy. 
+    Restore file and remove the backed up copy.
+
     Just renames the file with ".backup" at the end to its 'true' name.
     This is reverse method to ``backup_and_remove``.
     """
@@ -672,6 +741,7 @@ def restore_and_remove(path, overwrite_existing = False):
         lg.out(1, 'bpio.restore_and_remove ERROR can not rename file %s to %s' % (path, bkpath))
         lg.exc()
 
+
 def remove_backuped_file(path):
     """
     Tries to remove the file with ".backup" at the end.
@@ -685,7 +755,8 @@ def remove_backuped_file(path):
         lg.out(1, 'bpio.remove_backuped_file ERROR can not remove file ' + bkpath)
         lg.exc()
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def LowerPriority():
     """
@@ -710,7 +781,8 @@ def LowerPriority():
     else:
         import os
         os.nice(20)
-        
+
+
 def HigherPriority():
     try:
         sys.getwindowsversion()
@@ -731,13 +803,14 @@ def HigherPriority():
 
 #-------------------------------------------------------------------------------
 
+
 def shortPath(path):
     """
     Get absolute 'short' path in Unicode, converts to 8.3 windows filenames.
     """
     path_ = os.path.abspath(path)
     if not Windows():
-        if type(path_) != unicode:
+        if not isinstance(path_, unicode):
             return unicode(path_)
         return path_
     if not os.path.exists(path_):
@@ -753,13 +826,15 @@ def shortPath(path):
         lg.exc()
         return unicode(path_)
 
+
 def longPath(path):
     """
-    Get absolute 'long' path in Unicode, convert to full path, even if it was in 8.3 format.
+    Get absolute 'long' path in Unicode, convert to full path, even if it was
+    in 8.3 format.
     """
     path_ = os.path.abspath(path)
     if not Windows():
-        if type(path_) != unicode:
+        if not isinstance(path_, unicode):
             return unicode(path_)
         return path_
     if not os.path.exists(path_):
@@ -772,20 +847,21 @@ def longPath(path):
         lg.exc()
     return unicode(path_)
 
+
 def _encode(s):
     """
-    If ``s`` is unicode - encode to utf-8, otherwise return ``s``. 
-    """    
+    If ``s`` is unicode - encode to utf-8, otherwise return ``s``.
+    """
     if isinstance(s, unicode):
         return s.encode('utf-8')
     return s
 
-#def portablePath(path):
+# def portablePath(path):
 #    """
-#    For Windows changes all separators to Linux format: 
-#        - "\\" -> "/" 
+#    For Windows changes all separators to Linux format:
+#        - "\\" -> "/"
 #        - "\" -> "/"
-#    If ``path`` is unicode convert to utf-8. 
+#    If ``path`` is unicode convert to utf-8.
 #    """
 #    p = path
 #    if Windows():
@@ -798,11 +874,12 @@ def _encode(s):
 def portablePath(path):
     """
     Fix path to fit for our use:
-        - do convert to absolute path
-        - for Windows: 
-            - change all separators to Linux format: "\\"->"/" and "\"=>"/"
-            - convert disk letter to lower case
-        - convert to unicode 
+
+    - do convert to absolute path
+    - for Windows:
+        - change all separators to Linux format: "\\"->"/" and "\"=>"/"
+        - convert disk letter to lower case
+    - convert to unicode
     """
     if path == '' or path == '/':
         return path
@@ -815,7 +892,7 @@ def portablePath(path):
         # p = p.encode('utf-8')
         p = unicode(p)
     if Windows():
-        p = p.replace('\\', '/') # .replace('\\\\', '/')
+        p = p.replace('\\', '/')  # .replace('\\\\', '/')
         if len(p) >= 2:
             if p[1] == ':':
                 p = p[0].lower() + p[1:]
@@ -823,7 +900,8 @@ def portablePath(path):
                 p = '\\\\' + p[2:]
     if p.endswith('/') and len(p) > 1:
         p = p.rstrip('/')
-    return p # unicode(p) #.encode('utf-8')
+    return p  # unicode(p) #.encode('utf-8')
+
 
 def pathExist(localpath):
     """
@@ -837,6 +915,7 @@ def pathExist(localpath):
     if Windows() and pathIsNetworkLocation(localpath):
         return True
     return False
+
 
 def pathIsDir(localpath):
     """
@@ -866,10 +945,11 @@ def pathIsDir(localpath):
             st = os.path.stat(localpath)
             return stat.S_ISDIR(st.st_mode)
         except:
-            return False 
+            return False
     # now we are in really big trouble
     raise Exception('Path not exist: %s' % p)
     return False
+
 
 def pathIsDriveLetter(path):
     """
@@ -883,6 +963,7 @@ def pathIsDriveLetter(path):
     if not p[0].isalpha():
         return False
     return True
+
 
 def pathIsNetworkLocation(path):
     """
@@ -900,12 +981,14 @@ def pathIsNetworkLocation(path):
         return False
     return True
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def main_is_frozen():
     """
     Return True if BitDust is started from .exe not from sources.
-        http://www.py2exe.org/index.cgi/HowToDetermineIfRunningFromExe
+
+    http://www.py2exe.org/index.cgi/HowToDetermineIfRunningFromExe
     """
     return (hasattr(sys, "frozen") or       # new py2exe
             hasattr(sys, "importers") or    # old py2exe
@@ -914,19 +997,24 @@ def main_is_frozen():
 
 def isGUIpossible():
     """
+    
     """
     # return False # TODO
     if Windows():
         return True
+    if Mac():
+        return True
     if Linux():
         return X11_is_running()
     return False
-    
+
 
 def X11_is_running():
     """
     Linux method to check if BitDust GUI is possible.
-        http://stackoverflow.com/questions/1027894/detect-if-x11-is-available-python
+
+    http://stackoverflow.com/questions/1027894/detect-if-x11-is-
+    available-python
     """
     global X11isRunning
     if not Linux():
@@ -940,10 +1028,11 @@ def X11_is_running():
         result = p.returncode == 0
     except:
         result = False
-    X11isRunning = result 
+    X11isRunning = result
     return X11isRunning
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def getExecutableDir():
     """
@@ -958,6 +1047,7 @@ def getExecutableDir():
             path = os.path.dirname(os.path.abspath(sys.argv[0]))
     return unicode(path)
 
+
 def getExecutableFilename():
     """
     A smart way to detect executable file name.
@@ -970,14 +1060,16 @@ def getExecutableFilename():
 #        return shortPath(path)
     return unicode(path)
 
+
 def getExecutableP2PDir():
     """
-    Tries to locate the p2p sub folder.  
+    Tries to locate the p2p sub folder.
     """
     execdir = getExecutableDir()
     if os.path.isdir(os.path.join(execdir, 'p2p')):
         return os.path.join(execdir, 'p2p')
     return execdir
+
 
 def getUserName():
     """
@@ -1002,6 +1094,7 @@ def getUserName():
 
 #------------------------------------------------------------------------------
 
+
 def listHomeDirLinux():
     """
     Just return a list of files and folders in the user home dir.
@@ -1015,10 +1108,12 @@ def listHomeDirLinux():
             rootlist.append(dirname)
     return rootlist
 
+
 def listLocalDrivesWindows():
     """
     Return a list of drive letters under Windows.
-    This list should include only "fixed", "writable" and "real" drives, 
+
+    This list should include only "fixed", "writable" and "real" drives,
     not include cd drives, network drives, USB drives, etc.
     """
     if not Windows():
@@ -1027,13 +1122,14 @@ def listLocalDrivesWindows():
     try:
         import win32api
         import win32file
-        drives = (drive for drive in win32api.GetLogicalDriveStrings().split ("\000") if drive)
+        drives = (drive for drive in win32api.GetLogicalDriveStrings().split("\000") if drive)
         for drive in drives:
             if win32file.GetDriveType(drive) == 3:
                 rootlist.append(drive)
     except:
         lg.exc()
     return rootlist
+
 
 def listRemovableDrivesWindows():
     """
@@ -1047,7 +1143,7 @@ def listRemovableDrivesWindows():
             mask = 1 << d
             if drivebits & mask:
                 # here if the drive is at least there
-                drname='%c:\\' % chr(ord('A')+d)
+                drname = '%c:\\' % chr(ord('A') + d)
                 t = win32file.GetDriveType(drname)
                 if t == win32file.DRIVE_REMOVABLE:
                     l.append(drname)
@@ -1055,21 +1151,25 @@ def listRemovableDrivesWindows():
         lg.exc()
     return l
 
+
 def listRemovableDrivesLinux():
     """
     Return a list of "removable" drives under Linux.
-    The same idea with ``listRemovableDrivesWindows``.  
+
+    The same idea with ``listRemovableDrivesWindows``.
     """
     try:
         return map(lambda x: os.path.join('/media', x), os.listdir('/media'))
     except:
         return []
 
+
 def listRemovableDrives():
     """
     Platform-independent way to get a list of "removable" locations.
-    Used to detect the location to write a copy of Private Key.
-    Should detect USB flash drives.
+
+    Used to detect the location to write a copy of Private Key. Should
+    detect USB flash drives.
     """
     if Linux():
         return listRemovableDrivesLinux()
@@ -1077,16 +1177,18 @@ def listRemovableDrives():
         return listRemovableDrivesWindows()
     return []
 
+
 def listMountPointsLinux():
     """
     Return a list of mount points under Linux.
+
     Used to detect locations for donated space and local backups.
     """
     mounts = os.popen('mount')
     result = []
     if Linux():
         mch = re.compile('^(.+?) on (.+?) type .+?$')
-    else: # Mac
+    else:  # Mac
         mch = re.compile('^(.+?) on (.+?).*?$')
     # mo = re.match('^(.+?) on (.+?) type .+?$', line)
     for line in mounts.readlines():
@@ -1097,7 +1199,8 @@ def listMountPointsLinux():
             if device.startswith('/dev/'):
                 result.append(mount_point)
     return result
-        
+
+
 def getMountPointLinux(path):
     """
     Return mount point for given path.
@@ -1109,12 +1212,14 @@ def getMountPointLinux(path):
 
 #-------------------------------------------------------------------------------
 
+
 def find_process(applist):
     """
     A portable method to search executed processes.
+
     You can provide a name or regexp to scan.
     """
-    try: 
+    try:
         import psutil
         pidsL = []
         for p in psutil.process_iter():
@@ -1146,6 +1251,7 @@ def find_process(applist):
 def kill_process(pid):
     """
     Call to OS ``kill`` procedure. Portable.
+
     ``pid`` - process id.
     """
     ostype = platform.uname()[0]
@@ -1157,7 +1263,7 @@ def kill_process(pid):
 
 def list_processes_linux():
     """
-    This function will return an iterator with the process pid/cmdline tuple
+    This function will return an iterator with the process pid/cmdline tuple.
 
     :return: pid, cmdline tuple via iterator
     :rtype: iterator
@@ -1174,11 +1280,11 @@ def list_processes_linux():
         try:
             # cmdline represents the command whith which the process was started
             f = open("%s/cmdline" % pid_path)
-            pid = pid_path.split("/")[2] # get the PID
+            pid = pid_path.split("/")[2]  # get the PID
             # we replace the \x00 to spaces to make a prettier output from kernel
             cmdline = f.read().replace("\x00", " ").rstrip()
             f.close()
-    
+
             yield (pid, cmdline)
         except:
             pass
@@ -1186,7 +1292,9 @@ def list_processes_linux():
 
 def find_process_linux(applist):
     """
-    You can look for some process name, give a keywords or regexp strings list  to search.
+    You can look for some process name, give a keywords or regexp strings list
+    to search.
+
     This is for Linux.
     """
     pidsL = []
@@ -1273,11 +1381,14 @@ def kill_process_win32(pid):
         return False
     return True
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
+
 
 def detect_number_of_cpu_cores():
-    """Detects the number of effective CPUs in the system"""
-    #for Linux, Unix and MacOS
+    """
+    Detects the number of effective CPUs in the system.
+    """
+    # for Linux, Unix and MacOS
     if hasattr(os, "sysconf"):
         if "SC_NPROCESSORS_ONLN" in os.sysconf_names:
             #Linux and Unix
@@ -1285,13 +1396,12 @@ def detect_number_of_cpu_cores():
             if isinstance(ncpus, int) and ncpus > 0:
                 return ncpus
         else:
-            #MacOS X
+            # MacOS X
             return int(os.popen2("sysctl -n hw.ncpu")[1].read())
-    #for Windows
+    # for Windows
     if "NUMBER_OF_PROCESSORS" in os.environ:
         ncpus = int(os.environ["NUMBER_OF_PROCESSORS"])
         if ncpus > 0:
             return ncpus
-    #return the default value
-    return 1    
-
+    # return the default value
+    return 1

@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Affero General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Affero General Public License
 # along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -46,7 +46,7 @@
 # THE POSSIBILITY OF SUCH DAMAGE.
 
 """
-Parallel Python Software, Execution Server
+Parallel Python Software, Execution Server.
 
 http://www.parallelpython.com - updates, documentation, examples and support
 forums
@@ -75,7 +75,7 @@ _RECONNECT_WAIT_TIME = 5
 try:
     set
 except NameError:
-    from sets import Set as set 
+    from sets import Set as set
 
 _USE_SUBPROCESS = False
 try:
@@ -88,7 +88,8 @@ except ImportError:
 def is_frozen():
     """
     Return True if BitDust is started from .exe not from sources.
-        http://www.py2exe.org/index.cgi/HowToDetermineIfRunningFromExe
+
+    http://www.py2exe.org/index.cgi/HowToDetermineIfRunningFromExe
     """
     if hasattr(sys, "frozen") or hasattr(sys, "importers"):
         return True
@@ -96,15 +97,18 @@ def is_frozen():
     if imp.is_frozen("__main__"):
         return True
     return False
-    
-    
+
+
 class _Task(object):
-    """Class describing single task (job)
+    """
+    Class describing single task (job)
     """
 
     def __init__(self, server, tid, callback=None,
-            callbackargs=(), group='default'):
-        """Initializes the task"""
+                 callbackargs=(), group='default'):
+        """
+        Initializes the task.
+        """
         self.lock = thread.allocate_lock()
         self.lock.acquire()
         self.tid = tid
@@ -118,9 +122,11 @@ class _Task(object):
         self.cancelled = False
 
     def finalize(self, sresult):
-        """Finalizes the task.
+        """
+        Finalizes the task.
 
-           For internal use only"""
+        For internal use only
+        """
         if self.cancelled:
             self.sresult = None
         else:
@@ -131,7 +137,9 @@ class _Task(object):
         self.finished = True
 
     def __call__(self, raw_result=False):
-        """Retrieves result of the task"""
+        """
+        Retrieves result of the task.
+        """
         self.wait()
 
         if not self.unpickled and not raw_result:
@@ -143,13 +151,17 @@ class _Task(object):
             return self.result
 
     def wait(self):
-        """Waits for the task"""
+        """
+        Waits for the task.
+        """
         if not self.finished:
             self.lock.acquire()
             self.lock.release()
 
     def __unpickle(self):
-        """Unpickles the result of the task"""
+        """
+        Unpickles the result of the task.
+        """
         if self.sresult is not None:
             self.result, sout = pickle.loads(self.sresult)
             if len(sout) > 0:
@@ -163,25 +175,30 @@ class _Task(object):
 
 
 class _Worker(object):
-    """Local worker class
+    """
+    Local worker class.
     """
     # command = '\"' + sys.executable + '\" -u \"' + 'bpworker.py' + '\"'
     # if is_frozen():
     #     command = 'bpworker.exe'
     if is_frozen():
-        command = ['bpworker.exe',]
+        command = ['bpworker.exe', ]
     else:
         command = [sys.executable, '-u', 'bpworker.py']
 
     def __init__(self, restart_on_free, pickle_proto):
-        """Initializes local worker"""
+        """
+        Initializes local worker.
+        """
         self.restart_on_free = restart_on_free
         self.pickle_proto = pickle_proto
         # print '_Worker', self.command, os.path.abspath('.')
         self.start()
 
     def start(self):
-        """Starts local worker"""
+        """
+        Starts local worker.
+        """
         if _USE_SUBPROCESS:
             if sys.platform.startswith("win"):
                 import win32process
@@ -192,7 +209,7 @@ class _Worker(object):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     universal_newlines=False,
-                    creationflags = win32process.CREATE_NO_WINDOW,)
+                    creationflags=win32process.CREATE_NO_WINDOW,)
             else:
                 proc = subprocess.Popen(
                     self.command,
@@ -209,17 +226,23 @@ class _Worker(object):
         self.is_free = True
 
     def stop(self):
-        """Stops local worker"""
+        """
+        Stops local worker.
+        """
         self.is_free = False
         self.t.close()
 
     def restart(self):
-        """Restarts local worker"""
+        """
+        Restarts local worker.
+        """
         self.stop()
         self.start()
 
     def free(self):
-        """Frees local worker"""
+        """
+        Frees local worker.
+        """
         if self.restart_on_free:
             self.restart()
         else:
@@ -227,11 +250,14 @@ class _Worker(object):
 
 
 class _RWorker(pptransport.CSocketTransport):
-    """Remote worker class
+    """
+    Remote worker class.
     """
 
     def __init__(self, host, port, secret, message=None, persistent=True):
-        """Initializes remote worker"""
+        """
+        Initializes remote worker.
+        """
         self.persistent = persistent
         self.host = host
         self.port = port
@@ -239,23 +265,27 @@ class _RWorker(pptransport.CSocketTransport):
         self.address = (host, port)
         self.id = host + ":" + str(port)
         logging.info("Creating Rworker id=%s persistent=%s"
-                % (self.id, persistent))
+                     % (self.id, persistent))
         self.connect(message)
         self.is_free = True
 
     def __del__(self):
-        """Closes connection with remote server"""
+        """
+        Closes connection with remote server.
+        """
         self.close()
 
     def connect(self, message=None):
-        """Connects to a remote server"""
+        """
+        Connects to a remote server.
+        """
         while True:
             try:
                 pptransport.SocketTransport.__init__(self)
                 self._connect(self.host, self.port)
                 if not self.authenticate(self.secret):
                     logging.error("Authentication failed for host=%s, port=%s"
-                            % (self.host, self.port))
+                                  % (self.host, self.port))
                     return False
                 if message:
                     self.send(message)
@@ -264,21 +294,24 @@ class _RWorker(pptransport.CSocketTransport):
             except:
                 if not self.persistent:
                     logging.info("Deleting from queue Rworker %s"
-                            % (self.id, ))
+                                 % (self.id, ))
                     return False
 #                print sys.excepthook(*sys.exc_info())
-                logging.info("Failed to reconnect with " \
-                        "(host=%s, port=%i), will try again in %i s"
-                        % (self.host, self.port, _RECONNECT_WAIT_TIME))
+                logging.info("Failed to reconnect with "
+                             "(host=%s, port=%i), will try again in %i s"
+                             % (self.host, self.port, _RECONNECT_WAIT_TIME))
                 time.sleep(_RECONNECT_WAIT_TIME)
 
 
 class _Statistics(object):
-    """Class to hold execution statisitcs for a single node
+    """
+    Class to hold execution statisitcs for a single node.
     """
 
     def __init__(self, ncpus, rworker=None):
-        """Initializes statistics for a node"""
+        """
+        Initializes statistics for a node.
+        """
         self.ncpus = ncpus
         self.time = 0.0
         self.njobs = 0
@@ -286,25 +319,28 @@ class _Statistics(object):
 
 
 class Template(object):
-    """Template class
+    """
+    Template class.
     """
 
     def __init__(self, job_server, func, depfuncs=(), modules=(),
-            callback=None, callbackargs=(), group='default', globals=None):
-        """Creates Template instance
+                 callback=None, callbackargs=(), group='default', globals=None):
+        """
+        Creates Template instance.
 
-           jobs_server - pp server for submitting jobs
-           func - function to be executed
-           depfuncs - tuple with functions which might be called from 'func'
-           modules - tuple with module names to import
-           callback - callback function which will be called with argument
-                   list equal to callbackargs+(result,)
-                   as soon as calculation is done
-           callbackargs - additional arguments for callback function
-           group - job group, is used when wait(group) is called to wait for
-           jobs in a given group to finish
-           globals - dictionary from which all modules, functions and classes
-           will be imported, for instance: globals=globals()"""
+        jobs_server - pp server for submitting jobs
+        func - function to be executed
+        depfuncs - tuple with functions which might be called from 'func'
+        modules - tuple with module names to import
+        callback - callback function which will be called with argument
+                list equal to callbackargs+(result,)
+                as soon as calculation is done
+        callbackargs - additional arguments for callback function
+        group - job group, is used when wait(group) is called to wait for
+        jobs in a given group to finish
+        globals - dictionary from which all modules, functions and classes
+        will be imported, for instance: globals=globals()
+        """
         self.job_server = job_server
         self.func = func
         self.depfuncs = depfuncs
@@ -315,48 +351,51 @@ class Template(object):
         self.globals = globals
 
     def submit(self, *args):
-        """Submits function with *arg arguments to the execution queue
+        """
+        Submits function with *arg arguments to the execution queue.
         """
         return self.job_server.submit(self.func, args, self.depfuncs,
-                self.modules, self.callback, self.callbackargs,
-                self.group, self.globals)
+                                      self.modules, self.callback, self.callbackargs,
+                                      self.group, self.globals)
 
 
 class Server(object):
-    """Parallel Python SMP execution server class
+    """
+    Parallel Python SMP execution server class.
     """
 
     default_port = 60000
     default_secret = "epo20pdosl;dksldkmm"
 
     def __init__(self, ncpus="autodetect", ppservers=(), secret=None,
-            loglevel=logging.WARNING, logstream=sys.stderr,
-            restart=False, proto=0):
-        """Creates Server instance
+                 loglevel=logging.WARNING, logstream=sys.stderr,
+                 restart=False, proto=0):
+        """
+        Creates Server instance.
 
-           ncpus - the number of worker processes to start on the local
-                   computer, if parameter is omitted it will be set to
-                   the number of processors in the system
-           ppservers - list of active parallel python execution servers
-                   to connect with
-           secret - passphrase for network connections, if omitted a default
-                   passphrase will be used. It's highly recommended to use a
-                   custom passphrase for all network connections.
-           loglevel - logging level
-           logstream - log stream destination
-           restart - wheather to restart worker process after each task completion
-           proto - protocol number for pickle module
+        ncpus - the number of worker processes to start on the local
+                computer, if parameter is omitted it will be set to
+                the number of processors in the system
+        ppservers - list of active parallel python execution servers
+                to connect with
+        secret - passphrase for network connections, if omitted a default
+                passphrase will be used. It's highly recommended to use a
+                custom passphrase for all network connections.
+        loglevel - logging level
+        logstream - log stream destination
+        restart - wheather to restart worker process after each task completion
+        proto - protocol number for pickle module
 
-           With ncpus = 1 all tasks are executed consequently
-           For the best performance either use the default "autodetect" value
-           or set ncpus to the total number of processors in the system
+        With ncpus = 1 all tasks are executed consequently
+        For the best performance either use the default "autodetect" value
+        or set ncpus to the total number of processors in the system
         """
 
         if not isinstance(ppservers, tuple):
             raise TypeError("ppservers argument must be a tuple")
 
         self.__initlog(loglevel, logstream)
-        logging.info("Creating server instance (pp-" + version+")")
+        logging.info("Creating server instance (pp-" + version + ")")
         self.__tid = 0
         self.__active_tasks = 0
         self.__active_tasks_lock = thread.allocate_lock()
@@ -394,7 +433,7 @@ class Server(object):
         for ppserver in ppservers:
             ppserver = ppserver.split(":")
             host = ppserver[0]
-            if len(ppserver)>1:
+            if len(ppserver) > 1:
                 port = int(ppserver[1])
             else:
                 port = Server.default_port
@@ -406,7 +445,7 @@ class Server(object):
                 interface = host.replace("*", "0")
                 broadcast = host.replace("*", "255")
                 self.auto_ppservers.append(((interface, port),
-                        (broadcast, port)))
+                                            (broadcast, port)))
         self.__stats_lock = thread.allocate_lock()
         if secret is not None:
             if not isinstance(secret, types.StringType):
@@ -422,29 +461,30 @@ class Server(object):
         self.__connect()
         self.__creation_time = time.time()
         logging.info("pp local server started with %d workers"
-                % (self.__ncpus, ))
+                     % (self.__ncpus, ))
 
     def submit(self, func, args=(), depfuncs=(), modules=(),
-            callback=None, callbackargs=(), group='default', globals=None):
-        """Submits function to the execution queue
+               callback=None, callbackargs=(), group='default', globals=None):
+        """
+        Submits function to the execution queue.
 
-            func - function to be executed
-            args - tuple with arguments of the 'func'
-            depfuncs - tuple with functions which might be called from 'func'
-            modules - tuple with module names to import
-            callback - callback function which will be called with argument
-                    list equal to callbackargs+(result,)
-                    as soon as calculation is done
-            callbackargs - additional arguments for callback function
-            group - job group, is used when wait(group) is called to wait for
-            jobs in a given group to finish
-            globals - dictionary from which all modules, functions and classes
-            will be imported, for instance: globals=globals()
+        func - function to be executed
+        args - tuple with arguments of the 'func'
+        depfuncs - tuple with functions which might be called from 'func'
+        modules - tuple with module names to import
+        callback - callback function which will be called with argument
+                list equal to callbackargs+(result,)
+                as soon as calculation is done
+        callbackargs - additional arguments for callback function
+        group - job group, is used when wait(group) is called to wait for
+        jobs in a given group to finish
+        globals - dictionary from which all modules, functions and classes
+        will be imported, for instance: globals=globals()
         """
         # perform some checks for frequent mistakes
         if self.__exiting:
-            raise RuntimeError("Cannot submit jobs: server"\
-                    " instance has been destroyed")
+            raise RuntimeError("Cannot submit jobs: server"
+                               " instance has been destroyed")
 
         if not isinstance(args, tuple):
             raise TypeError("args argument must be a tuple")
@@ -468,7 +508,7 @@ class Server(object):
             modules += tuple(self.__find_modules("", globals))
             modules = tuple(set(modules))
             self.__logger.info("Task %i will autoimport next modules: %s" %
-                    (tid, str(modules)))
+                               (tid, str(modules)))
             for object1 in globals.values():
                 if isinstance(object1, types.FunctionType) \
                         or isinstance(object1, types.ClassType):
@@ -506,13 +546,13 @@ class Server(object):
         self.__queue_lock.release()
 
         self.__logger.info("Task %i submited, function='%s'" %
-                (tid, func.func_name))
+                           (tid, func.func_name))
         self.__scheduler()
         return task
-    
-    
+
     def cancel(self, taskID):
-        """Cancel a task
+        """
+        Cancel a task.
         """
 
         wtask = None
@@ -523,10 +563,10 @@ class Server(object):
                 self.__waittasks[i].cancelled = True
                 break
         self.__waittasks_lock.release()
-        
+
         if not wtask:
             return
-        
+
         if wtask.worker_pid:
             for worker in self.__workers:
                 if worker.pid == wtask.worker_pid:
@@ -537,7 +577,7 @@ class Server(object):
 
                     worker.t.exiting = True
                     if sys.platform.startswith("win"):
-                        os.popen('TASKKILL /PID '+str(worker.pid)+' /F')
+                        os.popen('TASKKILL /PID ' + str(worker.pid) + ' /F')
                     else:
                         try:
                             os.kill(worker.pid, 9)
@@ -548,30 +588,31 @@ class Server(object):
                     self.__workers.remove(worker)
                     self.__logger.info("Running task %i cancelled, process %i killed" % (taskID, wtask.worker_pid))
                     break
-                
+
         else:
-            
+
             self.__queue_lock.acquire()
             for i in xrange(len(self.__queue)):
                 if self.__queue[i][0].tid == taskID:
                     self.__queue.pop(i)
             self.__queue_lock.release()
-            
+
             self.__waittasks_lock.acquire()
             for i in xrange(len(self.__waittasks)):
                 if self.__waittasks[i].tid == taskID:
                     self.__waittasks.pop(i)
                     break
-            self.__waittasks_lock.release() 
-                       
+            self.__waittasks_lock.release()
+
             self.__logger.info("Scheduled task %i cancelled" % taskID)
-            
+
         self.__scheduler()
 
-
     def wait(self, group=None):
-        """Waits for all jobs in a given group to finish.
-           If group is omitted waits for all jobs to finish
+        """
+        Waits for all jobs in a given group to finish.
+
+        If group is omitted waits for all jobs to finish
         """
         while True:
             self.__waittasks_lock.acquire()
@@ -585,14 +626,18 @@ class Server(object):
                 break
 
     def get_ncpus(self):
-        """Returns the number of local worker processes (ppworkers)"""
+        """
+        Returns the number of local worker processes (ppworkers)
+        """
         return self.__ncpus
 
     def set_ncpus(self, ncpus="autodetect"):
-        """Sets the number of local worker processes (ppworkers)
+        """
+        Sets the number of local worker processes (ppworkers)
 
         ncpus - the number of worker processes, if parammeter is omitted
-                it will be set to the number of processors in the system"""
+                it will be set to the number of processors in the system
+        """
         if ncpus == "autodetect":
             ncpus = self.__detect_ncpus()
         if not isinstance(ncpus, int):
@@ -600,15 +645,18 @@ class Server(object):
         if ncpus < 0:
             raise ValueError("ncpus must be an integer > 0")
         if ncpus > len(self.__workers):
-            self.__workers.extend([_Worker(self.__restart_on_free, 
-                    self.__pickle_proto) for x in\
-                    range(ncpus - len(self.__workers))])
+            self.__workers.extend([_Worker(self.__restart_on_free,
+                                           self.__pickle_proto) for x in
+                                   range(ncpus - len(self.__workers))])
         self.__stats["local"].ncpus = ncpus
         self.__ncpus = ncpus
 
     def get_active_nodes(self):
-        """Returns active nodes as a dictionary
-        [keys - nodes, values - ncpus]"""
+        """
+        Returns active nodes as a dictionary.
+
+        [keys - nodes, values - ncpus]
+        """
         active_nodes = {}
         for node, stat in self.__stats.items():
             if node == "local" or node in self.autopp_list \
@@ -617,7 +665,9 @@ class Server(object):
         return active_nodes
 
     def get_stats(self):
-        """Returns job execution statistics as a dictionary"""
+        """
+        Returns job execution statistics as a dictionary.
+        """
         for node, stat in self.__stats.items():
             if stat.rworker:
                 try:
@@ -629,22 +679,25 @@ class Server(object):
         return self.__stats
 
     def print_stats(self):
-        """Prints job execution statistics. Useful for benchmarking on
-           clusters"""
+        """
+        Prints job execution statistics.
+
+        Useful for benchmarking on clusters
+        """
 
         print "Job execution statistics:"
-        walltime = time.time()-self.__creation_time
+        walltime = time.time() - self.__creation_time
         statistics = self.get_stats().items()
         totaljobs = 0.0
         for ppserver, stat in statistics:
             totaljobs += stat.njobs
         print " job count | % of all jobs | job time sum | " \
-                "time per job | job server"
+            "time per job | job server"
         for ppserver, stat in statistics:
             if stat.njobs:
                 print "    %6i |        %6.2f |     %8.4f |  %11.6f | %s" \
-                        % (stat.njobs, 100.0*stat.njobs/totaljobs, stat.time,
-                        stat.time/stat.njobs, ppserver, )
+                    % (stat.njobs, 100.0 * stat.njobs / totaljobs, stat.time,
+                       stat.time / stat.njobs, ppserver, )
         print "Time elapsed since server creation", walltime
 
         if not self.__accurate_stats:
@@ -655,8 +708,10 @@ class Server(object):
     # all methods below are for internal use only
 
     def insert(self, sfunc, sargs, task=None):
-        """Inserts function into the execution queue. It's intended for
-           internal use only (ppserver.py).
+        """
+        Inserts function into the execution queue.
+
+        It's intended for internal use only (ppserver.py).
         """
         if not task:
             tid = self.__gentid()
@@ -670,11 +725,13 @@ class Server(object):
         return task
 
     def connect1(self, host, port, persistent=True):
-        """Conects to a remote ppserver specified by host and port"""
+        """
+        Conects to a remote ppserver specified by host and port.
+        """
         try:
             rworker = _RWorker(host, port, self.secret, "STAT", persistent)
             ncpus = int(rworker.receive())
-            hostid = host+":"+str(port)
+            hostid = host + ":" + str(port)
             self.__stats[hostid] = _Statistics(ncpus, rworker)
 
             for x in range(ncpus):
@@ -682,13 +739,13 @@ class Server(object):
                 self.__update_active_rworkers(rworker.id, 1)
                 # append is atomic - no need to lock self.__rworkers
                 self.__rworkers.append(rworker)
-            #creating reserved rworkers
+            # creating reserved rworkers
             for x in range(ncpus):
                 rworker = _RWorker(host, port, self.secret, "EXEC", persistent)
                 self.__update_active_rworkers(rworker.id, 1)
                 self.__rworkers_reserved.append(rworker)
-            #creating reserved4 rworkers
-            for x in range(ncpus*0):
+            # creating reserved4 rworkers
+            for x in range(ncpus * 0):
                 rworker = _RWorker(host, port, self.secret, "EXEC", persistent)
 #                    self.__update_active_rworkers(rworker.id, 1)
                 self.__rworkers_reserved4.append(rworker)
@@ -700,7 +757,9 @@ class Server(object):
 #            sys.excepthook(*sys.exc_info())
 
     def __connect(self):
-        """Connects to all remote ppservers"""
+        """
+        Connects to all remote ppservers.
+        """
         for ppserver in self.ppservers:
             thread.start_new_thread(self.connect1, ppserver)
 
@@ -709,8 +768,10 @@ class Server(object):
             thread.start_new_thread(discover.run, ppserver)
 
     def __detect_ncpus(self):
-        """Detects the number of effective CPUs in the system"""
-        #for Linux, Unix and MacOS
+        """
+        Detects the number of effective CPUs in the system.
+        """
+        # for Linux, Unix and MacOS
         if hasattr(os, "sysconf"):
             if "SC_NPROCESSORS_ONLN" in os.sysconf_names:
                 #Linux and Unix
@@ -718,18 +779,20 @@ class Server(object):
                 if isinstance(ncpus, int) and ncpus > 0:
                     return ncpus
             else:
-                #MacOS X
+                # MacOS X
                 return int(os.popen2("sysctl -n hw.ncpu")[1].read())
-        #for Windows
+        # for Windows
         if "NUMBER_OF_PROCESSORS" in os.environ:
             ncpus = int(os.environ["NUMBER_OF_PROCESSORS"])
             if ncpus > 0:
                 return ncpus
-        #return the default value
+        # return the default value
         return 1
 
     def __initlog(self, loglevel, logstream):
-        """Initializes logging facility"""
+        """
+        Initializes logging facility.
+        """
         log_handler = logging.StreamHandler(logstream)
         log_handler.setLevel(loglevel)
         LOG_FORMAT = '        %(levelname)s %(message)s'
@@ -739,33 +802,39 @@ class Server(object):
         self.__logger.setLevel(loglevel)
 
     def __dumpsfunc(self, funcs, modules):
-        """Serializes functions and modules"""
+        """
+        Serializes functions and modules.
+        """
         hashs = hash(funcs + modules)
         if hashs not in self.__sfuncHM:
             sources = [self.__get_source(func) for func in funcs]
             self.__sfuncHM[hashs] = pickle.dumps(
-                    (funcs[0].func_name, sources, modules),
-                    self.__pickle_proto)
+                (funcs[0].func_name, sources, modules),
+                self.__pickle_proto)
         return self.__sfuncHM[hashs]
 
     def __find_modules(self, prefix, dict):
-        """recursively finds all the modules in dict"""
+        """
+        recursively finds all the modules in dict.
+        """
         modules = []
         for name, object in dict.items():
             if isinstance(object, types.ModuleType) \
                     and name not in ("__builtins__", "pp"):
-                if object.__name__ == prefix+name or prefix == "":
+                if object.__name__ == prefix + name or prefix == "":
                     modules.append(object.__name__)
                     modules.extend(self.__find_modules(
-                            object.__name__+".", object.__dict__))
+                        object.__name__ + ".", object.__dict__))
         return modules
 
     def __scheduler(self):
-        """Schedules jobs for execution"""
+        """
+        Schedules jobs for execution.
+        """
         self.__queue_lock.acquire()
         while self.__queue:
             if self.__active_tasks < self.__ncpus:
-                #TODO: select a job number on the basis of heuristic
+                # TODO: select a job number on the basis of heuristic
                 task = self.__queue.pop(0)
                 for worker in self.__workers:
                     if worker.is_free:
@@ -777,7 +846,7 @@ class Server(object):
                 self.__add_to_active_tasks(1)
                 try:
                     self.__stats["local"].njobs += 1
-                    thread.start_new_thread(self.__run, task+(worker, ))
+                    thread.start_new_thread(self.__run, task + (worker, ))
                 except:
                     pass
                 for i in xrange(len(self.__waittasks)):
@@ -790,7 +859,7 @@ class Server(object):
                         rworker.is_free = False
                         task = self.__queue.pop(0)
                         self.__stats[rworker.id].njobs += 1
-                        thread.start_new_thread(self.__rrun, task+(rworker, ))
+                        thread.start_new_thread(self.__rrun, task + (rworker, ))
                         break
                 else:
                     if len(self.__queue) > self.__ncpus:
@@ -800,20 +869,20 @@ class Server(object):
                                 task = self.__queue.pop(0)
                                 self.__stats[rworker.id].njobs += 1
                                 thread.start_new_thread(self.__rrun,
-                                        task+(rworker, ))
+                                                        task + (rworker, ))
                                 break
                         else:
                             break
                             # this code will not be executed
                             # and is left for further releases
-                            if len(self.__queue) > self.__ncpus*0:
+                            if len(self.__queue) > self.__ncpus * 0:
                                 for rworker in self.__rworkers_reserved4:
                                     if rworker.is_free:
                                         rworker.is_free = False
                                         task = self.__queue.pop(0)
                                         self.__stats[rworker.id].njobs += 1
                                         thread.start_new_thread(self.__rrun,
-                                                task+(rworker, ))
+                                                                task + (rworker, ))
                                         break
                     else:
                         break
@@ -821,18 +890,22 @@ class Server(object):
         self.__queue_lock.release()
 
     def __get_source(self, func):
-        """Fetches source of the function"""
+        """
+        Fetches source of the function.
+        """
         hashf = hash(func)
         if hashf not in self.__sourcesHM:
-            #get lines of the source and adjust indent
+            # get lines of the source and adjust indent
             sourcelines = inspect.getsourcelines(func)[0]
-            #remove indentation from the first line
+            # remove indentation from the first line
             sourcelines[0] = sourcelines[0].lstrip()
             self.__sourcesHM[hashf] = "".join(sourcelines)
         return self.__sourcesHM[hashf]
 
     def __rrun(self, job, sfunc, sargs, rworker):
-        """Runs a job remotelly"""
+        """
+        Runs a job remotelly.
+        """
         self.__logger.info("Task (remote) %i started" % (job.tid, ))
 
         try:
@@ -841,8 +914,8 @@ class Server(object):
             sresult = rworker.receive()
             rworker.is_free = True
         except:
-            self.__logger.info("Task %i failed due to broken network " \
-                    "connection - rescheduling" % (job.tid, ))
+            self.__logger.info("Task %i failed due to broken network "
+                               "connection - rescheduling" % (job.tid, ))
             self.insert(sfunc, sargs, job)
             self.__scheduler()
             self.__update_active_rworkers(rworker.id, -1)
@@ -863,7 +936,9 @@ class Server(object):
         self.__scheduler()
 
     def __run(self, job, sfunc, sargs, worker):
-        """Runs a job locally"""
+        """
+        Runs a job locally.
+        """
 
         if self.__exiting:
             return
@@ -895,30 +970,38 @@ class Server(object):
 
         self.__add_to_active_tasks(-1)
         if not self.__exiting:
-            self.__stat_add_time("local", time.time()-start_time)
+            self.__stat_add_time("local", time.time() - start_time)
         self.__logger.info("Task %i ended" % (job.tid, ))
         self.__scheduler()
 
     def __add_to_active_tasks(self, num):
-        """Updates the number of active tasks"""
+        """
+        Updates the number of active tasks.
+        """
         self.__active_tasks_lock.acquire()
         self.__active_tasks += num
         self.__active_tasks_lock.release()
 
     def __stat_add_time(self, node, time_add):
-        """Updates total runtime on the node"""
+        """
+        Updates total runtime on the node.
+        """
         self.__stats_lock.acquire()
         self.__stats[node].time += time_add
         self.__stats_lock.release()
 
     def __stat_add_job(self, node):
-        """Increments job count on the node"""
+        """
+        Increments job count on the node.
+        """
         self.__stats_lock.acquire()
         self.__stats[node].njobs += 1
         self.__stats_lock.release()
 
     def __update_active_rworkers(self, id, count):
-        """Updates list of active rworkers"""
+        """
+        Updates list of active rworkers.
+        """
         self.__active_rworkers_list_lock.acquire()
 
         if id not in self.autopp_list:
@@ -928,12 +1011,16 @@ class Server(object):
         self.__active_rworkers_list_lock.release()
 
     def __gentid(self):
-        """Generates a unique job ID number"""
+        """
+        Generates a unique job ID number.
+        """
         self.__tid += 1
         return self.__tid - 1
 
     def destroy(self):
-        """Kills ppworkers and closes open files"""
+        """
+        Kills ppworkers and closes open files.
+        """
         self.__exiting = True
         self.__queue_lock.acquire()
         self.__queue = []
@@ -942,7 +1029,7 @@ class Server(object):
         for worker in self.__workers:
             worker.t.exiting = True
             if sys.platform.startswith("win"):
-                os.popen('TASKKILL /PID '+str(worker.pid)+' /F')
+                os.popen('TASKKILL /PID ' + str(worker.pid) + ' /F')
             else:
                 try:
                     os.kill(worker.pid, 9)
