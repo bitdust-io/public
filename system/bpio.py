@@ -1223,11 +1223,16 @@ def find_process(applist):
         import psutil
         pidsL = []
         for p in psutil.process_iter():
-            if p.pid == os.getpid():
+            try:
+                p_pid = p.pid
+                p_cmdline = p.cmdline()
+            except:
+                continue
+            if p_pid == os.getpid():
                 continue
             for app in applist:
                 try:
-                    cmdline = ' '.join(p.cmdline())
+                    cmdline = ' '.join(p_cmdline)
                 except:
                     continue
                 if app.startswith('regexp:'):
@@ -1236,16 +1241,16 @@ def find_process(applist):
                 else:
                     if cmdline.count(app):
                         pidsL.append(p.pid)
-        return pidsL
+        if pidsL:
+            return pidsL
     except:
         pass
-    pidsL = []
     ostype = platform.uname()[0]
     if ostype == "Windows":
         return find_process_win32(applist)
     else:
         return find_process_linux(applist)
-    return pidsL
+    return []
 
 
 def kill_process(pid):

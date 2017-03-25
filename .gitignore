@@ -6,6 +6,8 @@
 history
 commits-from
 mergecommits.py
+HISTORY.txt
+COMMITS.txt
 .identities/
 plugins/
 web/*.db
