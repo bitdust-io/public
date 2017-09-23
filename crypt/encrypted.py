@@ -25,7 +25,7 @@
 #
 
 """
-.. module:: encrypted_block.
+.. module:: encrypted.
 
 Higher level code interfaces with ``encrypted`` so that it does not have to deal
 with ECC stuff.  We write or read a large block at a time (maybe 64 MB say).
@@ -45,13 +45,13 @@ We number them with our block number and the supplier numbers.
 
 Going to disk should let us do restarts after crashes without much trouble.
 
-Digital signatures and timestamps are done on ``encrypted_blocks``.
-Signatures are also done on ``packets``.
+Digital signatures and timestamps are done on ``encrypted`` blocks of data.
+Signatures are also done on ``packets`` and ``encrypted`` blocks.
 
 RAIDMAKE:
-    This object can be asked to generate any/all ``packet(s)`` that would come from this ``encrypted_block``.
+    This object can be asked to generate any/all ``packet(s)`` that would come from this ``encrypted``.
 RAIDREAD:
-    It can also rebuild the ``encrypted_block`` from packets and will
+    It can also rebuild the ``encrypted`` from packets and will
     generate the read requests to get fetch the packets.
 """
 
@@ -67,9 +67,11 @@ from logs import lg
 from lib import misc
 
 from contacts import contactsdb
+
 from userid import my_id
 
-import key
+from crypt import key
+from crypt import my_keys
 
 #------------------------------------------------------------------------------
 
@@ -95,24 +97,35 @@ class Block:
     """
 
     def __init__(self,
-                 CreatorID,
-                 BackupID,
-                 BlockNumber,
-                 SessionKey,
-                 SessionKeyType,
-                 LastBlock,
-                 Data,
-                 EncryptFunc=key.EncryptLocalPK):
+                 CreatorID=None,
+                 BackupID='',
+                 BlockNumber=0,
+                 SessionKey='',
+                 SessionKeyType=None,
+                 LastBlock=True,
+                 Data='',
+                 EncryptKey=None,
+                 DecryptKey=None, ):
         self.CreatorID = CreatorID
-        self.BackupID = BackupID
+        if not self.CreatorID:
+            self.CreatorID = my_id.getLocalID()
+        self.BackupID = str(BackupID)
         self.BlockNumber = BlockNumber
-        self.EncryptedSessionKey = EncryptFunc(SessionKey)
+        if callable(EncryptKey):
+            self.EncryptedSessionKey = EncryptKey(SessionKey)
+        elif isinstance(EncryptKey, basestring):
+            self.EncryptedSessionKey = my_keys.encrypt(EncryptKey, SessionKey)
+        else:
+            self.EncryptedSessionKey = key.EncryptLocalPublicKey(SessionKey)
         self.SessionKeyType = SessionKeyType
+        if not self.SessionKeyType:
+            self.SessionKeyType = key.SessionKeyType()
         self.Length = len(Data)
         self.LastBlock = bool(LastBlock)
         self.EncryptedData = key.EncryptWithSessionKey(SessionKey, Data)  # DataLonger
         self.Signature = None
         self.Sign()
+        self.DecryptKey = DecryptKey
         if _Debug:
             lg.out(_DebugLevel, 'new data in %s' % self)
 
@@ -122,9 +135,13 @@ class Block:
     def SessionKey(self):
         """
         Return original SessionKey from ``EncryptedSessionKey`` using
-        ``crypt.key.DecryptLocalPK()`` method.
+        ``crypt.key.DecryptLocalPrivateKey()`` method.
         """
-        return key.DecryptLocalPK(self.EncryptedSessionKey)
+        if callable(self.DecryptKey):
+            return self.DecryptKey(self.EncryptedSessionKey)
+        elif isinstance(self.DecryptKey, basestring):
+            return my_keys.decrypt(self.DecryptKey, self.EncryptedSessionKey)
+        return key.DecryptLocalPrivateKey(self.EncryptedSessionKey)
 
     def GenerateHashBase(self):
         """
@@ -197,15 +214,19 @@ class Block:
         Create a string that stores all data fields of that ``encrypted.Block``
         object.
         """
+        decrypt_key = getattr(self, 'DecryptKey')
+        delattr(self, 'DecryptKey')
         e = misc.ObjectToString(self)
+        setattr(self, 'DecryptKey', decrypt_key)
         return e
 
 #------------------------------------------------------------------------------
 
 
-def Unserialize(data):
+def Unserialize(data, decrypt_key=None):
     """
     A method to create a ``encrypted.Block`` instance from input string.
     """
     newobject = misc.StringToObject(data)
+    setattr(newobject, 'DecryptKey', decrypt_key)
     return newobject

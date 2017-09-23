@@ -120,7 +120,7 @@ def init():
     from django.core.wsgi import get_wsgi_application
     from django.conf import settings as django_settings
     from django.core import management
-    from django.contrib.auth.management.commands import changepassword
+    # from django.contrib.auth.management.commands import changepassword
 
     if _Debug:
         lg.out(_DebugLevel, '    configuring WSGI bridge from Twisted to Django')
@@ -215,8 +215,14 @@ def shutdown():
     if _WSGIListener:
         if _Debug:
             lg.out(_DebugLevel, '    close listener %s' % _WSGIListener)
-        result = _WSGIListener.stopListening()
-        _WSGIListener.connectionLost("Closing WSGIListener as requested")
+        try:
+            result = _WSGIListener.stopListening()
+        except:
+            lg.exc()
+        try:
+            _WSGIListener.connectionLost("Closing WSGIListener as requested")
+        except:
+            lg.exc()
         del _WSGIListener
     else:
         if _Debug:

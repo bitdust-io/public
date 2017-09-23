@@ -8,6 +8,8 @@ commits-from
 mergecommits.py
 HISTORY.txt
 COMMITS.txt
+Makefile
+setup_gen.py
 .identities/
 plugins/
 web/*.db

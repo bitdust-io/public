@@ -51,17 +51,19 @@ try:
 except:
     sys.exit('Error initializing twisted.internet.reactor backup_db.py')
 
+from twisted.internet.defer import Deferred
+
 #------------------------------------------------------------------------------
 
 from logs import lg
 
 from system import bpio
-from lib import misc
 from system import tmpfile
 from system import dirsize
 
 from contacts import contactsdb
 
+from lib import misc
 from lib import packetid
 from lib import nameurl
 
@@ -80,6 +82,8 @@ from services import driver
 
 from storage import backup_fs
 from storage import backup_matrix
+from storage import backup_tar
+from storage import backup
 
 #------------------------------------------------------------------------------
 
@@ -164,11 +168,11 @@ def WriteIndex(filepath=None):
     if filepath is None:
         filepath = settings.BackupIndexFilePath()
     src = '%d\n' % revision()
-    src += backup_fs.Serialize()
+    src += backup_fs.Serialize(to_json=True)
     return bpio.AtomicWriteFile(filepath, src)
 
 
-def ReadIndex(inpt):
+def ReadIndex(raw_data):
     """
     Read index data base, ``input`` is a ``cStringIO.StringIO`` object which
     keeps the data.
@@ -180,18 +184,25 @@ def ReadIndex(inpt):
     if _LoadingFlag:
         return False
     _LoadingFlag = True
+#     try:
+#         new_revision = int(inpt.readline().rstrip('\n'))
+#     except:
+#         _LoadingFlag = False
+#         lg.exc()
+#         return False
+    backup_fs.Clear()
     try:
-        new_revision = int(inpt.readline().rstrip('\n'))
-    except:
-        _LoadingFlag = False
+        count = backup_fs.Unserialize(raw_data, from_json=True)
+    except KeyError:
+        lg.warn('fallback to old (non-json) index format')
+        count = backup_fs.Unserialize(raw_data, from_json=False)
+    except ValueError:
         lg.exc()
         return False
-    backup_fs.Clear()
-    count = backup_fs.Unserialize(inpt)
     if _Debug:
         lg.out(_DebugLevel, 'backup_control.ReadIndex %d items loaded' % count)
     # local_site.update_backup_fs(backup_fs.ListAllBackupIDsSQL())
-    commit(new_revision)
+    # commit(new_revision)
     _LoadingFlag = False
     return True
 
@@ -214,10 +225,20 @@ def Load(filepath=None):
         lg.out(2, 'backup_control.Load ERROR reading file %s' % filepath)
         return False
     inpt = cStringIO.StringIO(src)
-    ret = ReadIndex(inpt)
+    try:
+        known_revision = int(inpt.readline().rstrip('\n'))
+    except:
+        lg.exc()
+        return False
+    raw_data = inpt.read()
     inpt.close()
-    backup_fs.Scan()
-    backup_fs.Calculate()
+    ret = ReadIndex(raw_data)
+    if ret:
+        commit(known_revision)
+        backup_fs.Scan()
+        backup_fs.Calculate()
+    else:
+        lg.warn('catalog index reading failed')
     return ret
 
 
@@ -285,7 +306,7 @@ def IncomingSupplierBackupIndex(newpacket):
         lg.out(2, 'backup_control.IncomingSupplierBackupIndex ERROR reading data from %s' % newpacket.RemoteID)
         return
     try:
-        session_key = key.DecryptLocalPK(b.EncryptedSessionKey)
+        session_key = key.DecryptLocalPrivateKey(b.EncryptedSessionKey)
         padded_data = key.DecryptWithSessionKey(session_key, b.EncryptedData)
         inpt = cStringIO.StringIO(padded_data[:int(b.Length)])
         supplier_revision = inpt.readline().rstrip('\n')
@@ -293,7 +314,7 @@ def IncomingSupplierBackupIndex(newpacket):
             supplier_revision = int(supplier_revision)
         else:
             supplier_revision = -1
-        inpt.seek(0)
+        # inpt.seek(0)
     except:
         lg.out(2, 'backup_control.IncomingSupplierBackupIndex ERROR reading data from %s' % newpacket.RemoteID)
         lg.out(2, '\n' + padded_data)
@@ -306,15 +327,23 @@ def IncomingSupplierBackupIndex(newpacket):
     if driver.is_started('service_backup_db'):
         from storage import index_synchronizer
         index_synchronizer.A('index-file-received', (newpacket, supplier_revision))
-    if revision() < supplier_revision:
-        ReadIndex(inpt)
+    if revision() >= supplier_revision:
+        inpt.close()
+        lg.out(4, 'backup_control.IncomingSupplierBackupIndex skipped, supplier %s revision=%d, local revision=%d' % (
+            newpacket.RemoteID, supplier_revision, revision(), ))
+        return
+    raw_data = inpt.read()
+    inpt.close()
+    if ReadIndex(raw_data):
+        commit(supplier_revision)
         backup_fs.Scan()
         backup_fs.Calculate()
         WriteIndex()
         control.request_update()
-        lg.out(2, 'backup_control.IncomingSupplierBackupIndex updated to revision %d from %s' % (
+        lg.out(4, 'backup_control.IncomingSupplierBackupIndex updated to revision %d from %s' % (
             revision(), newpacket.RemoteID))
-    inpt.close()
+    else:
+        lg.warn('failed to read catalog index from supplier')
 
 #------------------------------------------------------------------------------
 
@@ -458,32 +487,46 @@ class Task():
     All tasks are stored in the list, see ``tasks()`` method.
     """
 
-    def __init__(self, pathID, localPath=None):
+    def __init__(self, pathID, localPath=None, keyID=None):
         self.number = NewTaskNumber()                   # index number for the task
         self.pathID = pathID                            # source path to backup
+        self.keyID = keyID
         self.localPath = localPath
         self.created = time.time()
+        self.backupID = None
+        self.result_defer = Deferred()
         if _Debug:
             lg.out(_DebugLevel, 'new Task created: %r' % self)
 
     def __repr__(self):
         """
-        Return a string like "Task-5: 0/1/2/3 from
-        /home/veselin/Documents/myfile.txt".
+        Return a string like:
+
+            "Task-5: 0/1/2/3 from /home/veselin/Documents/myfile.txt"
         """
         return 'Task-%d(%s from %s)' % (self.number, self.pathID, self.localPath)
 
-    #--- !!! STARTING BACKUP HERE !!! ---
+    def _on_job_done(self, backupID, result):
+        reactor.callLater(0, OnJobDone, backupID, result)
+        if self.result_defer is not None:
+            self.result_defer.callback((backupID, result))
+
+    def job(self):
+        """
+        """
+        if self.backupID is None:
+            return None
+        if self.backupID not in jobs():
+            return None
+        return jobs()[self.backupID]
+
     def run(self):
         """
-        Runs a new ``Job`` from that ``Task``.
-
+        Runs a new ``Job`` from that ``Task``
         Called from ``RunTasks()`` method if it is possible to start a
         new task - the maximum number of simultaneously running ``Jobs``
         is limited.
         """
-        import backup_tar
-        import backup
         iter_and_path = backup_fs.WalkByID(self.pathID)
         if iter_and_path is None:
             lg.out(4, 'backup_control.Task.run ERROR %s not found in the index' % self.pathID)
@@ -496,11 +539,13 @@ class Task():
             except:
                 lg.exc()
                 return
-        if self.localPath and self.localPath != sourcePath:
-            lg.warn('local path were changed: %s -> %s' % (self.localPath, sourcePath))
-        self.localPath = sourcePath
-        if not bpio.pathExist(sourcePath):
-            lg.warn('path not exist: %s' % sourcePath)
+        if not self.localPath:
+            self.localPath = sourcePath
+            lg.out('backup_control.Task.run local path was populated from catalog: %s' % self.localPath)
+        if self.localPath != sourcePath:
+            lg.warn('local path is differ from catalog copy: %s != %s' % (self.localPath, sourcePath))
+        if not bpio.pathExist(self.localPath):
+            lg.warn('path not exist: %s' % self.localPath)
             reactor.callLater(0, OnTaskFailed, self.pathID, 'not exist')
             return
         dataID = misc.NewBackupID()
@@ -511,46 +556,53 @@ class Task():
             while itemInfo.has_version(dataID + str(i)):
                 i += 1
             dataID += str(i)
-        backupID = self.pathID + '/' + dataID
+        self.backupID = self.pathID + '/' + dataID
+        if self.backupID in jobs():
+            lg.warn('backup job %s already started' % self.backupID)
+            return
         try:
-            backup_fs.MakeLocalDir(settings.getLocalBackupsDir(), backupID)
+            backup_fs.MakeLocalDir(settings.getLocalBackupsDir(), self.backupID)
         except:
             lg.exc()
             lg.out(4, 'backup_control.Task.run ERROR creating destination folder for %s' % self.pathID)
             # self.defer.callback('error', self.pathID)
             return
         compress_mode = 'bz2'  # 'none' # 'gz'
-        if bpio.pathIsDir(sourcePath):
-            backupPipe = backup_tar.backuptar(sourcePath, compress=compress_mode)
+        if bpio.pathIsDir(self.localPath):
+            backupPipe = backup_tar.backuptar(self.localPath, compress=compress_mode)
         else:
-            backupPipe = backup_tar.backuptarfile(sourcePath, compress=compress_mode)
+            backupPipe = backup_tar.backuptarfile(self.localPath, compress=compress_mode)
         backupPipe.make_nonblocking()
         job = backup.backup(
-            backupID, backupPipe,
-            OnJobDone, OnBackupBlockReport,
-            settings.getBackupBlockSize(),
-            sourcePath)
-        jobs()[backupID] = job
+            self.backupID,
+            backupPipe,
+            finishCallback=self._on_job_done,
+            blockResultCallback=OnBackupBlockReport,
+            blockSize=settings.getBackupBlockSize(),
+            sourcePath=self.localPath,
+            keyID=self.keyID or itemInfo.key_id,
+        )
+        jobs()[self.backupID] = job
         itemInfo.add_version(dataID)
         if itemInfo.type in [backup_fs.PARENT, backup_fs.DIR]:
-            dirsize.ask(sourcePath, OnFoundFolderSize, (self.pathID, dataID))
+            dirsize.ask(self.localPath, OnFoundFolderSize, (self.pathID, dataID))
         else:
-            jobs()[backupID].totalSize = os.path.getsize(sourcePath)
-        jobs()[backupID].automat('start')
+            jobs()[self.backupID].totalSize = os.path.getsize(self.localPath)
+        jobs()[self.backupID].automat('start')
         reactor.callLater(0, FireTaskStartedCallbacks, self.pathID, dataID)
         lg.out(4, 'backup_control.Task-%d.run [%s/%s], size=%d, %s' % (
-            self.number, self.pathID, dataID, itemInfo.size, sourcePath))
+            self.number, self.pathID, dataID, itemInfo.size, self.localPath))
 
 #------------------------------------------------------------------------------
 
 
-def PutTask(pathID, localPath=None):
+def PutTask(pathID, localPath=None, keyID=None):
     """
-    Creates a new ``Task`` and append it to the list of tasks.
+    Creates a new backup ``Task`` and append it to the list of tasks.
     """
-    t = Task(pathID, localPath)
+    t = Task(pathID=pathID, localPath=localPath, keyID=keyID)
     tasks().append(t)
-    return t.number
+    return t
 
 
 def HasTask(pathID):
@@ -592,13 +644,14 @@ def OnFoundFolderSize(pth, sz, arg):
     """
     try:
         pathID, version = arg
-        backupID = pathID + '/' + version
         item = backup_fs.GetByID(pathID)
         if item:
             item.set_size(sz)
-        job = GetRunningBackupObject(backupID)
-        if job:
-            job.totalSize = sz
+        if version:
+            backupID = pathID + '/' + version
+            job = GetRunningBackupObject(backupID)
+            if job:
+                job.totalSize = sz
         if _Debug:
             lg.out(_DebugLevel, 'backup_control.OnFoundFolderSize %s %d' % (backupID, sz))
     except:
@@ -721,17 +774,18 @@ def FireTaskFinishedCallbacks(pathID, version, result):
 #------------------------------------------------------------------------------
 
 
-def StartSingle(pathID, localPath=None):
+def StartSingle(pathID, localPath=None, keyID=None):
     """
     A high level method to start a backup of single file or folder.
     """
     from storage import backup_monitor
-    PutTask(pathID, localPath)
+    t = PutTask(pathID=pathID, localPath=localPath, keyID=keyID)
     reactor.callLater(0, RunTasks)
     reactor.callLater(0, backup_monitor.A, 'restart')
+    return t
 
 
-def StartRecursive(pathID, localPath=None):
+def StartRecursive(pathID, keyID=None):
     """
     A high level method to start recursive backup of given path.
 
@@ -739,13 +793,14 @@ def StartRecursive(pathID, localPath=None):
     tasks for them.
     """
     from storage import backup_monitor
-    startedtasks = set()
+    startedtasks = []
 
     def visitor(path_id, path, info):
         if info.type == backup_fs.FILE:
             if path_id.startswith(pathID):
-                PutTask(path_id, path)
-                startedtasks.add(path_id)
+                t = PutTask(pathID=path_id, localPath=path, keyID=keyID)
+                startedtasks.append(t)
+
     backup_fs.TraverseByID(visitor)
     reactor.callLater(0, RunTasks)
     reactor.callLater(0, backup_monitor.A, 'restart')

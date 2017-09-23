@@ -118,6 +118,20 @@ def create_index(name):
     return automatid, _Index[automatid]
 
 
+def erase_index(automatid):
+    """
+    Removes given unique automat ID from Index dict and returns its index number or None if ID was not found.
+    """
+    global _Index
+    if _Index is None:
+        return None
+    return _Index.pop(automatid, None)
+#     index = _Index.get(automatid, None)
+#     if index is None:
+#         return None
+#     del _Index[automatid]
+
+
 def set_object(index, obj):
     """
     Put object for that index into memory.
@@ -133,8 +147,9 @@ def clear_object(index):
     global _Objects
     if _Objects is None:
         return
-    if index in _Objects:
-        del _Objects[index]
+    return _Objects.pop(index, None)
+#     if index in _Objects:
+#         del _Objects[index]
 
 
 def objects():
@@ -274,16 +289,19 @@ class Automat(object):
     """
     By default, a state machine is called like this::
 
-          reactor.callLater(0, self.event, 'event-01', arg1, arg2, ... )
+        reactor.callLater(0, self.event, 'event-01', (arg1, arg2, ... ))
 
-    If ``fast = True`` it will call state machine method directly.
+    If ``fast = True`` it will call state machine method directly:
+
+        self.event('event-01', (arg1, arg2, ... ))
+
     """
 
     post = False
     """
     Sometimes need to set the new state AFTER finish all actions.
     Set ``post = True`` to call ``self.state = <newstate>``
-    in the ``self.event()`` method, not in the ``self.A()`` method.
+    in the ``self.event()`` method, but not in the ``self.A()`` method.
     You also must set that flag in the MS Visio document and rebuild the code:
     put ``[post]`` string into the last line of the LABEL shape.
     """
@@ -299,38 +317,44 @@ class Automat(object):
         self._state_callbacks = {}
         self.init()
         self.startTimers()
+        self.register()
         if _Debug:
             self.log(max(_DebugLevel, self.debug_level),
                      'CREATED AUTOMAT %s with index %d, %d running' % (
                 str(self), self.index, len(objects())))
+
+    def register(self):
+        """
+        Put reference to this automat instance into a global dictionary.
+        """
         set_object(self.index, self)
 
+    def unregister(self):
+        """
+        Removes reference to this instance from global dictionary tracking all state machines.
+        """
+        clear_object(self.index)
+
     def __del__(self):
-        global _Index
+        """
+        Calls state changed callback and removes state machine from the index.
+        """
         global _StateChangedCallback
         if self is None:
+            # Some crazy stuff happens? :-)
             return
         o = self
         automatid = self.id
         name = self.name
+        index = self.index
+        if _StateChangedCallback is not None:
+            _StateChangedCallback(index, automatid, name, '')
         debug_level = max(_DebugLevel, self.debug_level)
-        if _Index is None:
-            if _Debug:
-                self.log(debug_level, 'automat.__del__ WARNING Index is None: %r %r' % (automatid, name))
-            return
-        index = _Index.get(automatid, None)
-        if index is None:
-            if _Debug:
-                self.log(debug_level, 'automat.__del__ WARNING %s not found' % automatid)
-            return
-        del _Index[automatid]
+        erase_index(automatid)
         if _Debug:
             self.log(debug_level,
                      'DESTROYED AUTOMAT %s with index %d, %d running' % (
                          str(o), index, len(objects())))
-        del o
-        if _StateChangedCallback is not None:
-            _StateChangedCallback(index, automatid, name, '')
 
     def __repr__(self):
         """
@@ -354,7 +378,7 @@ class Automat(object):
         object.
         """
 
-    def destroy(self):
+    def destroy(self, dead_state='NOT_EXIST'):
         """
         Call this method to remove the state machine from the ``objects()``
         dictionary and delete that instance.
@@ -362,12 +386,10 @@ class Automat(object):
         Be sure to not have any existing references on that instance so
         destructor will be called immediately.
         """
-        # self.log(self.debug_level, 'destroying %r, refs=%d' % (self, sys.getrefcount(self)))
         self._state_callbacks.clear()
         self.stopTimers()
-        # self.state = 'NOT_EXIST'
+        self.state = dead_state
         objects().pop(self.index)
-        # print sys.getrefcount(self)
 
     def state_changed(self, oldstate, newstate, event_string, arg):
         """
@@ -572,14 +594,15 @@ class Automat(object):
 
             cb(oldstate, newstate, event_string, args)
 
-        For example, methodA will be called when machineA become "ONLINE":
+        For example, method_B() will be called when machine_A become "ONLINE":
 
-            machineA.addStateChangedCallback(methodA, None, "ONLINE")
+            machine_A.addStateChangedCallback(method_B, None, "ONLINE")
 
         If you set "None" to both arguments,
         the callback will be executed every time when the state gets changed:
 
-            machineB.addStateChangedCallback(methodB)
+            machineB.addStateChangedCallback(method_B)
+
         """
         key = (oldstate, newstate)
         if key not in self._state_callbacks:

@@ -22,7 +22,7 @@
 
 
 """
-.. module:: broadcasters_finder.
+.. module:: broadcasters_finder
 
 .. role:: red
 
@@ -175,9 +175,9 @@ class BroadcastersFinder(automat.Automat):
         """
         Action method.
         """
-        d = lookup.start()
-        d.addCallback(self._nodes_lookup_finished)
-        d.addErrback(lambda err: self.automat('users-not-found'))
+        t = lookup.start()
+        t.result_defer.addCallback(self._nodes_lookup_finished)
+        t.result_defer.addErrback(lambda err: self.automat('users-not-found'))
 
     def doRememberUser(self, arg):
         """
@@ -231,7 +231,7 @@ class BroadcastersFinder(automat.Automat):
         Remove all references to the state machine object to destroy it.
         """
         callback.remove_inbox_callback(self._inbox_packet_received)
-        automat.objects().pop(self.index)
+        self.unregister()
         global _BroadcastersFinder
         del _BroadcastersFinder
         _BroadcastersFinder = None
@@ -239,7 +239,7 @@ class BroadcastersFinder(automat.Automat):
     #------------------------------------------------------------------------------
 
     def _inbox_packet_received(self, newpacket, info, status, error_message):
-        if  newpacket.Command == commands.Ack() and \
+        if newpacket.Command == commands.Ack() and \
                 newpacket.OwnerID == self.target_idurl and \
                 newpacket.PacketID == 'identity' and \
                 self.state == 'ACK?':

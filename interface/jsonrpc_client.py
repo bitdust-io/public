@@ -46,12 +46,22 @@ from lib.fastjsonrpc.client import Proxy
 
 
 def output(value):
-    print value
+    import pprint
+    pprint.pprint(value)
     reactor.stop()
 
-proxy = Proxy('http://localhost:%d' % settings.DefaultJsonRPCPort())
-# proxy.callRemote('ping', 'http://p2p-id.ru/bitdust_j_vps1014.xml').addBoth(output)
-# proxy.callRemote('config_set', 'logs/debug-level', '20').addBoth(output)
-proxy.callRemote('filemanager_list', 'path=/').addBoth(output)
+#------------------------------------------------------------------------------
 
-reactor.run()
+def main():
+    proxy = Proxy('http://localhost:%d' % settings.DefaultJsonRPCPort())
+    # proxy.callRemote('ping', 'http://p2p-id.ru/bitdust_j_vps1014.xml').addBoth(output)
+    # proxy.callRemote('config_set', 'logs/debug-level', '20').addBoth(output)
+    # proxy.callRemote('filemanager_list', 'path=/').addBoth(output)
+    # proxy.callRemote('keys_list').addBoth(output)
+    # proxy.callRemote('key_create', 'ccc2').addBoth(output)
+    proxy.callRemote('key_get', key_id='cool$testveselin@p2p-id.ru', include_private=True).addBoth(output)
+    reactor.run()
+
+
+if __name__ == '__main__':
+    main()

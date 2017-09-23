@@ -43,8 +43,7 @@ class MinerService(LocalService):
     config_path = 'services/miner/enabled'
 
     def dependent_on(self):
-        return ['service_p2p_hookups',
-                'service_nodes_lookup',
+        return ['service_nodes_lookup',
                 ]
 
     def start(self):
@@ -56,5 +55,14 @@ class MinerService(LocalService):
     def stop(self):
         from coins import coins_miner
         coins_miner.A('stop')
-        coins_miner.Destroy()
+        coins_miner.A('shutdown')
         return True
+
+    def request(self, request, info):
+        # TODO: we can add some limit for number of connections here
+        from p2p import p2p_service
+        return p2p_service.SendAck(request, 'accepted')
+
+    def cancel(self, request, info):
+        from p2p import p2p_service
+        return p2p_service.SendAck(request, 'accepted')

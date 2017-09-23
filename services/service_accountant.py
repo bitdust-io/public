@@ -43,12 +43,14 @@ class CoinsAccountantService(LocalService):
     config_path = 'services/accountant/enabled'
 
     def dependent_on(self):
-        return ['service_p2p_hookups',
+        return ['service_broadcasting',
                 ]
 
     def start(self):
+        from coins import coins_db
         from coins import accountant_node
         from coins import accountants_finder
+        coins_db.init()
         accountants_finder.A('init')
         accountant_node.A('init')
         accountant_node.A('start')
@@ -57,11 +59,13 @@ class CoinsAccountantService(LocalService):
         return True
 
     def stop(self):
+        from coins import coins_db
         from coins import accountant_node
         accountant_node.A().removeStateChangedCallback(
             self._on_accountant_node_switched)
         accountant_node.A('stop')
         accountant_node.A('shutdown')
+        coins_db.shutdown()
         return True
 
     def request(self, request, info):
@@ -74,16 +78,11 @@ class CoinsAccountantService(LocalService):
             lg.exc()
             return None
         if mode != 'join' and mode != 'write' and mode != 'read':
-            lg.out(
-                8,
-                "service_accountant.request DENIED, wrong mode provided : %s" %
-                mode)
+            lg.out(8, "service_accountant.request DENIED, wrong mode provided : %s" % mode)
             return None
         from coins import accountant_node
         if not accountant_node.A():
-            lg.out(
-                8,
-                "service_accountant.request DENIED, accountant_node() state machine not exist")
+            lg.out(8, "service_accountant.request DENIED, accountant_node() state machine not exist")
             return p2p_service.SendFail(
                 request, "accountant_node service not started")
         # if accountant_node.A().state not in ['ACCOUNTANTS?', "READY", "VALID_COIN?", "WRITE_COIN!", ]:
@@ -92,6 +91,8 @@ class CoinsAccountantService(LocalService):
         # currently unavailable")
         if mode == 'join':
             accountant_node.A('accountant-connected', request.OwnerID)
+#             if accountant_node.A().state == 'OFFLINE':
+#                 accountant_node.A('start')
         return p2p_service.SendAck(request, 'accepted')
 
     def _on_accountant_node_switched(self, oldstate, newstate, evt, args):
@@ -99,7 +100,5 @@ class CoinsAccountantService(LocalService):
         from twisted.internet import reactor
         from coins import accountant_node
         if newstate == 'OFFLINE' and oldstate != 'AT_STARTUP':
-            # reactor.callLater(60, accountant_node.A, 'start')
-            lg.out(
-                8,
-                'service_broadcasting._on_accountant_node_switched will try to reconnect again after 1 minute')
+            reactor.callLater(10 * 60, accountant_node.A, 'start')
+            lg.out(8, 'service_broadcasting._on_accountant_node_switched will try to reconnect again after 10 minutes')

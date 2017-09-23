@@ -220,7 +220,7 @@ class ProxySender(automat.Automat):
         """
         Remove all references to the state machine object to destroy it.
         """
-        automat.objects().pop(self.index)
+        self.unregister()
         global _ProxySender
         del _ProxySender
         _ProxySender = None
@@ -271,7 +271,7 @@ class ProxySender(automat.Automat):
             key.SessionKeyType(),
             True,
             src,
-            EncryptFunc=lambda inp: key.EncryptStringPK(publickey, inp))
+            EncryptKey=lambda inp: key.EncryptOpenSSHPublicKey(publickey, inp))
         block_encrypted = block.Serialize()
         newpacket = signed.Packet(
             commands.Relay(),

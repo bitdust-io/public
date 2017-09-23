@@ -73,7 +73,7 @@ from main import settings
 #------------------------------------------------------------------------------
 
 _MyRsaKey = None
-_MyPubKey = None
+_MyKeyObject = None
 
 #------------------------------------------------------------------------------
 
@@ -95,8 +95,8 @@ def InitMyKey(keyfilename=None):
     The size for new key will be taken from settings.
     """
     global _MyRsaKey
-    global _MyPubKey
-    if _MyPubKey is not None:
+    global _MyKeyObject
+    if _MyKeyObject is not None:
         return
     if _MyRsaKey is not None:
         return
@@ -106,7 +106,7 @@ def InitMyKey(keyfilename=None):
 
 def LoadMyKey(keyfilename=None):
     global _MyRsaKey
-    global _MyPubKey
+    global _MyKeyObject
     if keyfilename is None:
         keyfilename = settings.KeyFileName()
     if os.path.exists(keyfilename + '_location'):
@@ -114,15 +114,15 @@ def LoadMyKey(keyfilename=None):
         if os.path.exists(newkeyfilename):
             keyfilename = newkeyfilename
     if os.path.exists(keyfilename):
-        _MyPubKey = keys.Key.fromFile(keyfilename)
-        _MyRsaKey = _MyPubKey.keyObject
+        _MyKeyObject = keys.Key.fromFile(keyfilename)
+        _MyRsaKey = _MyKeyObject.keyObject
         lg.out(4, 'key.InitMyKey loaded private key from %s' % (keyfilename))
         return ValidateKey()
     return False
 
 
 def GenerateNewKey(keyfilename=None):
-    global _MyPubKey
+    global _MyKeyObject
     global _MyRsaKey
     if keyfilename is None:
         keyfilename = settings.KeyFileName()
@@ -132,8 +132,8 @@ def GenerateNewKey(keyfilename=None):
             keyfilename = newkeyfilename
     lg.out(4, 'key.InitMyKey generate new private key')
     _MyRsaKey = RSA.generate(settings.getPrivateKeySize(), os.urandom)
-    _MyPubKey = keys.Key(_MyRsaKey)
-    keystring = _MyPubKey.toString('openssh')
+    _MyKeyObject = keys.Key(_MyRsaKey)
+    keystring = _MyKeyObject.toString('openssh')
     bpio.WriteFile(keyfilename, keystring)
     lg.out(4, '    wrote %d bytes to %s' % (len(keystring), keyfilename))
 
@@ -149,9 +149,9 @@ def ForgetMyKey():
     """
     Remove Private Key from memory.
     """
-    global _MyPubKey
+    global _MyKeyObject
     global _MyRsaKey
-    _MyPubKey = None
+    _MyKeyObject = None
     _MyRsaKey = None
 
 
@@ -167,9 +167,9 @@ def MyPublicKey():
     """
     Return Public part of the Key as openssh string.
     """
-    global _MyPubKey
+    global _MyKeyObject
     InitMyKey()
-    Result = _MyPubKey.public().toString('openssh')
+    Result = _MyKeyObject.public().toString('openssh')
     return Result
 
 
@@ -177,9 +177,9 @@ def MyPrivateKey():
     """
     Return Private part of the Key as openssh string.
     """
-    global _MyPubKey
+    global _MyKeyObject
     InitMyKey()
-    return _MyPubKey.toString('openssh')
+    return _MyKeyObject.toString('openssh')
 
 
 def MyPublicKeyObject():
@@ -187,18 +187,18 @@ def MyPublicKeyObject():
     Return Public part of the Key as object, useful to convert to different
     formats.
     """
-    global _MyPubKey
+    global _MyKeyObject
     InitMyKey()
-    return _MyPubKey.public()
+    return _MyKeyObject.public()
 
 
 def MyPrivateKeyObject():
     """
     Return Private part of the Key as object.
     """
-    global _MyPubKey
+    global _MyKeyObject
     InitMyKey()
-    return _MyPubKey
+    return _MyKeyObject
 
 #------------------------------------------------------------------------------
 
@@ -208,10 +208,10 @@ def Sign(inp):
     Sign some ``inp`` string with our Private Key, this calls PyCrypto method
     ``Crypto.PublicKey.RSA.sign``.
     """
-    global _MyPubKey
+    global _MyKeyObject
     InitMyKey()
     # Makes a list but we just want a string
-    Signature = _MyPubKey.keyObject.sign(inp, '')
+    Signature = _MyKeyObject.keyObject.sign(inp, '')
     # so we take first element in list - need str cause was long
     result = str(Signature[0])
     return result
@@ -354,42 +354,29 @@ def EncryptWithSessionKey(session_key, inp, session_key_type=SessionKeyType()):
 
 #------------------------------------------------------------------------------
 
-
-def DecryptLocalPK(inp):
-    """
-    Decrypt ``inp`` string with your Private Key.
-
-    We only decrypt with our local private key so no argument for that.
-    """
-    global _MyRsaKey
-    InitMyKey()
-    atuple = (inp,)
-    padresult = _MyRsaKey.decrypt(atuple)
-    # remove the "1" added in EncryptBinaryPK
-    result = padresult[1:]
-    return result
-
-
-def EncryptLocalPK(inp):
-    """
-    This is just using local key, encrypt ``inp`` string.
-    """
-    global _MyPubKey
-    InitMyKey()
-    return EncryptBinaryPK(_MyPubKey, inp)
-
-#------------------------------------------------------------------------------
-
-
-def EncryptStringPK(publickeystring, inp):
+def EncryptOpenSSHPublicKey(openssh_string_public, inp):
     """
     Encrypt ``inp`` string with given Public Key.
     """
-    keyobj = keys.Key.fromString(publickeystring)
-    return EncryptBinaryPK(keyobj, inp)
+    keyobj = keys.Key.fromString(openssh_string_public)
+    return EncryptBinaryPublicKey(keyobj, inp)
 
 
-def EncryptBinaryPK(publickey, inp):
+def DecryptOpenSSHPrivateKey(openssh_string_private, inp):
+    """
+    Decrypt ``inp`` string with a Private Key provided as string in openssh format.
+    """
+    key_object = keys.Key.fromString(openssh_string_private)
+    rsa_key = key_object.keyObject
+    atuple = (inp,)
+    padresult = rsa_key.decrypt(atuple)
+    # remove the "1" added in EncryptBinaryPublicKey
+    result = padresult[1:]
+    return result
+
+#------------------------------------------------------------------------------
+
+def EncryptBinaryPublicKey(publickey, inp):
     """
     Encrypt ``inp`` string using given Public Key in the ``publickey`` object.
 
@@ -401,6 +388,29 @@ def EncryptBinaryPK(publickey, inp):
     # So we add a 1 in front.
     atuple = publickey.keyObject.encrypt('1' + inp, "")
     return atuple[0]
+
+
+def EncryptLocalPublicKey(inp):
+    """
+    This is just using local key, encrypt ``inp`` string.
+    """
+    global _MyKeyObject
+    InitMyKey()
+    return EncryptBinaryPublicKey(_MyKeyObject, inp)
+
+
+def DecryptLocalPrivateKey(inp):
+    """
+    Decrypt ``inp`` string with your Private Key.
+    Here we decrypt with our local private key - so no argument for that.
+    """
+    global _MyRsaKey
+    InitMyKey()
+    atuple = (inp,)
+    padresult = _MyRsaKey.decrypt(atuple)
+    # remove the "1" added in EncryptBinaryPublicKey
+    result = padresult[1:]
+    return result
 
 #------------------------------------------------------------------------------
 
@@ -420,7 +430,7 @@ def SpeedTest():
     for i in range(loops):
         Data = os.urandom(dataSZ)
         SessionKey = NewSessionKey()
-        EncryptedSessionKey = EncryptLocalPK(SessionKey)
+        EncryptedSessionKey = EncryptLocalPublicKey(SessionKey)
         EncryptedData = EncryptWithSessionKey(SessionKey, Data)
         Signature = Sign(Hash(EncryptedData))
         packets.append((Data, len(Data), EncryptedSessionKey, EncryptedData, Signature))
@@ -430,7 +440,7 @@ def SpeedTest():
     dt = time.time()
     print 'decrypt now'
     for Data, Length, EncryptedSessionKey, EncryptedData, Signature in packets:
-        SessionKey = DecryptLocalPK(EncryptedSessionKey)
+        SessionKey = DecryptLocalPrivateKey(EncryptedSessionKey)
         paddedData = DecryptWithSessionKey(SessionKey, EncryptedData)
         newData = paddedData[:Length]
         if not VerifySignature(MyPublicKey(), Hash(EncryptedData), Signature):

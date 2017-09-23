@@ -404,7 +404,7 @@ class ProxyReceiver(automat.Automat):
             lg.out(2, 'proxy_receiver.doProcessInboxPacket ERROR reading data from %s' % newpacket.CreatorID)
             return
         try:
-            session_key = key.DecryptLocalPK(block.EncryptedSessionKey)
+            session_key = key.DecryptLocalPrivateKey(block.EncryptedSessionKey)
             padded_data = key.DecryptWithSessionKey(session_key, block.EncryptedData)
             inpt = cStringIO.StringIO(padded_data[:int(block.Length)])
             data = inpt.read()
@@ -516,7 +516,7 @@ class ProxyReceiver(automat.Automat):
         """
         Remove all references to the state machine object to destroy it.
         """
-        automat.objects().pop(self.index)
+        self.unregister()
         global _ProxyReceiver
         del _ProxyReceiver
         _ProxyReceiver = None

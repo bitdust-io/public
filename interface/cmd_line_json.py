@@ -33,9 +33,7 @@ module:: cmd_line_json
 import os
 import sys
 
-from twisted.internet import reactor
 
-from lib.fastjsonrpc.client import Proxy as jsonProxy
 from lib import jsontemplate
 
 from interface import cmd_line_json_templates as templ
@@ -48,8 +46,8 @@ def parser():
     Create an ``optparse.OptionParser`` object to read command line arguments.
     """
     from optparse import OptionParser, OptionGroup
-    from main.help import usage
-    parser = OptionParser(usage=usage())
+    from main.help import usage_text
+    parser = OptionParser(usage=usage_text())
     group = OptionGroup(parser, "Logs")
     group.add_option('-d', '--debug',
                      dest='debug',
@@ -136,6 +134,7 @@ def print_and_stop(result):
     """
     Print text to console and stop the reactor.
     """
+    from twisted.internet import reactor
     import pprint
     pprint.pprint(result, indent=2,)
     reactor.stop()
@@ -157,6 +156,7 @@ def print_template_and_stop(result, template):
     """
     Print text with json template formatting and stop the reactor.
     """
+    from twisted.internet import reactor
     print_template(result, template)
     reactor.stop()
 
@@ -165,6 +165,7 @@ def fail_and_stop(err):
     """
     Send error message to STDOUT and stop the reactor.
     """
+    from twisted.internet import reactor
     try:
         print_text(err.getErrorMessage())
     except:
@@ -174,7 +175,7 @@ def fail_and_stop(err):
 #------------------------------------------------------------------------------
 
 
-def call_jsonrpc_method(method, *args):
+def call_jsonrpc_method(method, *args, **kwargs):
     """
     Method to communicate with existing BitDust process.
 
@@ -182,41 +183,44 @@ def call_jsonrpc_method(method, *args):
     """
     from system import bpio
     from main import settings
+    from lib.fastjsonrpc.client import Proxy as jsonProxy
     try:
         local_port = int(bpio.ReadBinaryFile(settings.LocalJsonRPCPortFilename()))
     except:
         local_port = settings.DefaultJsonRPCPort()
     proxy = jsonProxy('http://127.0.0.1:' + str(local_port))
-    return proxy.callRemote(method, *args)
+    return proxy.callRemote(method, *args, **kwargs)
 
 
-def call_jsonrpc_method_and_stop(method, *args):
+def call_jsonrpc_method_and_stop(method, *args, **kwargs):
     """
-    
     """
-    d = call_jsonrpc_method(method, *args)
+    from twisted.internet import reactor
+    d = call_jsonrpc_method(method, *args, **kwargs)
     d.addCallback(print_and_stop)
     d.addErrback(fail_and_stop)
     reactor.run()
     return 0
 
 
-def call_jsonrpc_method_template_and_stop(method, template, *args):
+def call_jsonrpc_method_template_and_stop(method, template, *args, **kwargs):
     """
     
     """
-    d = call_jsonrpc_method(method, *args)
+    from twisted.internet import reactor
+    d = call_jsonrpc_method(method, *args, **kwargs)
     d.addCallback(print_template_and_stop, template)
     d.addErrback(fail_and_stop)
     reactor.run()
     return 0
 
 
-def call_jsonrpc_method_transform_template_and_stop(method, template, transform, *args):
+def call_jsonrpc_method_transform_template_and_stop(method, template, transform, *args, **kwargs):
     """
     
     """
-    d = call_jsonrpc_method(method, *args)
+    from twisted.internet import reactor
+    d = call_jsonrpc_method(method, *args, **kwargs)
     d.addCallback(lambda result: print_template_and_stop(transform(result), template))
     d.addErrback(fail_and_stop)
     reactor.run()
@@ -328,6 +332,52 @@ def run_now(opts, args):
 #------------------------------------------------------------------------------
 
 
+def cmd_deploy(opts, args, overDict):
+    from main import settings
+    from system import bpio
+    source_dir = bpio.getExecutableDir()
+    venv_path = os.path.join(settings.BaseDir(), 'venv')
+    if len(args) > 1 and not os.path.exists(args[1]) and os.path.isdir(os.path.dirname(args[1])):
+        venv_path = args[1]
+    script_path = os.path.join(settings.BaseDir(), 'bitdust')
+    status = os.system('rm -rf {}'.format(venv_path))
+    if status != 0:
+        print_text('\nClean up of existing virtual environment files failed!\n')
+        return status
+    status = os.system('virtualenv -p python2.7 {}'.format(venv_path))
+    if status != 0:
+        print_text('\nFailed to create virtual environment, please check/install virtualenv package\n')
+        return status
+    status = os.system('{}/bin/pip install -r "{}/requirements.txt"'.format(venv_path, source_dir))
+    if status != 0:
+        depends = [
+            'git',
+            'python-dev',
+            'python-setuptools',
+            'python-pip',
+            'python-virtualenv',
+            'libffi-dev',
+            'libssl-dev',
+        ]
+        print_text('\nFound an error. Try to install all binary package dependencies:\n')
+        # TODO: try to detect package manager on target OS: debian/mandrake/OSX
+        print_text('    sudo apt-get install %s\n\n' % (' '.join(depends)))
+        return status
+    script = "#!/bin/sh\n"
+    script += '# This is a short shell script to create an alias in OS for BitDust software.\n'
+    script += '# NOTICE: BitDust software do not require root permissions to run, please start as normal user.\n\n'
+    script += '{}/bin/python {}/bitdust.py "$@"\n\n'.format(venv_path, source_dir)
+    bpio.WriteFileSimple(script_path, script)
+    os.chmod(script_path, 0775)
+    print_text('\nBitDust application files created successfully in {}'.format(settings.BaseDir()))
+    print_text('To run the programm use this executable script:\n\n    {}\n'.format(script_path))
+    print_text('To create system-wide shell command, add /Users/veselin/.bitdust/bitdust to your PATH, or create a symlink:\n')
+    print_text('    sudo ln -s {} /usr/local/bin/bitdust\n\n'.format(script_path))
+    return 0
+
+#------------------------------------------------------------------------------
+
+
 def cmd_reconnect(opts, args, overDict):
     tpl = jsontemplate.Template(templ.TPL_RAW)
     return call_jsonrpc_method_template_and_stop('reconnect', tpl)
@@ -355,6 +405,8 @@ def cmd_identity(opts, args, overDict, running):
             print_text('local identity is not exist')
         return 0
 
+    from twisted.internet import reactor
+
     def _register():
         if len(args) <= 2:
             return 2
@@ -368,14 +420,18 @@ def cmd_identity(opts, args, overDict, running):
         from automats import automat
         from main import initializer
         from lib import misc
+        from logs import lg
         if not misc.ValidUserName(args[2]):
+            print_text('invalid user name')
             return 0
+        automat.LifeBegins(lg.when_life_begins())
+        automat.OpenLogFile(settings.AutomatsLog())
         initializer.A('run-cmd-line-register', {'username': args[2], 'pksize': pksize})
         reactor.run()
         automat.objects().clear()
+        my_id.loadLocalIdentity()
         if my_id.isLocalIdentityReady():
-            print_text('new identity created:')
-            print_text(my_id.getLocalIdentity().serialize())
+            print_text('\n' + my_id.getLocalIdentity().serialize())
         else:
             print_text('identity creation FAILED')
         return 0
@@ -406,12 +462,15 @@ def cmd_identity(opts, args, overDict, running):
             return 2
         from automats import automat
         from main import initializer
+        from logs import lg
+        automat.LifeBegins(lg.when_life_begins())
+        automat.OpenLogFile(settings.AutomatsLog())
         initializer.A('run-cmd-line-recover', {'idurl': idurl, 'keysrc': txt})
         reactor.run()
         automat.objects().clear()
+        my_id.loadLocalIdentity()
         if my_id.isLocalIdentityReady():
-            print_text('your identity were restored:')
-            print_text(my_id.getLocalIdentity().serialize())
+            print_text('\n' + my_id.getLocalIdentity().serialize())
         else:
             print_text('identity recovery FAILED')
         return 0
@@ -421,19 +480,19 @@ def cmd_identity(opts, args, overDict, running):
             print_text('local identity [%s] already exist\n' % my_id.getIDName())
             return 1
         if running:
-            print_text('BitDust is running at the moment, need to stop the software at first\n')
+            print_text('BitDust is running at the moment, need to stop the software first\n')
             return 0
         return _register()
 
     if args[1].lower() in ['restore', 'recover', 'read', 'load', ]:
         if running:
-            print_text('BitDust is running at the moment, need to stop the software at first\n')
+            print_text('BitDust is running at the moment, need to stop the software first\n')
             return 0
         return _recover()
 
     if args[1].lower() in ['delete', 'remove', 'erase', 'del', 'rm', 'kill']:
         if running:
-            print_text('BitDust is running at the moment, need to stop the software at first\n')
+            print_text('BitDust is running at the moment, need to stop the software first\n')
             return 0
         oldname = my_id.getIDName()
         my_id.forgetLocalIdentity()
@@ -447,51 +506,69 @@ def cmd_identity(opts, args, overDict, running):
 
 
 def cmd_key(opts, args, overDict, running, executablePath):
-    from main import settings
-    from lib import misc
-    from system import bpio
-    from userid import my_id
-    from crypt import key
-    settings.init()
-    my_id.init()
-
-    if not key.LoadMyKey():
-        print_text('private key not exist or is not valid\n')
-        return 0
-    if not my_id.isLocalIdentityReady():
-        print_text('local identity not exist, your key worth nothing\n')
+    if not running:
+        print_text('BitDust is not running at the moment\n')
         return 0
 
-    if len(args) == 2:
-        if args[1] == 'copy':
-            TextToSave = my_id.getLocalID() + "\n" + key.MyPrivateKey()
-            misc.setClipboardText(TextToSave)
+    if len(args) == 1 or (len(args) == 2 and args[1] in ['list', 'ls', ]):
+        tpl = jsontemplate.Template(templ.TPL_KEYS_LIST)
+        return call_jsonrpc_method_template_and_stop('keys_list', tpl, include_private=False)
+
+    if len(args) >= 3 and args[1] in ['create', 'new', 'gen', 'generate', 'make', ]:
+        key_id = args[2]
+        key_sz = 4096
+        if len(args) > 3:
+            key_sz = int(args[3])
+        tpl = jsontemplate.Template(templ.TPL_KEY_CREATE)
+        return call_jsonrpc_method_template_and_stop('key_create', tpl, key_id, key_sz)
+
+    if len(args) >= 2 and args[1] in ['copy', 'cp', 'bk', 'backup', 'save', ]:
+        from twisted.internet import reactor
+
+        def _on_key(key_json):
+            TextToSave = key_json['result'][0]['creator'] + "\n" + key_json['result'][0]['private']
+            if len(args) >= 4 and args[1] in ['bk', 'backup', 'save', ]:
+                from system import bpio
+                curpath = os.getcwd()
+                os.chdir(executablePath)
+                filenameto = bpio.portablePath(args[3])
+                os.chdir(curpath)
+                # filenameto = bpio.portablePath(args[3])
+                if not bpio.AtomicWriteFile(filenameto, TextToSave):
+                    del TextToSave
+                    print_text('error writing to %s\n' % filenameto)
+                    reactor.stop()
+                    return 1
+                print_text('private key "%s" was stored in "%s"' % (key_json['result'][0]['id'], filenameto))
+            else:
+                from lib import misc
+                misc.setClipboardText(TextToSave)
+                print_text('key "%s" was sent to clipboard, you can use Ctrl+V to paste your private key where you want' % key_json['result'][0]['id'])
             del TextToSave
-            print_text('now you can "paste" with Ctr+V your private key where you want')
-            print_text('WARNING! keep your key in safe place, do not publish it!\n')
-            return 0
-        elif args[1] == 'print':
-            TextToSave = my_id.getLocalID() + "\n" + key.MyPrivateKey()
-            print_text('\n' + TextToSave + '\n')
-            del TextToSave
-            print_text('WARNING! keep your key in safe place, do not publish it!\n')
-            return 0
-    elif len(args) == 3:
-        if args[1] == 'copy' or args[1] == 'save' or args[1] == 'backup':
-            from system import bpio
-            curpath = os.getcwd()
-            os.chdir(executablePath)
-            filenameto = bpio.portablePath(args[2])
-            os.chdir(curpath)
-            TextToSave = my_id.getLocalID() + "\n" + key.MyPrivateKey()
-            if not bpio.AtomicWriteFile(filenameto, TextToSave):
-                del TextToSave
-                print_text('error writing to %s\n' % filenameto)
-                return 1
-            del TextToSave
-            print_text('your private key were copied to file %s' % filenameto)
-            print_text('WARNING! keep your key in safe place, do not publish it!\n')
-            return 0
+            if key_json['result'][0]['alias'] == 'master':
+                print_text('WARNING! keep your "master" key in safe place, do not publish it!\n')
+            reactor.stop()
+            return
+
+        key_id = 'master' if len(args) < 3 else args[2]
+        d = call_jsonrpc_method('key_get', key_id=key_id, include_private=True)
+        d.addCallback(_on_key)
+        d.addErrback(fail_and_stop)
+        reactor.run()
+        return 0
+
+    if len(args) >= 2 and args[1] in ['print', 'get', 'show', ]:
+        tpl = jsontemplate.Template(templ.TPL_KEY_GET)
+        key_id = 'master' if len(args) < 3 else args[2]
+        return call_jsonrpc_method_template_and_stop('key_get', tpl, key_id=key_id, include_private=True)
+
+    if len(args) >= 3 and args[1] in ['delete', 'erase', 'remove', 'clear', 'del', 'rm', 'kill', ]:
+        tpl = jsontemplate.Template(templ.TPL_RAW)
+        return call_jsonrpc_method_template_and_stop('key_erase', tpl, key_id=args[2])
+
+    if len(args) >= 4 and args[1] in ['share', 'send', 'transfer', 'access', ]:
+        tpl = jsontemplate.Template(templ.TPL_RAW)
+        return call_jsonrpc_method_template_and_stop('key_share', tpl, key_id=args[2], idurl=args[3])
 
     return 2
 
@@ -554,19 +631,26 @@ def cmd_backup(opts, args, overDict, executablePath):
         tpl = jsontemplate.Template(templ.TPL_BACKUPS_TASKS_LIST)
         return call_jsonrpc_method_template_and_stop('backups_queue', tpl)
 
-    if len(args) >= 2 and args[1] in ['bind', 'map', ]:
+    if len(args) > 3 and args[1] in ['bind', 'map', ]:
         tpl = jsontemplate.Template(templ.TPL_RAW)
+        key_id = args[4] if len(args) > 4 else None
         if os.path.exists(args[2]):
-            return call_jsonrpc_method_template_and_stop('backup_map_path', tpl, args[2])
+            return call_jsonrpc_method_template_and_stop('backup_map_path', tpl, args[2], args[3], key_id)
         print_text('path %s not exist\n' % args[2])
         return 1
 
-    if len(args) >= 2 and args[1] in ['add', 'append', 'insert', ]:
+    if len(args) >= 2 and args[1] in ['add', 'append', 'insert', 'make', 'create', ]:
         tpl = jsontemplate.Template(templ.TPL_RAW)
+        key_id = args[3] if len(args) > 3 else None
+        if args[1] in ['make', 'create', ]:
+            if args[0] in ['dir', 'folder', ]:
+                return call_jsonrpc_method_template_and_stop('backup_dir_make', tpl, args[2], key_id)
+            else:
+                return call_jsonrpc_method_template_and_stop('backup_file_add', tpl, args[2], key_id)
         if os.path.isdir(args[2]):
-            return call_jsonrpc_method_template_and_stop('backup_dir_add', tpl, args[2])
+            return call_jsonrpc_method_template_and_stop('backup_dir_add', tpl, args[2], key_id)
         elif os.path.isfile(args[2]):
-            return call_jsonrpc_method_template_and_stop('backup_file_add', tpl, args[2])
+            return call_jsonrpc_method_template_and_stop('backup_file_add', tpl, args[2], key_id)
         print_text('path %s not exist\n' % args[2])
         return 1
 
@@ -588,7 +672,7 @@ def cmd_backup(opts, args, overDict, executablePath):
             return call_jsonrpc_method_template_and_stop('backup_delete_id', tpl, args[2])
         return call_jsonrpc_method_template_and_stop('backup_delete_path', tpl, args[2])
 
-    if len(args) > 2 and args[1] in ['cancel', 'abort']:
+    if len(args) > 2 and args[1] in ['cancel', 'abort', ]:
         tpl = jsontemplate.Template(templ.TPL_RAW)
         if packetid.IsBackupIDCorrect(args[2]):
             return call_jsonrpc_method_template_and_stop('backup_abort_running', tpl, args[2])
@@ -606,14 +690,14 @@ def cmd_backup(opts, args, overDict, executablePath):
             return 1
         return call_jsonrpc_method_template_and_stop('backup_start_path', tpl, args[2])
 
-    if len(args) == 2:
-        tpl = jsontemplate.Template(templ.TPL_RAW)
-        if packetid.Valid(args[1]):
-            return call_jsonrpc_method_template_and_stop('backup_start_id', tpl, args[1])
-        if not os.path.exists(os.path.abspath(args[1])):
-            print_text('path %s not exist\n' % args[1])
-            return 1
-        return call_jsonrpc_method_template_and_stop('backup_start_path', tpl, args[1])
+#     if len(args) == 2:
+#         tpl = jsontemplate.Template(templ.TPL_RAW)
+#         if packetid.Valid(args[1]):
+#             return call_jsonrpc_method_template_and_stop('backup_start_id', tpl, args[1])
+#         if not os.path.exists(os.path.abspath(args[1])):
+#             print_text('path %s not exist\n' % args[1])
+#             return 1
+#         return call_jsonrpc_method_template_and_stop('backup_start_path', tpl, args[1])
 
     return 2
 
@@ -676,35 +760,6 @@ def cmd_integrate(opts, args, overDict):
     src += 'python %s/bitdust.py "$@"\n\n' % curpath
     print_text(src)
     return 0
-#     print_text('creating a command script : %s ... ' % cmdpath, nl='')
-#     result = False
-#     try:
-#         f = open(cmdpath, 'w')
-#         f.write(src)
-#         f.close()
-#         os.chmod(cmdpath, 0755)
-#         result = True
-#         print_text('SUCCESS')
-#     except:
-#         print_text('FAILED')
-#     if not result:
-#         cmdpath = os.path.join(os.path.expanduser('~'), 'bin', 'bitdust')
-#         print_text('try to create a command script in user home folder : %s ... ' % cmdpath, nl='')
-#         try:
-#             if not os.path.isdir(os.path.join(os.path.expanduser('~'), 'bin')):
-#                 os.mkdir(os.path.join(os.path.expanduser('~'), 'bin'))
-#             f = open(cmdpath, 'w')
-#             f.write(src)
-#             f.close()
-#             os.chmod(cmdpath, 0755)
-#             result = True
-#             print_text('SUCCESS')
-#         except:
-#             print_text('FAILED')
-#             return 0
-#     if result:
-#         print_text('now use "bitdust" command to access the BitDust software.\n')
-#     return 0
 
 #------------------------------------------------------------------------------
 
@@ -1005,6 +1060,10 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
     from system import bpio
     bpio.init()
 
+    #---install---
+    if cmd in ['deploy', 'install', 'venv', 'virtualenv', ]:
+        return cmd_deploy(opts, args, overDict)
+
     #---start---
     if cmd == '' or cmd == 'start' or cmd == 'go' or cmd == 'run':
         appList = bpio.find_process([
@@ -1147,7 +1206,7 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
             for k in config.conf().listAllEntries():
                 print k, config.conf().getData(k)
         else:
-            print_text(help.help())
+            print_text(help.help_text())
             print_text(pars.format_option_help())
         return 0
 
@@ -1165,7 +1224,7 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
         return cmd_identity(opts, args, overDict, running)
 
     #---key---
-    elif cmd == 'key':
+    elif cmd in ['key', 'keys', 'pk', 'private_key', 'priv', ]:
         return cmd_key(opts, args, overDict, running, executablePath)
 
     #---ping---
@@ -1249,7 +1308,7 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
         return cmd_friend(opts, args, overDict)
 
     #---backup---
-    elif cmd in ['file', 'files', 'fi', 'fs', 'backup', 'backups', 'bk', 'up', 'upload', 'uploads', ]:
+    elif cmd in ['file', 'files', 'fi', 'fs', 'backup', 'backups', 'bk', 'up', 'upload', 'uploads', 'folder', 'dir', ]:
         if not running:
             print_text('BitDust is not running at the moment\n')
             return 0

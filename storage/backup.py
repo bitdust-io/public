@@ -133,11 +133,17 @@ class backup(automat.Automat):
         'timer-001sec': (0.01, ['READ']),
     }
 
-    def __init__(self, backupID, pipe,
-                 finishCallback=None, blockResultCallback=None,
-                 blockSize=None, sourcePath=None):
+    def __init__(self,
+                 backupID,
+                 pipe,
+                 finishCallback=None,
+                 blockResultCallback=None,
+                 blockSize=None,
+                 sourcePath=None,
+                 keyID=None, ):
         self.backupID = backupID
         self.sourcePath = sourcePath
+        self.keyID = keyID
         self.eccmap = eccmap.Current()
         self.pipe = pipe
         self.blockSize = blockSize
@@ -256,7 +262,7 @@ class backup(automat.Automat):
         """
         Action method.
         """
-        events.info('backup', '%s started' % self.backupID)
+        events.send('backup-started', dict(backup_id=self.backupID))
 
     def doRead(self, arg):
         def readChunk():
@@ -308,11 +314,13 @@ class backup(automat.Automat):
                 key.NewSessionKey(),
                 key.SessionKeyType(),
                 self.stateEOF,
-                src,)
+                src,
+                EncryptKey=self.keyID,
+            )
             del src
             if _Debug:
-                lg.out(_DebugLevel, 'backup.doEncryptBlock blockNumber=%d size=%d atEOF=%s dt=%s' % (
-                    self.blockNumber, self.currentBlockSize, self.stateEOF, str(time.time() - dt)))
+                lg.out(_DebugLevel, 'backup.doEncryptBlock blockNumber=%d size=%d atEOF=%s dt=%s EncryptKey=%s' % (
+                    self.blockNumber, self.currentBlockSize, self.stateEOF, str(time.time() - dt), self.keyID))
             return block
         maybeDeferred(_doBlock).addCallback(
             lambda block: self.automat('block-encrypted', block),)
@@ -386,11 +394,11 @@ class backup(automat.Automat):
         if self.ask4abort:
             if self.finishCallback:
                 self.finishCallback(self.backupID, 'abort')
-            events.info('backup', '%s aborted' % self.backupID)
+            events.send('backup-aborted', dict(backup_id=self.backupID))
         else:
             if self.finishCallback:
                 self.finishCallback(self.backupID, 'done')
-            events.info('backup', '%s done successfully' % self.backupID)
+            events.send('backup-done', dict(backup_id=self.backupID))
 
     def doDestroyMe(self, arg):
         self.currentBlockData.close()
@@ -428,7 +436,7 @@ class backup(automat.Automat):
             if _Debug:
                 lg.out(_DebugLevel, 'backup._raidmakeCallback WARNING - result is None :  %r eof=%s dt=%s' % (
                     blockNumber, str(self.stateEOF), str(time.time() - dt)))
-            events.info('backup', '%s aborted' % self.backupID)
+            events.send('backup-aborted', dict(backup_id=self.backupID))
             self._kill_pipe()
         else:
             if _Debug:

@@ -62,22 +62,26 @@ if __name__ == '__main__':
 
 from logs import lg
 
-from lib import schedule
-from lib import maths
-
 from system import bpio
 
 from main import settings
+from main import events
 
 #------------------------------------------------------------------------------
 
 _CurrentProcess = None
-_FirstRunDelay = 3600
+_FirstRunDelay = 30
 _LoopInterval = 3600 * 6
 _ShedulerTask = None
 
 #------------------------------------------------------------------------------
 
+def write2log(txt):
+    out_file = file(settings.UpdateLogFilename(), 'a')
+    print >>out_file, txt
+    out_file.close()
+
+#------------------------------------------------------------------------------
 
 def init():
     lg.out(4, 'git_proc.init')
@@ -96,19 +100,25 @@ def shutdown():
 #------------------------------------------------------------------------------
 
 
-def update_callback():
-    lg.out(6, 'git_proc.update_callback')
-
-
 def sync_callback(result):
+    """
+    """
     lg.out(6, 'git_proc.sync_callback: %s' % result)
+
+    if result == 'code-fetched':
+        events.send('source-code-fetched')
+    elif result == 'up-to-date':
+        events.send('source-code-up-to-date')
+    else:
+        events.send('source-code-update-error', dict(result=result))
+
     try:
         from system import tray_icon
         if result == 'error':
             # tray_icon.draw_icon('error')
             # reactor.callLater(5, tray_icon.restore_icon)
             return
-        elif result == 'new-data':
+        elif result == 'code-fetched':
             tray_icon.set_icon('updated')
             return
     except:
@@ -140,64 +150,87 @@ def loop(first_start=False):
 #------------------------------------------------------------------------------
 
 
-def sync(callback_func=None):
+def sync(callback_func=None, update_method='rebase'):
     """
-    
+    Runs commands and process stdout and stderr to recogneze the result:
+
+        git fetch --all -v
+        git rebase origin/master -v
+
     """
-    def _reset_done(response, retcode, result):
+    def _reset_done(response, error, retcode, result):
         if callback_func is None:
             return
         callback_func(result)
 
-    def _fetch_done(response, retcode):
-        result = 'up-to-date'
+    def _rebase_done(response, error, retcode, result):
+        if callback_func is None:
+            return
+        if retcode != 0:
+            result = 'sync-error'
+        else:
+            if response.count('Changes from') or response.count('Fast-forwarded'):
+                result = 'code-fetched'
+            else:
+                result = 'up-to-date'
+        callback_func(result)
+
+    def _fetch_done(response, error, retcode):
+        if retcode != 0:
+            if callback_func:
+                callback_func('sync-error')
+            return
+        result = 'sync-error'
         if response.count('Unpacking') or \
             (response.count('master') and response.count('->')) or \
             response.count('Updating') or \
             response.count('Receiving') or \
                 response.count('Counting'):
-            result = 'new-data'
-        else:
-            if retcode != 0:
-                result = 'sync-error'
-        if retcode == 0:
+            result = 'new-code'
+        if update_method == 'reset':
             run(['reset', '--hard', 'origin/master', ],
-                lambda resp, ret: _reset_done(resp, ret, result))
+                callback=lambda resp, err, ret: _reset_done(resp, err, ret, result))
+        elif update_method == 'rebase':
+            run(['rebase', 'origin/master', '-v'],
+                callback=lambda resp, err, ret: _rebase_done(resp, err, ret, result))
         else:
-            if callback_func:
-                callback_func(result)
-    run(['fetch', '--all', '-v'], _fetch_done)
+            raise Exception('invalid update method: %s' % update_method)
+
+    run(['fetch', '--all', '-v'], callback=_fetch_done)
 
 #------------------------------------------------------------------------------
 
 
-def run(cmdargs, callback_func=None):
+def run(cmdargs, base_dir=None, git_bin=None, env=None, callback=None):
     """
-    
     """
     if _Debug:
         lg.out(_DebugLevel, 'git_proc.run')
+    base_dir = base_dir or bpio.getExecutableDir()
     if bpio.Windows():
         cmd = ['git', ] + cmdargs
-        exec_dir = bpio.getExecutableDir()
-        git_exe = bpio.portablePath(os.path.join(exec_dir, '..', 'git', 'bin', 'git.exe'))
+        if git_bin:
+            git_exe = git_bin
+        else:
+            git_exe = bpio.portablePath(os.path.join(base_dir, '..', 'git', 'bin', 'git.exe'))
         if not os.path.isfile(git_exe):
             if _Debug:
                 lg.out(_DebugLevel, '    not found git.exe, try to run from shell')
             try:
-                response, retcode = execute_in_shell(cmd, base_dir=bpio.getExecutableDir())
+                response, error, retcode = execute_in_shell(cmd, base_dir=base_dir)
             except:
                 response = ''
+                error = ''
                 retcode = 1
-            if callback_func:
-                callback_func(response, retcode)
+            if callback:
+                callback(response, error, retcode)
             return
         if _Debug:
             lg.out(_DebugLevel, '    found git in %s' % git_exe)
         cmd = [git_exe, ] + cmdargs
     else:
-        cmd = ['git', ] + cmdargs
-    execute(cmd, callback=callback_func, base_dir=bpio.getExecutableDir())
+        cmd = [git_bin or 'git', ] + cmdargs
+    execute(cmd, callback=callback, base_dir=base_dir, env=env)
 
 #------------------------------------------------------------------------------
 
@@ -208,6 +241,7 @@ def execute_in_shell(cmdargs, base_dir=None):
     import subprocess
     if _Debug:
         lg.out(_DebugLevel, 'git_proc.execute_in_shell: "%s"' % (' '.join(cmdargs)))
+    write2log('EXECUTE in shell: %s, base_dir=%s' % (cmdargs, base_dir))
     _CurrentProcess = nonblocking.Popen(
         cmdargs,
         shell=True,
@@ -215,19 +249,23 @@ def execute_in_shell(cmdargs, base_dir=None):
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,)
-    out_data = _CurrentProcess.communicate()[0]
+    result = _CurrentProcess.communicate()
+    out_data = result[0]
+    err_data = result[1]
+    write2log('STDOUT:\n%s\nSTDERR:\n%s\n' % (out_data, err_data))
     returncode = _CurrentProcess.returncode
     if _Debug:
-        lg.out(_DebugLevel, 'git_proc.execute_in_shell returned: %s\n%s' % (returncode, out_data))
-    return (out_data, returncode)  # _CurrentProcess
+        lg.out(_DebugLevel, 'git_proc.execute_in_shell returned: %s, stdout bytes: %d, stderr bytes: %d' % (
+            returncode, len(out_data), len(err_data)))
+    return (out_data, err_data, returncode)  # _CurrentProcess
 
 #------------------------------------------------------------------------------
 
 
 class GitProcessProtocol(protocol.ProcessProtocol):
 
-    def __init__(self, callback):
-        self.callback = callback
+    def __init__(self, callbacks=[]):
+        self.callbacks = callbacks
         self.out = ''
         self.err = ''
 
@@ -246,14 +284,15 @@ class GitProcessProtocol(protocol.ProcessProtocol):
     def processEnded(self, reason):
         if _Debug:
             lg.out(_DebugLevel, 'git process FINISHED : %s' % reason.value.exitCode)
-        if self.callback:
-            self.callback(self.out, reason.value.exitCode)
+        for cb in self.callbacks:
+            cb(self.out, self.err, reason.value.exitCode)
 
 
-def execute(cmdargs, base_dir=None, process_protocol=None, callback=None):
+def execute(cmdargs, base_dir=None, process_protocol=None, env=None, callback=None):
     global _CurrentProcess
     if _Debug:
         lg.out(_DebugLevel, 'git_proc.execute: "%s" in %s' % (' '.join(cmdargs), base_dir))
+    write2log('EXECUTE: %s, base_dir=%s' % (cmdargs, base_dir))
     executable = cmdargs[0]
     if bpio.Windows():
         from twisted.internet import _dumbwin32proc
@@ -274,10 +313,13 @@ def execute(cmdargs, base_dir=None, process_protocol=None, callback=None):
         setattr(_dumbwin32proc.win32process, 'CreateProcess', fake_createprocess)
 
     if process_protocol is None:
-        process_protocol = GitProcessProtocol(callback)
+        process_protocol = GitProcessProtocol(callbacks=[
+            lambda out, err, ret_code: write2log('STDOUT:\n%s\nSTDERR:\n%s\n' % (out, err)),
+            callback,
+        ])
     try:
         _CurrentProcess = reactor.spawnProcess(
-            process_protocol, executable, cmdargs, path=base_dir)
+            process_protocol, executable, cmdargs, path=base_dir, env=env)
     except:
         lg.exc()
         return None
@@ -286,6 +328,7 @@ def execute(cmdargs, base_dir=None, process_protocol=None, callback=None):
     return _CurrentProcess
 
 #------------------------------------------------------------------------------
+
 
 if __name__ == "__main__":
     bpio.init()

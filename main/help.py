@@ -32,11 +32,11 @@ instructions.
 """
 
 
-
-def usage():
+def usage_text():
     return '''usage: bitdust [options] [command] [arguments]
 
 Commands:
+  install
   start
   detach
   restart
@@ -46,15 +46,18 @@ Commands:
   identity create <username> [private key size]
   identity restore <private key source file> [IDURL]
   identity erase
-  key copy
-  key backup <destination filename to write your private key>
-  key print
+  key list
+  key create <key id>
+  key delete <key id>
+  key get [key_id]
+  key copy [key id]
+  key backup <key id> <filename>
   get <option>
   set <option> [value]
   set list
   file list
   file idlist
-  file bind <local file or folder>
+  dir make <catalog path> [key id]
   file add <local file or folder>
   file addtree <folder path>
   file start <local path or ID>
@@ -82,7 +85,7 @@ Commands:
   service <service name>
   ping <IDURL>
   chat
-  chat send <IDURL> <"text message">
+  chat send <IDURL> "<text message>"
   api <method> [params]
   version
   help
@@ -92,10 +95,13 @@ Commands:
 #------------------------------------------------------------------------------
 
 
-def help():
+def help_text():
     return '''usage: bitdust [options] [command] [arguments]
 
 Commands:
+  install               create virtual environment and deploy
+                        Python2.7 dependencies in ~/.bitdust/venv/
+
   [start]               start main BitDust process
 
   detach                start BitDust in as a daemon process
@@ -120,13 +126,23 @@ Commands:
 
   identity erase        delete local identity from this machine
 
-  key copy              copy private key to clipboard, use Ctrl+V to paste it
+  key list              list details for known private keys
 
-  key backup <a filename for copy of private key>
+  key create <key_id> [size]
+                        generate a new private key with given ID
+
+  key delete <key_id>
+                        erase given private key
+                        WARNING!!! all data encrypted with that key will be lost
+
+  key get [key_id]      prints private key details to console
+                        WARNING!!! never publish your "master" key
+
+  key copy [key_id]     copy given private key to clipboard, use Ctrl+V to paste it
+                        WARNING!!! never publish your "master" key
+
+  key backup <key_id> <filename>
                         copy private key into file
-
-  key print             print private key to console
-                        WARNING!!! do not publish your key
 
   get <option>          print current value for given program setting
 
@@ -138,8 +154,8 @@ Commands:
 
   file idlist           show a list of items already uploaded on remote peers
 
-  file bind <local path>
-                        add given path as a top level item in the catalog
+  dir make <catalog path> [key id]
+                        create an empty folder under given path in catalog
 
   file add <local path>
                         replicate given path into the catalog,
@@ -221,7 +237,7 @@ Commands:
   chat                  start a chat session, send/listen text
                         messages from other users
 
-  chat send <IDURL> <"text message">
+  chat send <IDURL> "<text message>"
                         send a single text message to remote user
 
   api <method> [params] execute API method and return JSON response
@@ -234,26 +250,8 @@ Commands:
 
 '''
 
-
-# recover <private key filename> [idurl or username]
-#                       recover existing account with your private key file
-#
-#  schedule <folder> [schedule in compact format]
-#                        set or get a schedule for a folder to start backups automatically
-#   help schedule         print format description to set scheduled backup
-#  money                 show the financial status
-#
-#  money transfer <username or idurl> <amount>
-#                        transfer money to another user
-#
-#  money receipts        show receipts history
-#
-#  money receipt <receipt ID>
-#                        show single receipt info
-#
-
-
 #------------------------------------------------------------------------------
+
 
 def schedule_format():
     return '''

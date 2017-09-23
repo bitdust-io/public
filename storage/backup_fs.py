@@ -60,6 +60,7 @@ import os
 import sys
 import cStringIO
 import time
+import json
 
 #------------------------------------------------------------------------------
 
@@ -86,10 +87,12 @@ UNKNOWN = -1
 FILE = 0
 DIR = 1
 PARENT = 2
-TYPES = {UNKNOWN: 'UNKNOWN',
-         FILE: 'FILE',
-         DIR: 'DIR',
-         PARENT: 'PARENT', }
+TYPES = {
+    UNKNOWN: 'UNKNOWN',
+    FILE: 'FILE',
+    DIR: 'DIR',
+    PARENT: 'PARENT',
+}
 
 #------------------------------------------------------------------------------
 
@@ -201,16 +204,23 @@ class FSItemInfo():
     the index.
     """
 
-    def __init__(self, name='', path='', typ=UNKNOWN):
+    def __init__(self, name='', path_id='', typ=UNKNOWN, key_id=None):
         if isinstance(name, unicode):
             self.unicodename = name
         else:
             self.unicodename = unicode(name)
-        self.path = path
+        self.path_id = path_id
         self.type = typ
         self.size = -1
+        self.key_id = key_id
         self.versions = {}  # set()
         # print self # typ, self.unicodename, path
+
+    def __repr__(self):
+        return '<%s %s %d %s>' % (TYPES[self.type], misc.unicode_to_str_safe(self.name()), self.size, self.key_id)
+
+    def filename(self):
+        return os.path.basename(self.unicodename)
 
     def name(self):
         return self.unicodename
@@ -223,11 +233,11 @@ class FSItemInfo():
 
     def read_stats(self, path):
         if not bpio.pathExist(path):
-            self.size = -1
-            return
+            # self.size = -1
+            return False
         if bpio.pathIsDir(path):
-            self.size = -1
-            return
+            # self.size = -1
+            return False
         try:
             s = os.stat(path)
         except:
@@ -235,9 +245,10 @@ class FSItemInfo():
                 s = os.stat(path.decode('utf-8'))
             except:
                 lg.exc()
-                self.size = -1
-                return
+                # self.size = -1
+                return False
         self.size = long(s.st_size)
+        return True
 
     def read_versions(self, path):
         path = bpio.portablePath(path)
@@ -337,29 +348,52 @@ class FSItemInfo():
                 version, maxblock, sz = word, -1, -1
             self.set_version_info(version, maxblock, sz)
 
-    def serialize(self, encoding='utf-8'):
+    def serialize(self, encoding='utf-8', to_json=False):
+        if to_json:
+            return {
+                'n': self.unicodename.encode(encoding),
+                'i': str(self.path_id),
+                't': self.type,
+                's': self.size,
+                'k': self.key_id,
+                'v': [{
+                    'n': v,
+                    'b': self.versions[v][0],
+                    's': self.versions[v][1],
+                } for v in self.list_versions(sorted=True)]
+            }
         e = self.unicodename.encode(encoding)
-        return '%s %d %d %s\n%s\n' % (self.path, self.type,
+        return '%s %d %d %s\n%s\n' % (self.path_id, self.type,
                                       self.size, self.pack_versions(), e,)
 
-    def unserialize(self, src, decoding='utf-8'):
+    def unserialize(self, src, decoding='utf-8', from_json=False):
+        if from_json:
+            try:
+                self.unicodename = src['n']  # .decode(decoding)
+                self.path_id = str(src['i'])
+                self.type = src['t']
+                self.size = src['s']
+                self.key_id = src['k']
+                self.versions = {v['n']: [v['b'], v['s'], ] for v in src['v']}
+            except:
+                lg.exc()
+                raise KeyError('Incorrect item format:\n%s' % src)
+            return
         try:
             details, name = src.split('\n')[:2]
         except:
-            raise
+            raise Exception('Incorrect item format:\n%s' % src)
         if details == '' or name == '':
             raise Exception('Incorrect item format:\n%s' % src)
         try:
             self.unicodename = name.decode(decoding)
             details = details.split(' ')
-            self.path, self.type, self.size = details[:3]
+            self.path_id, self.type, self.size = details[:3]
             self.type, self.size = int(self.type), int(self.size)
             self.unpack_versions(' '.join(details[3:]))
         except:
-            raise
-
-    def __repr__(self):
-        return '<%s %s %d>' % (TYPES[self.type], misc.unicode_to_str_safe(self.name()), self.size)
+            lg.exc()
+            raise KeyError('Incorrect item format:\n%s' % src)
 
 #------------------------------------------------------------------------------
 
@@ -380,7 +414,7 @@ def MakeID(iter, startID=-1):
 #------------------------------------------------------------------------------
 
 
-def AddFile(path, read_stats=False, iter=None, iterID=None):
+def AddFile(path, read_stats=False, iter=None, iterID=None, keyID=None):
     """
     Scan all components of the ``path`` and create an item in the index for
     that file.
@@ -391,14 +425,15 @@ def AddFile(path, read_stats=False, iter=None, iterID=None):
 
     Here path must be in "portable" form - only '/' allowed, assume path is a file, not a folder.
     """
-    if not os.path.isfile(path):
-        raise Exception('File not exist')
+    # if not os.path.isfile(path):
+    #     raise Exception('File not exist')
     parts = bpio.portablePath(path).lstrip('/').split('/')
     if not iter:
         iter = fs()
     if not iterID:
         iterID = fsID()
     resultID = ''
+    parentKeyID = None
     # build all tree, skip the last part
     for i in range(len(parts) - 1):
         name = parts[i]
@@ -407,8 +442,8 @@ def AddFile(path, read_stats=False, iter=None, iterID=None):
         p = '/'.join(parts[:i + 1])
         if bpio.Linux() or bpio.Mac():
             p = '/' + p
-        if not bpio.pathIsDir(p):
-            raise Exception('Directory not exist: %s' % str(p))
+        # if not bpio.pathIsDir(p):
+        #     raise Exception('Directory not exist: %s' % str(p))
         if name not in iter:
             # made a new ID for this folder, ID starts from 0. new folders will get the last ID +1
             # or it may find a free place in the middle, if some folders or files were removed before
@@ -417,7 +452,7 @@ def AddFile(path, read_stats=False, iter=None, iterID=None):
             # build a unique backup id for that file including all indexed ids
             resultID += '/' + str(id)
             # make new sub folder
-            ii = FSItemInfo(name, resultID.lstrip('/'), PARENT)
+            ii = FSItemInfo(name=name, path_id=resultID.lstrip('/'), typ=DIR, key_id=keyID or parentKeyID)
             if read_stats:
                 ii.read_stats(p)
             # we use 0 key as decimal value, all files and folders are strings - no conflicts possible 0 != '0'
@@ -430,6 +465,7 @@ def AddFile(path, read_stats=False, iter=None, iterID=None):
             # go down into the existing forest
             resultID += '/' + str(id)
         # move down to the next level
+        parentKeyID = iterID[id][INFO_KEY].key_id
         iter = iter[name]
         iterID = iterID[id]
     # the last part of the path is a filename
@@ -438,7 +474,7 @@ def AddFile(path, read_stats=False, iter=None, iterID=None):
     id = MakeID(iter)
     resultID += '/' + str(id)
     resultID = resultID.lstrip('/')
-    ii = FSItemInfo(filename, resultID, FILE)
+    ii = FSItemInfo(name=filename, path_id=resultID, typ=FILE, key_id=keyID or parentKeyID)
     if read_stats:
         ii.read_stats(path)
     iter[ii.name()] = id
@@ -447,7 +483,7 @@ def AddFile(path, read_stats=False, iter=None, iterID=None):
     return resultID, iter, iterID
 
 
-def AddDir(path, read_stats=False, iter=None, iterID=None):
+def AddDir(path, read_stats=False, iter=None, iterID=None, keyID=None):
     """
     Add directory to the index, but do not read folder content.
 
@@ -469,6 +505,7 @@ def AddDir(path, read_stats=False, iter=None, iterID=None):
     if not iterID:
         iterID = fsID()
     resultID = ''
+    parentKeyID = None
     for i in range(len(parts)):
         name = parts[i]
         if not name:
@@ -476,12 +513,12 @@ def AddDir(path, read_stats=False, iter=None, iterID=None):
         p = '/'.join(parts[:i + 1])
         if bpio.Linux() or bpio.Mac():
             p = '/' + p
-        if not bpio.pathIsDir(p):
-            raise Exception('Directory not exist: %s' % str(p))
+        # if not bpio.pathIsDir(p):
+        #     raise Exception('Directory not exist: %s' % str(p))
         if name not in iter:
             id = MakeID(iter)
             resultID += '/' + str(id)
-            ii = FSItemInfo(name, resultID.lstrip('/'), PARENT)
+            ii = FSItemInfo(name, path_id=resultID.lstrip('/'), typ=DIR, key_id=keyID or parentKeyID)
             if read_stats:
                 ii.read_stats(p)
             iter[ii.name()] = {0: id}
@@ -489,6 +526,7 @@ def AddDir(path, read_stats=False, iter=None, iterID=None):
         else:
             id = iter[name][0]
             resultID += '/' + str(id)
+        parentKeyID = iterID[id][INFO_KEY].key_id
         iter = iter[name]
         iterID = iterID[id]
         if i == len(parts) - 1:
@@ -496,7 +534,7 @@ def AddDir(path, read_stats=False, iter=None, iterID=None):
     return resultID.lstrip('/'), iter, iterID
 
 
-def AddLocalPath(localpath, read_stats=False):
+def AddLocalPath(localpath, read_stats=False, key_id=None):
     """
     Operate like ``AddDir()`` but also recursively reads the entire folder and
     put all items in the index. Parameter ``localpath`` can be a file or folder
@@ -536,7 +574,7 @@ def AddLocalPath(localpath, read_stats=False):
             if bpio.pathIsDir(p):
                 if name not in iter:
                     id = MakeID(iter, lastID)
-                    ii = FSItemInfo(name, (path_id + '/' + str(id)).lstrip('/'), DIR)
+                    ii = FSItemInfo(name=name, path_id=(path_id + '/' + str(id)).lstrip('/'), typ=DIR, key_id=key_id)
                     iter[ii.name()] = {0: id}
                     if read_stats:
                         ii.read_stats(p)
@@ -547,7 +585,7 @@ def AddLocalPath(localpath, read_stats=False):
                 c += recursive_read_dir(p, path_id + '/' + str(id), iter[name], iterID[id])
             else:
                 id = MakeID(iter, lastID)
-                ii = FSItemInfo(name, (path_id + '/' + str(id)).lstrip('/'), FILE)
+                ii = FSItemInfo(name=name, path_id=(path_id + '/' + str(id)).lstrip('/'), typ=FILE, key_id=key_id)
                 if read_stats:
                     ii.read_stats(p)
                 iter[ii.name()] = id
@@ -557,21 +595,19 @@ def AddLocalPath(localpath, read_stats=False):
         return c
     localpath = bpio.portablePath(localpath)
     if bpio.pathIsDir(localpath):
-        path_id, iter, iterID = AddDir(localpath, read_stats)
+        path_id, iter, iterID = AddDir(localpath, read_stats=read_stats, keyID=key_id)
         num = recursive_read_dir(localpath, path_id, iter, iterID)
         return path_id, iter, iterID, num
     else:
-        path_id, iter, iterID = AddFile(localpath, read_stats)
+        path_id, iter, iterID = AddFile(localpath, read_stats=read_stats, keyID=key_id)
         return path_id, iter, iterID, 1
     return None, None, None, 0
 
 
-def MapPath(path, read_stats=False, iter=None, iterID=None, startID=-1):
+def MapPath(path, read_stats=False, iter=None, iterID=None, startID=-1, key_id=None):
     """
     Acts like AddFile() but do not follow the directory structure. This just
-    "map" some local path (file or dir) to one item.
-
-    in the catalog - by default as a top level item.
+    "bind" some local path (file or dir) to one item in the catalog - by default as a top level item.
     The name of new item will be equal to the local path.
     """
     path = bpio.portablePath(path)
@@ -582,13 +618,36 @@ def MapPath(path, read_stats=False, iter=None, iterID=None, startID=-1):
     if not iterID:
         iterID = fsID()
     # make an ID for the filename
-    resultID = MakeID(iter)
-    ii = FSItemInfo(path, resultID, FILE)
+    typ = DIR if bpio.pathIsDir(path) else FILE
+    resultID = MakeID(iter, startID=startID)
+    ii = FSItemInfo(path, path_id=resultID, typ=typ, key_id=key_id)
     if read_stats:
         ii.read_stats(path)
     iter[ii.name()] = resultID
     iterID[resultID] = ii
     return str(resultID), iter, iterID
+
+
+# def AppendFile(name, parentPath, read_stats=False, iter=None, iterID=None, startID=-1):
+#     """
+#     """
+#     if not iter:
+#         iter = fs()
+#     if not iterID:
+#         iterID = fsID()
+#     parent_iter_path_id = WalkByPath(parentPath, iter=iter)
+#     if not parent_iter_path_id:
+#         return None
+#     parent_iter, parent_path_id = parent_iter_path_id
+#     # make an ID for the filename
+#     newID = MakeID(parent_iter, startID=startID)
+#     resultID = parent_path_id + '/' + str(newID)
+#     ii = FSItemInfo(name, resultID, FILE)
+#     if read_stats:
+#         ii.read_stats(parentPath.rstrip('/') + '/' + name)
+#     iter[ii.name()] = newID
+#     iterID[newID] = ii
+#     return resultID
 
 #------------------------------------------------------------------------------
 
@@ -604,7 +663,7 @@ def SetFile(item, iter=None, iterID=None):
         iter = fs()
     if iterID is None:
         iterID = fsID()
-    parts = item.path.lstrip('/').split('/')
+    parts = item.path_id.lstrip('/').split('/')
     for j in range(len(parts)):
         part = parts[j]
         id = misc.ToInt(part, part)
@@ -637,7 +696,7 @@ def SetDir(item, iter=None, iterID=None):
         iter = fs()
     if iterID is None:
         iterID = fsID()
-    parts = item.path.lstrip('/').split('/')
+    parts = item.path_id.lstrip('/').split('/')
     itemname = item.name()
     for j in range(len(parts)):
         part = parts[j]
@@ -751,7 +810,8 @@ def WalkByID(pathID, iterID=None):
         elif isinstance(iterID[id], FSItemInfo):
             if j != len(parts) - 1:
                 return None
-            path += (('/' + iterID[id].name()) if ('/' in pathID) else iterID[id].name())
+            path += '/' + iterID[id].name()
+            # (('/' + iterID[id].name()) if ('/' in pathID) else iterID[id].name())
         else:
             raise Exception('Wrong data type in the index')
         if j == len(parts) - 1:
@@ -916,9 +976,22 @@ def GetByPath(path):
     first and than use the main index to get the item.
     """
     path_id = ToID(path)
-    if path_id is None:
+    if not path_id:
         return None
     return GetByID(path_id)
+
+
+def GetIteratorsByPath(path):
+    """
+    Returns both iterators (iter, iterID) for given path, or None if not found.
+    """
+    iter_and_id = WalkByPath(path)
+    if iter_and_id is None:
+        return None
+    iter_and_path = WalkByID(iter_and_id[1])
+    if iter_and_path is None:
+        return None
+    return iter_and_path[0], iter_and_id[0]
 
 #------------------------------------------------------------------------------
 
@@ -931,6 +1004,8 @@ def IsDir(path):
     if iter_and_id is None:
         return False
     iter, pathid = iter_and_id
+    if pathid == '':
+        return True
     if not isinstance(iter, dict):
         return False
     if 0 not in iter:
@@ -1132,7 +1207,6 @@ def TraverseByIDSorted(callback, iterID=None):
 
 def TraverseChildsByID(callback, iterID=None):
     """
-    
     """
     def list_traverse(i, path_id, path, cb):
         name = None
@@ -1300,7 +1374,6 @@ def ExtractVersions(item_id, item_info, path_exist=None):
 
 def ListRootItems(iter=None):
     """
-    
     """
     result = []
     root_items = WalkByPath('', iter)
@@ -1313,7 +1386,6 @@ def ListRootItems(iter=None):
 
 def ListChilds(iterID):
     """
-    
     """
     lg.out(4, 'backup_fs.ListChilds %s' % (iterID))
     result = []
@@ -1377,6 +1449,8 @@ def ListByPath(path, iter=None):
     List sub items in the index at given ``path``.
     """
     lg.out(4, 'backup_fs.ListByPath %s' % (path))
+    if path in ['', '/']:
+        return ListRootItems()
     path = bpio.portablePath(path)
     iter_and_id = WalkByPath(path, iter)
     if iter_and_id is None:
@@ -1485,7 +1559,7 @@ def ListExpandedFoldersAndBackups(expanded_dirs, selected_items):
 
 def ListByPathAdvanced(path, iter=None):
     """
-    List sub items and versions at given ``path``.
+    List all items at given ``path`` and return data in tuples.
     """
     if path == '/':
         path = ''
@@ -1508,12 +1582,12 @@ def ListByPathAdvanced(path, iter=None):
             item_id = (pathID + '/' + item_path_id).strip('/')
             (item_size, item_time, versions) = ExtractVersions(item_id, item_info, path_exist)
             result.append(('dir', item_info.name(), item_id,
-                           item_size, item_time, path, has_childs, item_info.exist(), versions))
+                           item_size, item_time, path, has_childs, item_info, versions, ))
         elif item_type == FILE:
             item_id = (pathID + '/' + item_path_id).strip('/')
             (item_size, item_time, versions) = ExtractVersions(item_id, item_info, path_exist)
             result.append(('file', item_info.name(), item_id,
-                           item_size, item_time, path, False, item_info.exist(), versions))
+                           item_size, item_time, path, False, item_info, versions))
     TraverseChildsByID(visitor, iterID)
     return result
 
@@ -1762,51 +1836,85 @@ def Clear():
     fsID().clear()
 
 
-def Serialize(iterID=None):
+def Serialize(iterID=None, to_json=False, encoding='utf-8'):
     """
     Use this to write index to the local file.
     """
-    result = cStringIO.StringIO()
     cnt = [0]
+    if to_json:
+        result = {'items': []}
+    else:
+        result = cStringIO.StringIO()
 
     def cb(path_id, path, info):
-        result.write(info.serialize())
+        if to_json:
+            result['items'].append(info.serialize(encoding=encoding, to_json=True))
+        else:
+            result.write(info.serialize(encoding=encoding, to_json=False))
         cnt[0] += 1
     TraverseByID(cb, iterID)
-    src = result.getvalue()
-    result.close()
+    if to_json:
+        src = json.dumps(result, indent=2, encoding=encoding)
+    else:
+        src = result.getvalue()
+        result.close()
     lg.out(6, 'backup_fs.Serialize done with %d indexed files' % cnt[0])
     return src
 
 
-def Unserialize(inpt, iter=None, iterID=None):
+def Unserialize(raw_data, iter=None, iterID=None, from_json=False, decoding='utf-8'):
     """
     Read index from ``StringIO`` object.
     """
     count = 0
-    while True:
-        src = inpt.readline() + inpt.readline()  # 2 times because we take 2 lines for every item
-        if src.strip() == '':
-            break
-        item = FSItemInfo()
-        item.unserialize(src)
-        if item.type == FILE:
-            if not SetFile(item, iter, iterID):
-                raise Exception('Can not put item into the tree: %s' % str(item))
-            count += 1
-        elif item.type == DIR or item.type == PARENT:
-            if not SetDir(item, iter, iterID):
-                raise Exception('Can not put item into the tree: %s' % str(item))
-            count += 1
-        else:
-            raise Exception('Incorrect entry type')
+    if from_json:
+        json_data = json.loads(raw_data, encoding=decoding)
+        for json_item in json_data['items']:
+            item = FSItemInfo()
+            item.unserialize(json_item, decoding=decoding, from_json=True)
+            if item.type == FILE:
+                if not SetFile(item, iter=iter, iterID=iterID):
+                    lg.warn('Can not put FILE item into the tree: %s' % str(item))
+                    raise ValueError('Can not put FILE item into the tree: %s' % str(item))
+                count += 1
+            elif item.type == DIR or item.type == PARENT:
+                if not SetDir(item, iter=iter, iterID=iterID):
+                    lg.warn('Can not put DIR or PARENT item into the tree: %s' % str(item))
+                    raise ValueError('Can not put DIR or PARENT item into the tree: %s' % str(item))
+                count += 1
+            else:
+                raise ValueError('Incorrect entry type')
+    else:
+        inpt = cStringIO.StringIO(raw_data)
+        while True:
+            src = inpt.readline() + inpt.readline()  # 2 times because we take 2 lines for every item
+            if src.strip() == '':
+                break
+            item = FSItemInfo()
+            item.unserialize(src, decoding=decoding, from_json=False)
+            if item.type == FILE:
+                if not SetFile(item, iter=iter, iterID=iterID):
+                    inpt.close()
+                    lg.warn('Can not put FILE item into the tree: %s' % str(item))
+                    raise ValueError('Can not put FILE item into the tree: %s' % str(item))
+                count += 1
+            elif item.type == DIR or item.type == PARENT:
+                if not SetDir(item, iter=iter, iterID=iterID):
+                    inpt.close()
+                    lg.warn('Can not put DIR or PARENT item into the tree: %s' % str(item))
+                    raise ValueError('Can not put DIR or PARENT item into the tree: %s' % str(item))
+                count += 1
+            else:
+                inpt.close()
+                raise ValueError('Incorrect entry type')
+        inpt.close()
     lg.out(6, 'backup_fs.Unserialize done with %d indexed files' % count)
     return count
 
 #------------------------------------------------------------------------------
 
 
-def test():
+def _test():
     """
     For tests.
     """
@@ -1817,11 +1925,44 @@ def test():
     src = bpio.ReadTextFile(filepath)
     inpt = cStringIO.StringIO(src)
     inpt.readline()
-    count = Unserialize(inpt)
+    # count = Unserialize(inpt)
+    count = Unserialize(inpt.read(), from_json=True)
     inpt.close()
     print count
     Scan()
     Calculate()
+    pprint.pprint(fs())
+    pprint.pprint(fsID())
+
+#     parent_path = os.path.dirname(bpio.portablePath(unicode('/some/remote/path')))
+#     if IsFile(parent_path):
+#         raise
+#     iter_and_iterID = GetIteratorsByPath(parent_path)
+#     if iter_and_iterID is None:
+#         _, parent_iter, parent_iterID = AddDir(parent_path, read_stats=False)
+#     else:
+#         parent_iter, parent_iterID = iter_and_iterID
+#     print MapPath('/tmp/com.apple.launchd.KlOCuOQw9M', iter=parent_iter, iterID=parent_iterID)
+
+#     print AddDir('/this/folder/not/exist/', read_stats=True, keyID='KKKKKKK')
+#     print AddDir('/this/folder/not/exist/subdir')
+
+#     pprint.pprint(fs())
+#     pprint.pprint(fsID())
+
+    # print GetByPath('')
+
+    # print WalkByID('8/0/0')
+
+    # print AppendFile('new', '/Users/veselin/Pictures')
+
+    # import pdb; pdb.set_trace()
+    # item = FSItemInfo('new', '/Users/new', FILE)
+    # SetFile(item)
+    # print ToID('/Users/new')
+
+    # print Exists('/asd')
+    # print IsDir('/asd')
     # MapPath("/Users/veselin/Pictures/fotosess/Thumbs.db")
     # pprint.pprint(fs())
     # pprint.pprint(fsID())
@@ -1831,15 +1972,15 @@ def test():
 
     # import pdb
     # pdb.set_trace()
-    pprint.pprint(ListRootItems())
+    # pprint.pprint(ListRootItems())
     # pprint.pprint(ListAllBackupIDsAdvanced())
     # pprint.pprint(ListByPathAdvanced(sys.argv[1]))
 
-    print ListByPathAdvanced("")
-    pth = '~/Downloads/test/asd'
-    ppth = bpio.portablePath(unicode(pth))
-    print ppth
-    print ToID(ppth)
+    # print ListByPathAdvanced("")
+    # pth = '~/Downloads/test/asd'
+    # ppth = bpio.portablePath(unicode(pth))
+    # print ppth
+    # print ToID(ppth)
 
 #    bpio.init()
 #    for path in sys.argv[1:]:
@@ -1885,5 +2026,6 @@ def test():
     # pprint.pprint( ListLocalFolder(sys.argv[1]) )
     # print ListLocalFolder(sys.argv[1])
 
+
 if __name__ == '__main__':
-    test()
+    _test()

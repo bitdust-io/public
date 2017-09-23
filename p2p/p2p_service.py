@@ -37,39 +37,9 @@ This serves requests from peers:
     * Ack           - response from remote peer after my request
     * Message       - a message from remote peer
     * Correspondent - request to be my correspondent
+    TODO: describe other packets here
 
-For listed customers we will save and retrieve data up to their specified limits.
-BitDust tells us who our customers are and limits, we get their identities.
-If a customer does not contact us for more than 30 hours (or something) then we can process
-requests from that customers scrubbers.
-
-Security:
-
-    * Transport_control has checked that it is signed by a contact,
-      but we need to check that this is a customer.
-
-    * Since we have control over suppliers, and may not change them much,
-      it feels like customers are more of a risk.
-
-    * Code treats suppliers and customers differently.  Fun that stores
-      have customers come in the front door and suppliers in the back door.
-
-    * But I don't see anything really worth doing.
-      On Unix machines we could run customers in a chrooted environment.
-      There would be a main code and any time it got a change
-      in the list of customers, it could restart the customer code.
-      The customer code could be kept very small this way.
-      Again, I doubt it.  We only have XML and binary.
-
-    * Real risk is probably the code for SSH, Email, Vetex, etc.
-      Once it is a packet object, we are probably ok.
-
-    * We will store in a file and be able to read it back when requested.
-      Request comes as a packet and we just verify it signature to be sure about sender.
-
-    * Resource limits.
-      A ``local_tester`` checks that someone is not trying to use more than they are supposed to
-      and we could also do it here
+TODO: need to move logic from this monolitic file into a services
 """
 
 #------------------------------------------------------------------------------
@@ -179,10 +149,6 @@ def inbox(newpacket, info, status, error_message):
         # will Delete all files starting in a backup
         DeleteBackup(newpacket)
         commandhandled = True
-    elif newpacket.Command == commands.RequestIdentity():
-        # contact asking for our current identity
-        RequestIdentity(newpacket)
-        commandhandled = True
     elif newpacket.Command == commands.Message():
         # contact asking for our current identity
         if driver.is_started('service_private_messages'):
@@ -201,9 +167,9 @@ def inbox(newpacket, info, status, error_message):
         # handled by service_accountant()
         Coin(newpacket, info)
         commandhandled = False
-    elif newpacket.Command == commands.RetreiveCoin():
+    elif newpacket.Command == commands.RetrieveCoin():
         # handled by service_accountant()
-        RetreiveCoin(newpacket, info)
+        RetrieveCoin(newpacket, info)
         commandhandled = False
 
     return commandhandled
@@ -297,13 +263,13 @@ def SendFail(request, response='', remote_idurl=None):
         commands.Fail(),
         my_id.getLocalID(),
         my_id.getLocalID(),
-        request.PacketID,
+        request.PacketID,  # This is needed to identify Fail on remote side
         response,
         remote_idurl,
     )
     if _Debug:
         lg.out(_DebugLevel, "p2p_service.SendFail %s to %s    response: %s ..." % (
-            result.PacketID, result.RemoteID, str(response)[:15]))
+            result.PacketID, result.RemoteID, str(response)[:40]))
     gateway.outbox(result)
     return result
 
@@ -334,30 +300,21 @@ def Identity(newpacket):
     """
     newxml = newpacket.Payload
     newidentity = identity.identity(xmlsrc=newxml)
-    # SECURITY - check that identity is signed correctly
-    # if not newidentity.Valid():
-    #     lg.out(1,"p2p_service.Identity ERROR has non-Valid identity")
-    #     return
+    # SECURITY
+    # check that identity is signed correctly
+    # old public key matches new one
+    # this is done in `UpdateAfterChecking()`
     idurl = newidentity.getIDURL()
     if not identitycache.UpdateAfterChecking(idurl, newxml):
         lg.warn("ERROR has non-Valid identity")
         return False
-    # if contacts.isKnown(idurl):
-        # This checks that old public key matches new
-    #     identitycache.UpdateAfterChecking(idurl, newxml)
-    # else:
-        # TODO
-        # may be we need to make some temporary storage
-        # for identities who we did not know yet
-        # just to be able to receive packets from them
-    #     identitycache.UpdateAfterChecking(idurl, newxml)
     # Now that we have ID we can check packet
     if not newpacket.Valid():
         # If not valid do nothing
         lg.warn("not Valid packet from %s" % idurl)
-        # TODO: send Fail ?
         return False
     if newpacket.OwnerID == idurl:
+        # TODO: this needs to be moved to a service
         # wide=True : a small trick to respond to all contacts if we receive pings
         SendAck(newpacket, wide=True)
         if _Debug:
@@ -366,23 +323,6 @@ def Identity(newpacket):
         if _Debug:
             lg.out(_DebugLevel, "p2p_service.Identity from [%s]" % nameurl.GetName(idurl))
     return True
-
-
-def RequestIdentity(request):
-    """
-    Someone is requesting a copy of our current identity.
-
-    Already verified that they are a contact. Can also be used as a sort
-    of "ping" test to make sure we are alive.
-    """
-    if _Debug:
-        lg.out(_DebugLevel, "p2p_service.RequestIdentity from %s" % request.OwnerID)
-    MyID = my_id.getLocalID()
-    RemoteID = request.OwnerID
-    PacketID = request.PacketID
-    identitystr = my_id.getLocalIdentity().serialize()
-    result = signed.Packet(commands.Identity(), MyID, MyID, PacketID, identitystr, RemoteID)
-    gateway.outbox(result, False)
 
 
 def SendIdentity(remote_idurl, wide=False, callbacks={}):
@@ -401,8 +341,11 @@ def SendIdentity(remote_idurl, wide=False, callbacks={}):
 
 
 def RequestService(request, info):
+    """
+    """
     if len(request.Payload) > 1024 * 10:
         return SendFail(request, 'too long payload')
+    # TODO: move code into driver module, use callback module here instead of direct call
     words = request.Payload.split(' ')
     if len(words) < 1:
         lg.warn("got wrong payload in %s" % request)
@@ -436,16 +379,13 @@ def SendRequestService(remote_idurl, service_info, wide=False, callbacks={}):
 def CancelService(request, info):
     if _Debug:
         lg.out(_DebugLevel, "p2p_service.CancelService")
+    # TODO: move code into driver module, use callback module here instead of direct call
     words = request.Payload.split(' ')
     if len(words) < 1:
         lg.warn("got wrong payload in %s" % request)
         return SendFail(request, 'wrong payload')
     service_name = words[0]
-    # TODO: - temporary keep that for backward compatibility
-    if service_name == 'storage':
-        if not driver.is_started('service_supplier'):
-            return SendFail(request, 'supplier service is off')
-        return driver.cancel('service_supplier', request, info)
+    # TODO: add validation
     if not driver.is_exist(service_name):
         lg.warn("got wrong payload in %s" % request)
         return SendFail(request, 'service %s not exist' % service_name)
@@ -473,6 +413,7 @@ def ListFiles(request):
     """
     if not driver.is_started('service_supplier'):
         return SendFail(request, 'supplier service is off')
+    # TODO: use callback module here instead of direct call
     from supplier import list_files
     return list_files.send(request.OwnerID, request.PacketID, request.Payload)
 
@@ -484,7 +425,7 @@ def Files(newpacket, info):
     if _Debug:
         lg.out(_DebugLevel, "p2p_service.Files from [%s] at %s://%s" % (
             nameurl.GetName(newpacket.OwnerID), info.proto, info.host))
-    # TODO use callback here
+    # TODO: use callback module here instead of direct call
     from storage import backup_control
     backup_control.IncomingSupplierListFiles(newpacket)
 
@@ -585,7 +526,7 @@ def Retrieve(request):
     We send with ``outboxNoAck()`` method because he will ask again if
     he does not get it
     """
-    # TODO: rename to RetreiveData()
+    # TODO: rename to RetrieveData()
     if not driver.is_started('service_supplier'):
         return SendFail(request, 'supplier service is off')
     if not contactsdb.is_customer(request.OwnerID):
@@ -756,10 +697,6 @@ def SendDeleteListBackups(SupplierID, ListBackupIDs):
 def Correspondent(request):
     if _Debug:
         lg.out(_DebugLevel, "p2p_service.Correspondent")
-#     MyID = my_id.getLocalID()
-#     RemoteID = request.OwnerID
-#     PacketID = request.PacketID
-#     Msg = misc.decode64(request.Payload)
     # TODO: need to connect users here
 
 #------------------------------------------------------------------------------
@@ -865,12 +802,18 @@ def SendBroadcastMessage(outpacket):
 
 def Coin(request, info):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.Coin   %r from %s" % (request, info.sender_idurl))
+        try:
+            input_coins = json.loads(request.Payload)
+        except:
+            lg.exc()
+            input_coins = []
+        lg.out(_DebugLevel, "p2p_service.Coin from %s with %d coins" % (
+            nameurl.GetName(info.sender_idurl), len(input_coins), ))
 
 
 def SendCoin(remote_idurl, coins, packet_id=None, wide=False, callbacks={}):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendCoin to %s" % remote_idurl)
+        lg.out(_DebugLevel, "p2p_service.SendCoin to %s with %d records" % (remote_idurl, len(coins)))
     if packet_id is None:
         packet_id = packetid.UniqueID()
     outpacket = signed.Packet(
@@ -881,16 +824,17 @@ def SendCoin(remote_idurl, coins, packet_id=None, wide=False, callbacks={}):
     return outpacket
 
 
-def RetreiveCoin(request, info):
+def RetrieveCoin(request, info):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.RetreiveCoin   %r from %s" % (request, info.sender_idurl))
+        lg.out(_DebugLevel, "p2p_service.RetrieveCoin from %s : %s" % (
+            nameurl.GetName(info.sender_idurl), request.Payload))
 
 
-def SendRetreiveCoin(remote_idurl, query, wide=False, callbacks={}):
+def SendRetrieveCoin(remote_idurl, query, wide=False, callbacks={}):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendRetreiveCoin to %s" % remote_idurl)
+        lg.out(_DebugLevel, "p2p_service.SendRetrieveCoin to %s" % remote_idurl)
     outpacket = signed.Packet(
-        commands.Coin(), my_id.getLocalID(),
+        commands.RetrieveCoin(), my_id.getLocalID(),
         my_id.getLocalID(), packetid.UniqueID(),
         json.dumps(query), remote_idurl)
     gateway.outbox(outpacket, wide=wide, callbacks=callbacks)
@@ -898,28 +842,20 @@ def SendRetreiveCoin(remote_idurl, query, wide=False, callbacks={}):
 
 #------------------------------------------------------------------------------
 
-
-def message2gui(proto, text):
-    pass
-#    statusline.setp(proto, text)
-
-
-def getErrorString(error):
-    try:
-        return error.getErrorMessage()
-    except:
-        if error is None:
-            return ''
-        return str(error)
-
-
-def getHostString(host):
-    try:
-        return str(host.host) + ':' + str(host.port)
-    except:
-        if host is None:
-            return ''
-        return str(host)
-
-if __name__ == '__main__':
-    settings.init()
+def SendKey(remote_idurl, encrypted_key_data, packet_id=None, wide=False, callbacks={}):
+    # full_key_data = json.dumps(key_data) if isinstance(key_data, dict) else key_data
+    if _Debug:
+        lg.out(_DebugLevel, "p2p_service.SendKey to %s with %d bytes encrypted key data" % (
+            remote_idurl, len(encrypted_key_data)))
+    if packet_id is None:
+        packet_id = packetid.UniqueID()
+    outpacket = signed.Packet(
+        Command=commands.Key(),
+        OwnerID=my_id.getLocalID(),
+        CreatorID=my_id.getLocalID(),
+        PacketID=packet_id,
+        Payload=encrypted_key_data,
+        RemoteID=remote_idurl,
+    )
+    gateway.outbox(outpacket, wide=wide, callbacks=callbacks)
+    return outpacket

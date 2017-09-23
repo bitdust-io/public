@@ -827,11 +827,16 @@ def RatingsDir():
     return os.path.join(BaseDir(), 'ratings')
 
 
-def BlockChainDir():
+def ContractChainDir():
     """
-    
     """
-    return os.path.join(BaseDir(), 'blockchain')
+    return os.path.join(BaseDir(), 'contracts')
+
+
+def PrivateKeysDir():
+    """
+    """
+    return os.path.join(BaseDir(), 'keys')
 
 #------------------------------------------------------------------------------
 #--- FILES --------------------------------------------------------------------
@@ -1097,7 +1102,8 @@ def MainLogFilename():
     """
     A prefix for file names to store main process logs.
     """
-    return os.path.join(LogsDir(), 'bitdust')
+    # return os.path.join(LogsDir(), 'bitdust')
+    return os.path.join(LogsDir(), 'main.log')
 
 
 def UpdateLogFilename():
@@ -1203,7 +1209,15 @@ def CertificateFiles():
 
 
 def DHTDBFile():
+    """
+    """
     return os.path.join(MetaDataDir(), 'dhtdb')
+
+
+def FTPServerCredentialsFile():
+    """
+    """
+    return os.path.join(MetaDataDir(), 'ftpcredentials')
 
 #------------------------------------------------------------------------------
 #--- BINARY FILES -------------------------------------------------------------
@@ -1304,16 +1318,20 @@ def FontImageFile():
 
 def DefaultXMLRPCPort():
     """
-    
     """
     return 8082
 
 
 def DefaultJsonRPCPort():
     """
-    
     """
     return 8083
+
+
+def DefaultFTPPort():
+    """
+    """
+    return 8021
 
 
 def IdentityServerPort():
@@ -1432,7 +1450,7 @@ def getTempDir():
     return TempDir()
 
 #------------------------------------------------------------------------------
-#--- PROXY SERVER OPTIONS -----------------------------------------------------
+#--- OS PROXY SERVER OPTIONS --------------------------------------------------
 #------------------------------------------------------------------------------
 
 
@@ -1538,6 +1556,22 @@ def enableIdServer(enable=None):
     config.conf().setData('services/id-server/enabled', str(enable))
 
 
+def enableJsonRPCServer(enable=None):
+    """
+    """
+    if enable is None:
+        return config.conf().getBool('interface/api/json-rpc-enabled')
+    config.conf().setData('interface/api/json-rpc-enabled', str(enable))
+
+
+def enableFTPServer(enable=None):
+    """
+    """
+    if enable is None:
+        return config.conf().getBool('interface/ftp/enabled')
+    config.conf().setData('interface/ftp/enabled', str(enable))
+
+
 def getIdServerHost():
     """
     """
@@ -1577,13 +1611,25 @@ def setIdServerTCPPort(tcp_port):
 def getJsonRPCServerPort():
     """
     """
-    return config.conf().getInt('api/json-rpc-server/port', DefaultJsonRPCPort())
+    return config.conf().getInt('interface/api/json-rpc-port', DefaultJsonRPCPort())
 
 
-def setJsonRPCServerTCPPort(json_rpc_port):
+def setJsonRPCServerPort(json_rpc_port):
     """
     """
-    return config.conf().setInt("sapi/json-rpc-server/port", json_rpc_port)
+    return config.conf().setInt("interface/api/json-rpc-port", json_rpc_port)
+
+
+def getFTPServerPort():
+    """
+    """
+    return config.conf().getInt('interface/ftp/port', DefaultFTPPort())
+
+
+def setFTPServerPort(ftp_port):
+    """
+    """
+    return config.conf().setInt("interface/ftp/port", ftp_port)
 
 
 def getTransportPort(proto):
@@ -2290,8 +2336,11 @@ def _setUpDefaultSettings():
 
     Every option must have a default value!
     """
-    config.conf().setDefaultValue('api/json-rpc-server/enabled', 'true')
-    config.conf().setDefaultValue('api/json-rpc-server/port', DefaultJsonRPCPort())
+    config.conf().setDefaultValue('interface/api/json-rpc-enabled', 'true')
+    config.conf().setDefaultValue('interface/api/json-rpc-port', DefaultJsonRPCPort())
+
+    config.conf().setDefaultValue('interface/ftp/enabled', 'true')
+    config.conf().setDefaultValue('interface/ftp/port', DefaultFTPPort())
 
     config.conf().setDefaultValue('logs/debug-level', defaultDebugLevel())
     config.conf().setDefaultValue('logs/memdebug-enabled', 'false')
@@ -2330,16 +2379,20 @@ def _setUpDefaultSettings():
 
     config.conf().setDefaultValue('services/broadcasting/enabled', 'true')
     config.conf().setDefaultValue('services/broadcasting/routing-enabled', 'false')
-    config.conf().setDefaultValue('services/broadcasting/max-broadcast-connections', '10')
+    config.conf().setDefaultValue('services/broadcasting/max-broadcast-connections', '3')
+
+    config.conf().setDefaultValue('services/contract-chain/enabled', 'false')
 
     config.conf().setDefaultValue('services/customer/enabled', 'true')
     config.conf().setDefaultValue('services/customer/needed-space',
                                   diskspace.MakeStringFromBytes(DefaultNeededBytes()))
     config.conf().setDefaultValue('services/customer/suppliers-number', DefaultDesiredSuppliers())
-
+    
     config.conf().setDefaultValue('services/customer-patrol/enabled', 'true')
-
+    
     config.conf().setDefaultValue('services/customer-support/enabled', 'true')
+    
+    config.conf().setDefaultValue('services/customer-contracts/enabled', 'false')
 
     config.conf().setDefaultValue('services/data-motion/enabled', 'true')
 
@@ -2357,6 +2410,8 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/identity-propagate/enabled', 'true')
 
     config.conf().setDefaultValue('services/ip-port-responder/enabled', 'true')
+
+    config.conf().setDefaultValue('services/keys-registry/enabled', 'true')
 
     config.conf().setDefaultValue('services/list-files/enabled', 'true')
 
@@ -2400,6 +2455,8 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/supplier/enabled', 'true')
     config.conf().setDefaultValue('services/supplier/donated-space',
                                   diskspace.MakeStringFromBytes(DefaultDonatedBytes()))
+
+    config.conf().setDefaultValue('services/supplier-contracts/enabled', 'false')
 
     config.conf().setDefaultValue('services/tcp-connections/enabled', 'true')
     config.conf().setDefaultValue('services/tcp-connections/tcp-port', DefaultTCPPort())
@@ -2456,6 +2513,9 @@ def _checkStaticDirectories():
     if not os.path.exists(RatingsDir()):
         lg.out(6, 'settings.init want to create folder: ' + RatingsDir())
         os.makedirs(RatingsDir())
+    if not os.path.exists(PrivateKeysDir()):
+        lg.out(6, 'settings.init want to create folder: ' + PrivateKeysDir())
+        os.makedirs(PrivateKeysDir())
 
 
 def _checkCustomDirectories():
@@ -2486,6 +2546,7 @@ def _checkCustomDirectories():
         config.conf().setData('paths/restore', DefaultRestoreDir())
 
 #-------------------------------------------------------------------------------
+
 
 if __name__ == '__main__':
     init()

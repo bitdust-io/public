@@ -79,6 +79,7 @@ from logs import lg
 from system import bpio
 
 from main import settings
+from main import events
 
 from automats import automat
 from automats import global_state
@@ -138,6 +139,7 @@ class Initializer(automat.Automat):
         global_state.set_global_state('INIT ' + newstate)
 
     def A(self, event, arg):
+        #--- AT_STARTUP
         if self.state == 'AT_STARTUP':
             if event == 'run':
                 self.state = 'LOCAL'
@@ -156,6 +158,7 @@ class Initializer(automat.Automat):
                 self.flagCmdLine = True
                 installer.A('recover-cmd-line', arg)
                 shutdowner.A('ready')
+        #--- LOCAL
         elif self.state == 'LOCAL':
             if event == 'init-local-done' and not self.isInstalled(arg) and self.isGUIPossible(arg):
                 self.state = 'INSTALL'
@@ -171,6 +174,7 @@ class Initializer(automat.Automat):
             elif event == 'init-local-done' and self.isInstalled(arg):
                 self.state = 'INTERFACES'
                 self.doInitInterfaces(arg)
+        #--- MODULES
         elif self.state == 'MODULES':
             if event == 'init-modules-done':
                 self.state = 'READY'
@@ -179,6 +183,7 @@ class Initializer(automat.Automat):
             elif (event == 'shutdowner.state' and arg == 'FINISHED'):
                 self.state = 'EXIT'
                 self.doDestroyMe(arg)
+        #--- INSTALL
         elif self.state == 'INSTALL':
             if not self.flagCmdLine and (event == 'installer.state' and arg == 'DONE'):
                 self.state = 'STOPPING'
@@ -189,17 +194,21 @@ class Initializer(automat.Automat):
             elif (event == 'shutdowner.state' and arg == 'FINISHED'):
                 self.state = 'EXIT'
                 self.doDestroyMe(arg)
+        #--- READY
         elif self.state == 'READY':
             if (event == 'shutdowner.state' and arg == 'FINISHED'):
                 self.state = 'EXIT'
                 self.doDestroyMe(arg)
+        #--- STOPPING
         elif self.state == 'STOPPING':
             if (event == 'shutdowner.state' and arg == 'FINISHED'):
                 self.state = 'EXIT'
                 self.doUpdate(arg)
                 self.doDestroyMe(arg)
+        #--- EXIT
         elif self.state == 'EXIT':
             pass
+        #--- SERVICES
         elif self.state == 'SERVICES':
             if (event == 'shutdowner.state' and arg == 'FINISHED'):
                 self.state = 'EXIT'
@@ -208,6 +217,7 @@ class Initializer(automat.Automat):
                 self.state = 'MODULES'
                 self.doInitModules(arg)
                 shutdowner.A('ready')
+        #--- INTERFACES
         elif self.state == 'INTERFACES':
             if (event == 'shutdowner.state' and arg == 'FINISHED'):
                 self.state = 'EXIT'
@@ -235,7 +245,6 @@ class Initializer(automat.Automat):
 
     def doInitLocal(self, arg):
         """
-        
         """
         self.flagGUI = arg.strip() == 'show'
         lg.out(2, 'initializer.doInitLocal flagGUI=%s' % self.flagGUI)
@@ -253,10 +262,12 @@ class Initializer(automat.Automat):
 
     def doInitInterfaces(self, arg):
         lg.out(2, 'initializer.doInitInterfaces')
-#         from interface import xmlrpc_server
-#         xmlrpc_server.init()
-        from interface import jsonrpc_server
-        jsonrpc_server.init()
+        if settings.enableFTPServer():
+            from interface import ftp_server
+            ftp_server.init()
+        if settings.enableJsonRPCServer():
+            from interface import jsonrpc_server
+            jsonrpc_server.init()
         reactor.callLater(0, self.automat, 'init-interfaces-done')
 
     def doInitModules(self, arg):
@@ -374,6 +385,7 @@ class Initializer(automat.Automat):
         from system import run_upnpc
         from raid import eccmap
         from userid import my_id
+        from crypt import my_keys
         my_id.init()
         if settings.enableWebStream():
             from logs import weblog
@@ -388,6 +400,7 @@ class Initializer(automat.Automat):
         settings.update_proxy_settings()
         run_upnpc.init()
         eccmap.init()
+        my_keys.init()
         if sys.argv.count('--twisted'):
             from twisted.python import log as twisted_log
             twisted_log.startLogging(MyTwistedOutputLog(), setStdout=0)
@@ -407,6 +420,16 @@ class Initializer(automat.Automat):
 #            except:
 #                lg.out(2, "guppy package is not installed")
 
+    def _on_software_code_updated(self, evt):
+        lg.out(2, 'initializer._on_software_code_updated will RESTART BitDust now! "source-code-fetched" event received')
+        if False:
+            # TODO: add checks to prevent restart if any important jobs running at the moment
+            return
+        if False:
+            # TODO: add an option to the settings
+            return
+        shutdowner.A('stop', 'restart')
+
     def _init_modules(self):
         """
         Finish initialization part, run delayed methods.
@@ -414,11 +437,7 @@ class Initializer(automat.Automat):
         lg.out(2, "initializer._init_modules")
         from updates import git_proc
         git_proc.init()
-        # from updates import os_windows_update
-        # from web import webcontrol
-        # os_windows_update.SetNewVersionNotifyFunc(webcontrol.OnGlobalVersionReceived)
-        # reactor.callLater(0, os_windows_update.init)
-        # reactor.callLater(0, webcontrol.OnInitFinalDone)
+        events.add_subscriber(self._on_software_code_updated, 'source-code-fetched')
 
     def _on_tray_icon_command(self, cmd):
         lg.out(2, "initializer._on_tray_icon_command : [%s]" % cmd)
@@ -453,7 +472,7 @@ class Initializer(automat.Automat):
                             tray_icon.draw_icon('error')
                             reactor.callLater(5, tray_icon.restore_icon)
                             return
-                        elif result == 'new-data':
+                        elif result == 'source-code-fetched':
                             tray_icon.draw_icon('updated')
                             reactor.callLater(5, tray_icon.restore_icon)
                             return

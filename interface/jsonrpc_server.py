@@ -35,7 +35,7 @@ import pprint
 import traceback
 
 from twisted.internet import reactor
-from twisted.internet.defer import Deferred, succeed, fail
+from twisted.internet.defer import Deferred, succeed
 from twisted.web import server
 
 if __name__ == '__main__':
@@ -56,11 +56,14 @@ import api
 
 _JsonRPCServer = None
 
-#------------------------------------------------------------------------------ 
+#------------------------------------------------------------------------------
 
 def init(json_rpc_port=None):
     global _JsonRPCServer
     lg.out(4, 'jsonrpc_server.init')
+    if _JsonRPCServer:
+        lg.warn('already started')
+        return
     from main import settings
     from system import bpio
     if not json_rpc_port:
@@ -137,12 +140,14 @@ class BitDustJsonRPCServer(JSONRPCServer):
         try:
             fm_result = self._catch_filemanager_methods(request_dict)
             if fm_result is None:
-                result = fm_result or JSONRPCServer._callMethod(self, request_dict)
+                result = JSONRPCServer._callMethod(self, request_dict)
             else:
                 result = fm_result
         except JSONRPCError as exc:
+            lg.err(exc.strerror)
             result = api.ERROR(exc.strerror)
         except Exception as exc:
+            lg.exc()
             result = api.ERROR(str(traceback.format_exc()), message=exc.message)
         if isinstance(result, Deferred):
             result.addCallback(
@@ -166,6 +171,30 @@ class BitDustJsonRPCServer(JSONRPCServer):
     def jsonrpc_filemanager(self, json_request):
         return api.filemanager(json_request)
 
+    def jsonrpc_config_list(self, sort=False):
+        return api.config_list(sort)
+
+    def jsonrpc_config_get(self, key, default=None):
+        return api.config_get(key, default)
+
+    def jsonrpc_config_set(self, key, value):
+        return api.config_set(key, value)
+
+    def jsonrpc_key_get(self, key_id, include_private=False):
+        return api.key_get(key_id, include_private=include_private)
+
+    def jsonrpc_keys_list(self, sort=False, include_private=False):
+        return api.keys_list(sort, include_private=include_private)
+
+    def jsonrpc_key_create(self, key_alias, key_size=4096):
+        return api.key_create(key_alias, key_size)
+
+    def jsonrpc_key_erase(self, key_id):
+        return api.key_erase(key_id)
+
+    def jsonrpc_key_share(self, key_id, idurl):
+        return api.key_share(key_id, idurl)
+
     def jsonrpc_backups_update(self):
         return api.backups_update()
 
@@ -175,26 +204,29 @@ class BitDustJsonRPCServer(JSONRPCServer):
     def jsonrpc_backups_id_list(self):
         return api.backups_id_list()
 
-    def jsonrpc_backup_start_path(self, path, bind_local_path=True):
-        return api.backup_start_path(path, bind_local_path=True)
+    def jsonrpc_backup_start_path(self, path, mount_path=None, key_id=None):
+        return api.backup_start_path(path, mount_path=mount_path, key_id=key_id)
 
     def jsonrpc_backup_start_id(self, pathID):
         return api.backup_start_id(pathID)
 
-    def jsonrpc_backup_map_path(self, dirpath):
-        return api.backup_map_path(dirpath)
+    def jsonrpc_backup_map_path(self, dirpath, mount_path, key_id=None):
+        return api.backup_map_path(dirpath, mount_path=mount_path, key_id=key_id)
 
-    def jsonrpc_backup_dir_add(self, dirpath):
-        return api.backup_dir_add(dirpath)
+    def jsonrpc_backup_dir_add(self, dirpath, key_id=None):
+        return api.backup_dir_add(dirpath, key_id=key_id)
 
-    def jsonrpc_backup_file_add(self, filepath):
-        return api.backup_file_add(filepath)
+    def jsonrpc_backup_dir_make(self, dirpath, key_id=None):
+        return api.backup_dir_make(dirpath, key_id=key_id)
+
+    def jsonrpc_backup_file_add(self, filepath, key_id=None):
+        return api.backup_file_add(filepath, key_id=key_id)
 
     def jsonrpc_backup_tree_add(self, dirpath):
         return api.backup_tree_add(dirpath)
 
-    def jsonrpc_backup_delete_local(self, backupID):
-        return api.backup_delete_local(backupID)
+    def jsonrpc_backup_delete_local(self, backup_id):
+        return api.backup_delete_local(backup_id)
 
     def jsonrpc_backup_delete_id(self, pathID):
         return api.backup_delete_id(pathID)
@@ -202,8 +234,8 @@ class BitDustJsonRPCServer(JSONRPCServer):
     def jsonrpc_backup_delete_path(self, path):
         return api.backup_delete_path(path)
 
-    def jsonrpc_restore_single(self, pathID_or_backupID_or_localPath, destinationPath=None):
-        return api.restore_single(pathID_or_backupID_or_localPath, destinationPath)
+    def jsonrpc_restore_single(self, path_id_or_backup_id_or_loca_path, destination_path=None):
+        return api.restore_single(path_id_or_backup_id_or_loca_path, destination_path)
 
     def jsonrpc_backups_queue(self):
         return api.backups_queue()
@@ -283,15 +315,6 @@ class BitDustJsonRPCServer(JSONRPCServer):
     def jsonrpc_ping(self, idurl, timeout=10):
         return api.ping(str(idurl), timeout)
 
-    def jsonrpc_config_list(self, sort=False):
-        return api.config_list(sort)
-
-    def jsonrpc_config_get(self, key, default=None):
-        return api.config_get(key, default)
-
-    def jsonrpc_config_set(self, key, value):
-        return api.config_set(key, value)
-
 #     def jsonrpc_list_messages(self):
 #         return api.list_messages()
 
@@ -323,6 +346,7 @@ class BitDustJsonRPCServer(JSONRPCServer):
     #     return api.
 
 #------------------------------------------------------------------------------
+
 
 if __name__ == "__main__":
     lg.set_debug_level(20)

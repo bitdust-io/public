@@ -113,8 +113,10 @@ class SupplierConnector(automat.Automat):
     }
 
     def __init__(self, idurl):
+        """
+        """
         self.idurl = idurl
-        self.name = nameurl.GetName(self.idurl)
+        name = 'supplier_%s' % nameurl.GetName(self.idurl)
         self.request_packet_id = None
         self.callbacks = {}
         try:
@@ -122,11 +124,11 @@ class SupplierConnector(automat.Automat):
         except:
             st = 'DISCONNECTED'
         if st == 'CONNECTED':
-            automat.Automat.__init__(self, 'supplier_%s' % self.name, 'CONNECTED', _DebugLevel, _Debug)
+            automat.Automat.__init__(self, name, 'CONNECTED', _DebugLevel, _Debug)
         elif st == 'NO_SERVICE':
-            automat.Automat.__init__(self, 'supplier_%s' % self.name, 'NO_SERVICE', _DebugLevel, _Debug)
+            automat.Automat.__init__(self, name, 'NO_SERVICE', _DebugLevel, _Debug)
         else:
-            automat.Automat.__init__(self, 'supplier_%s' % self.name, 'DISCONNECTED', _DebugLevel, _Debug)
+            automat.Automat.__init__(self, name, 'DISCONNECTED', _DebugLevel, _Debug)
         for cb in self.callbacks.values():
             cb(self.idurl, self.state, self.state)
 
@@ -271,12 +273,10 @@ class SupplierConnector(automat.Automat):
         else:
             bytes_per_supplier = int(math.ceil(2.0 * settings.MinimumNeededBytes() / float(settings.DefaultDesiredSuppliers())))
         service_info = 'service_supplier %d' % bytes_per_supplier
-        request = p2p_service.SendRequestService(
-            self.idurl, service_info, callbacks={
-                commands.Ack(): self._supplier_acked,
-                commands.Fail(): self._supplier_failed})
-        # commands.Ack(): lambda response, info: self.automat('ack', response),
-        # commands.Fail(): lambda response, info: self.automat('fail', response)})
+        request = p2p_service.SendRequestService(self.idurl, service_info, callbacks={
+            commands.Ack(): self._supplier_acked,
+            commands.Fail(): self._supplier_failed,
+        })
         self.request_packet_id = request.PacketID
 
     def doCancelService(self, arg):

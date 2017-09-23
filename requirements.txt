@@ -1,0 +1,12 @@
+twisted
+pyasn1
+pycrypto
+pyOpenSSL
+pyparsing
+appdirs
+CodernityDB
+cryptography
+service_identity
+psutil
+django==1.7  # if only you want to have a gui
+pkgversion

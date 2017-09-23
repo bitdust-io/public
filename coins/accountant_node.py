@@ -53,7 +53,6 @@ _DebugLevel = 6
 
 #------------------------------------------------------------------------------
 
-import time
 import datetime
 
 from twisted.internet.defer import Deferred
@@ -72,6 +71,7 @@ from p2p import p2p_service
 from p2p import commands
 
 from coins import coins_db
+from coins import coins_io
 
 from broadcast import broadcast_service
 
@@ -117,6 +117,7 @@ class AccountantNode(automat.Automat):
         self.connected_accountants = []
         self.min_accountants_connected = 1  # TODO: read from settings
         self.max_accountants_connected = 1  # TODO: read from settings
+        self.max_coins_per_packet = 100     # TODO: read from settings
         self.download_offset = datetime.datetime(2016, 1, 1)
         self.download_limit = 100
         self.pending_coins = []
@@ -138,6 +139,7 @@ class AccountantNode(automat.Automat):
         The state machine code, generated using `visio2python
         <http://bitdust.io/visio2python/>`_ tool.
         """
+        #---READY---
         if self.state == 'READY':
             if event == 'shutdown':
                 self.state = 'CLOSED'
@@ -152,28 +154,31 @@ class AccountantNode(automat.Automat):
                 self.state = 'VALID_COIN?'
                 self.doPullCoin(arg)
                 self.doVerifyCoin(arg)
+        #---READ_COINS---
         elif self.state == 'READ_COINS':
             if event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
             elif event == 'accountant-connected':
                 self.doAddAccountant(arg)
-                self.doRetreiveCoins(arg)
-            elif event == 'stop' or (event == 'timer-1min' and not self.isAnyCoinsReceived(arg)):
+                self.doRetrieveCoins(arg)
+            elif event == 'stop' or ( event == 'timer-1min' and not self.isAnyCoinsReceived(arg) ):
                 self.state = 'OFFLINE'
             elif event == 'new-coin-mined':
                 self.doPushCoin(arg)
             elif event == 'valid-coins-received' and self.isMoreCoins(arg):
                 self.doWriteCoins(arg)
-                self.doRetreiveCoins(arg)
+                self.doRetrieveCoins(arg)
             elif event == 'valid-coins-received' and not self.isMoreCoins(arg):
                 self.state = 'READY'
                 self.doWriteCoins(arg)
                 self.doCheckPendingCoins(arg)
+        #---AT_STARTUP---
         elif self.state == 'AT_STARTUP':
             if event == 'init':
                 self.state = 'OFFLINE'
                 self.doInit(arg)
+        #---VALID_COIN?---
         elif self.state == 'VALID_COIN?':
             if event == 'shutdown':
                 self.state = 'CLOSED'
@@ -193,6 +198,7 @@ class AccountantNode(automat.Automat):
                 self.doWriteCoins(arg)
             elif event == 'new-coin-mined':
                 self.doPushCoin(arg)
+        #---WRITE_COIN!---
         elif self.state == 'WRITE_COIN!':
             if event == 'shutdown':
                 self.state = 'CLOSED'
@@ -208,17 +214,24 @@ class AccountantNode(automat.Automat):
                 self.doWriteCoins(arg)
             elif event == 'new-coin-mined':
                 self.doPushCoin(arg)
+        #---OFFLINE---
         elif self.state == 'OFFLINE':
             if event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
             elif event == 'start':
                 self.state = 'ACCOUNTANTS?'
+                self.Attempts=0
                 self.doLookupAccountants(arg)
             elif event == 'accountant-connected':
+                self.state = 'ACCOUNTANTS?'
                 self.doAddAccountant(arg)
+                self.Attempts=2
+                self.doLookupAccountants(arg)
+        #---CLOSED---
         elif self.state == 'CLOSED':
             pass
+        #---ACCOUNTANTS?---
         elif self.state == 'ACCOUNTANTS?':
             if event == 'shutdown':
                 self.state = 'CLOSED'
@@ -226,13 +239,14 @@ class AccountantNode(automat.Automat):
             elif event == 'accountant-connected' and self.isMoreNeeded(arg):
                 self.doAddAccountant(arg)
                 self.doLookupAccountants(arg)
-            elif (event == 'lookup-failed' and not self.isAnyAccountants(arg)) or event == 'timer-2min':
-                self.state = 'OFFLINE'
             elif event == 'accountant-connected' and not self.isMoreNeeded(arg):
                 self.state = 'READ_COINS'
-                self.doRetreiveCoins(arg)
-            elif event == 'lookup-failed' and self.isAnyAccountants(arg):
+                self.doRetrieveCoins(arg)
+            elif event == 'lookup-failed' and self.Attempts < 5 and self.isAnyAccountants(arg):
+                self.Attempts+=1
                 self.doLookupAccountants(arg)
+            elif ( event == 'lookup-failed' and ( self.Attempts>=5 or not self.isAnyAccountants(arg) ) ) or event == 'timer-2min':
+                self.state = 'OFFLINE'
         return None
 
     def isAnyAccountants(self, arg):
@@ -284,17 +298,19 @@ class AccountantNode(automat.Automat):
             lg.out(_DebugLevel, 'accountant_node.doAddAccountant NEW %s connected, %d total accountants' % (
                 arg, len(self.connected_accountants)))
 
-    def doRetreiveCoins(self, arg):
+    def doRetrieveCoins(self, arg):
         """
         Action method.
         """
-        query = {'method': 'get_all',
-                 'index': 'time',
-                 'limit': self.download_limit,
-                 'start': utime.datetime_to_sec1970(self.download_offset),
-                 'end': utime.utcnow_to_sec1970(), }
+        query = {
+            'method': 'get_many',
+            'index': 'time_mined',
+            'limit': self.download_limit,
+            'start': utime.datetime_to_sec1970(self.download_offset),
+            'end': utime.utcnow_to_sec1970(),
+        }
         for idurl in self.connected_accountants:
-            p2p_service.SendRetreiveCoin(idurl, query)
+            p2p_service.SendRetrieveCoin(idurl, query)
 
     def doWriteCoins(self, arg):
         """
@@ -329,7 +345,7 @@ class AccountantNode(automat.Automat):
         """
         Action method.
         """
-        if not coins_db.validate_coin(self.current_coin):
+        if not coins_io.validate_coin(self.current_coin):
             self.current_coin = None
             self.automat('coin-not-valid')
             return
@@ -356,7 +372,7 @@ class AccountantNode(automat.Automat):
         self.pending_coins = None
         self.connected_accountants = None
         callback.remove_inbox_callback(self._on_inbox_packet)
-        automat.objects().pop(self.index)
+        self.unregister()
         global _AccountantNode
         del _AccountantNode
         _AccountantNode = None
@@ -371,45 +387,69 @@ class AccountantNode(automat.Automat):
         d.callback(acoin)
         return d
 
+    def _on_command_retreive_coin(self, newpacket, info):
+        query_j = coins_io.read_query_from_packet(newpacket)
+        if not query_j:
+            p2p_service.SendFail(newpacket, 'incorrect query received')
+            return False
+        coins, error = coins_db.query_json(query_j)
+        if error:
+            p2p_service.SendFail(newpacket, error)
+            return False
+        result_coins = []
+        for coin in coins:
+            result_coins.append(coin)
+            if len(result_coins) > self.max_coins_per_packet:
+                result_coins.append(None)
+                break
+        if not result_coins:
+            p2p_service.SendFail(newpacket, 'no coins found')
+            return False
+        p2p_service.SendCoin(newpacket.CreatorID, result_coins, packet_id=newpacket.PacketID)
+        return True
+
+    def _on_command_coin(self, newpacket, info):
+        coins_list = coins_io.read_coins_from_packet(newpacket)
+        if not coins_list:
+            p2p_service.SendFail(newpacket, 'failed to read coins from packet')
+            return True
+        if coins_list[-1] is None:
+            # TODO: partial result, request more coins
+            lg.warn('partial response, more coins were found but not transferred')
+            del coins_list[-1]
+        if len(coins_list) == 1:
+            acoin = coins_list[0]
+            if not coins_io.validate_coin(acoin):
+                p2p_service.SendFail(newpacket, 'coin validation failed')
+                return True
+            if not coins_io.verify_coin(acoin):
+                p2p_service.SendFail(newpacket, 'coin verification failed')
+                return True
+            if coins_db.exist(acoin):
+                self.automat('valid-coins-received', [acoin, ])
+            else:
+                self.automat('new-coin-mined', acoin)
+            return True
+        valid_coins = []
+        for acoin in coins_list:
+            if not coins_io.validate_coin(acoin):
+                continue
+            if not coins_io.verify_coin(acoin):
+                continue
+            valid_coins.append(acoin)
+        if len(valid_coins) == len(coins_list):
+            self.automat('valid-coins-received', valid_coins)
+        else:
+            p2p_service.SendFail(newpacket, 'some non-valid coins received')
+        return True
+
     def _on_inbox_packet(self, newpacket, info, status, error_message):
         if status != 'finished':
             return False
-        if newpacket.Command == commands.RetreiveCoin():
-            query_j = coins_db.read_query_from_packet(newpacket)
-            if not query_j:
-                p2p_service.SendFail(newpacket, 'incorrect query received')
-                return False
-            coins = coins_db.query_json(query_j)
-            p2p_service.SendCoin(newpacket.CreatorID, coins, packet_id=newpacket.PacketID)
-            return True
+        if _Debug:
+            lg.out(_DebugLevel, 'accountant_node._on_inbox_packet %r' % newpacket)
+        if newpacket.Command == commands.RetrieveCoin():
+            return self._on_command_retreive_coin(newpacket, info)
         if newpacket.Command == commands.Coin():
-            coins_list = coins_db.read_coins_from_packet(newpacket)
-            if not coins_list:
-                p2p_service.SendFail(newpacket, 'failed to read coins from packet')
-                return True
-            if len(coins_list) == 1:
-                acoin = coins_list[0]
-                if not coins_db.validate_coin(acoin):
-                    p2p_service.SendFail(newpacket, 'coin validation failed')
-                    return True
-                if not coins_db.verify_coin(acoin):
-                    p2p_service.SendFail(newpacket, 'coin verification failed')
-                    return True
-                if coins_db.exist(acoin):
-                    self.automat('valid-coins-received', [acoin, ])
-                else:
-                    self.automat('new-coin-mined', acoin)
-                return True
-            valid_coins = []
-            for acoin in coins_list:
-                if not coins_db.validate_coin(acoin):
-                    continue
-                if not coins_db.verify_coin(acoin):
-                    continue
-                valid_coins.append(acoin)
-            if len(valid_coins) == len(coins_list):
-                self.automat('valid-coins-received', valid_coins)
-            else:
-                p2p_service.SendFail(newpacket, 'some non-valid coins received')
-            return True
+            return self._on_command_coin(newpacket, info)
         return False

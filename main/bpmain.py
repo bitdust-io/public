@@ -138,7 +138,8 @@ def init(UI='', options=None, args=None, overDict=None, executablePath=None):
         if bpio.Windows() and bpio.isFrozen():
             lg.stdout_stop_redirecting()
         lg.close_log_file()
-        lg.open_log_file(settings.MainLogFilename() + '-' + time.strftime('%y%m%d%H%M%S') + '.log')
+        lg.open_log_file(settings.MainLogFilename())
+        # lg.open_log_file(settings.MainLogFilename() + '-' + time.strftime('%y%m%d%H%M%S') + '.log')
         if bpio.Windows() and bpio.isFrozen():
             lg.stdout_start_redirecting()
 
@@ -172,23 +173,28 @@ def init(UI='', options=None, args=None, overDict=None, executablePath=None):
 #    plug.init()
 #    reactor.addSystemEventTrigger('before', 'shutdown', plug.shutdown)
 
+    lg.out(2, "    python sys.path is:\n                %s" % ('\n                '.join(sys.path)))
+
     lg.out(2, "bpmain.run UI=[%s]" % UI)
 
     if lg.is_debug(20):
         lg.out(0, '\n' + bpio.osinfofull())
 
-    lg.out(4, 'bpmain.run import automats')
+    lg.out(4, 'import automats')
 
     #---START!---
     from automats import automat
     automat.LifeBegins(lg.when_life_begins())
     automat.OpenLogFile(settings.AutomatsLog())
 
-    import initializer
-    I = initializer.A()
-    lg.out(4, 'bpmain.run send event "run" to initializer()')
-    reactor.callWhenRunning(I.automat, 'run', UI)
-    return I
+    from main import events
+    events.init()
+
+    from main import initializer
+    IA = initializer.A()
+    lg.out(4, 'sending event "run" to initializer()')
+    reactor.callWhenRunning(IA.automat, 'run', UI)
+    return IA
 
 #------------------------------------------------------------------------------
 
@@ -201,6 +207,9 @@ def shutdown():
 
     import shutdowner
     shutdowner.A('reactor-stopped')
+
+    from main import events
+    events.shutdown()
 
     from automats import automat
     automat.objects().clear()
@@ -257,7 +266,7 @@ def parser():
     Create an ``optparse.OptionParser`` object to read command line arguments.
     """
     from optparse import OptionParser, OptionGroup
-    parser = OptionParser(usage=usage(), prog='BitDust')
+    parser = OptionParser(usage=usage_text(), prog='BitDust')
     group = OptionGroup(parser, "Logs")
     group.add_option('-d', '--debug',
                      dest='debug',
@@ -423,6 +432,7 @@ def wait_then_kill(x):
 
 #------------------------------------------------------------------------------
 
+
 _OriginalCallLater = None
 _DelayedCallsIndex = {}
 _LastCallableID = 0
@@ -435,30 +445,30 @@ class _callable():
     I tried to decrease the number of delayed calls.
     """
 
-    def __init__(self, callable, *args, **kw):
+    def __init__(self, callabl, *args, **kw):
         global _DelayedCallsIndex
-        self.callable = callable
-        if self.callable not in _DelayedCallsIndex:
-            _DelayedCallsIndex[self.callable] = [0, 0.0]
+        self.callabl = callabl
+        if self.callabl not in _DelayedCallsIndex:
+            _DelayedCallsIndex[self.callabl] = [0, 0.0]
         self.to_call = lambda: self.run(*args, **kw)
 
     def run(self, *args, **kw):
         tm = time.time()
-        self.callable(*args, **kw)
+        self.callabl(*args, **kw)
         exec_time = time.time() - tm
-        _DelayedCallsIndex[self.callable][0] += 1
-        _DelayedCallsIndex[self.callable][1] += exec_time
+        _DelayedCallsIndex[self.callabl][0] += 1
+        _DelayedCallsIndex[self.callabl][1] += exec_time
 
     def call(self):
         self.to_call()
 
 
-def _callLater(delay, callable, *args, **kw):
+def _callLater(delay, callabl, *args, **kw):
     """
     A wrapper around Twisted ``reactor.callLater()`` method.
     """
     global _OriginalCallLater
-    _call = _callable(callable, *args, **kw)
+    _call = _callable(callabl, *args, **kw)
     delayed_call = _OriginalCallLater(delay, _call.call)
     return delayed_call
 
@@ -479,7 +489,6 @@ def monitorDelayedCalls(r):
     """
     global _DelayedCallsIndex
     from logs import lg
-    from system import bpio
     keys = _DelayedCallsIndex.keys()
     keys.sort(key=lambda cb: -_DelayedCallsIndex[cb][1])
     s = ''
@@ -492,25 +501,25 @@ def monitorDelayedCalls(r):
 #-------------------------------------------------------------------------------
 
 
-def usage():
+def usage_text():
     """
-    Calls ``p2p.help.usage()`` method to print out how to run BitDust software
+    Calls ``p2p.help.usage_text()`` method to print out how to run BitDust software
     from command line.
     """
     try:
         import help
-        return help.usage()
+        return help.usage_text()
     except:
         return ''
 
 
-def help():
+def help_text():
     """
-    Same thing, calls ``p2p.help.help()`` to show detailed instructions.
+    Same thing, calls ``p2p.help.help_text()`` to show detailed instructions.
     """
     try:
         import help
-        return help.help()
+        return help.help_text()
     except:
         return ''
 
@@ -526,7 +535,7 @@ def backup_schedule_format():
         return ''
 
 
-def copyright():
+def copyright_text():
     """
     Prints the copyright string.
     """
@@ -566,8 +575,11 @@ def main(executable_path=None):
     # sys.excepthook = lg.exception_hook
 
     if not bpio.isFrozen():
-        from twisted.internet.defer import setDebugging
-        setDebugging(True)
+        try:
+            from twisted.internet.defer import setDebugging
+            setDebugging(True)
+        except:
+            lg.warn('python-twisted is not installed')
 
     pars = parser()
     (opts, args) = pars.parse_args()
@@ -629,6 +641,7 @@ def main(executable_path=None):
         lg.stdout_start_redirecting()
         lg.out(2, 'bpmain.main redirecting started')
 
+    # TODO: temporary solution to record run-time errors
     try:
         if os.path.isfile(os.path.join(appdata, 'logs', 'exception.log')):
             os.remove(os.path.join(appdata, 'logs', 'exception.log'))
@@ -642,7 +655,7 @@ def main(executable_path=None):
     #     lg.disable_output()
 
     if opts.verbose:
-        copyright()
+        copyright_text()
 
     lg.out(2, 'bpmain.main started ' + time.asctime())
 
@@ -691,9 +704,8 @@ def main(executable_path=None):
         bpio.shutdown()
         return ret
 
-    #---detach---
+    #---daemon---
     elif cmd == 'detach' or cmd == 'daemon' or cmd == 'background':
-        # lg.set_debug_level(20)
         appList = bpio.find_process([
             'bitdust.exe',
             'bpmain.py',
@@ -705,21 +717,17 @@ def main(executable_path=None):
             bpio.shutdown()
             return 0
         from lib import misc
-        # from twisted.internet import reactor
-        # def _detach():
-        #     result = misc.DoRestart(detach=True)
-        #     lg.out(0, 'run and detach main BitDust process: %s' % str(result))
-        #     reactor.callLater(2, reactor.stop)
-        # reactor.addSystemEventTrigger('after','shutdown', misc.DoRestart, detach=True)
-        # reactor.callLater(0.01, _detach)
-        # reactor.run()
-        lg.out(0, 'main BitDust process started in daemon mode\n')
+        lg.out(0, 'new BitDust process will be started in daemon mode, finishing current process\n')
         bpio.shutdown()
         result = misc.DoRestart(detach=True)
-        try:
-            result = result.pid
-        except:
-            pass
+        if result is not None:
+            try:
+                result = int(result)
+            except:
+                try:
+                    result = result.pid
+                except:
+                    pass
         return 0
 
     #---restart---
@@ -731,8 +739,6 @@ def main(executable_path=None):
             'regexp:^/usr/bin/python\ +/usr/bin/bitdust.*$',
         ])
         ui = False
-        # if cmd == 'restart':
-        # ui = True
         if len(appList) > 0:
             lg.out(0, 'found main BitDust process: %s, sending "restart" command ... ' % str(appList), '')
 
@@ -926,14 +932,14 @@ def main(executable_path=None):
     from interface import cmd_line_json as cmdln
     ret = cmdln.run(opts, args, pars, overDict, executable_path)
     if ret == 2:
-        print usage()
+        print usage_text()
     bpio.shutdown()
     return ret
 
 #------------------------------------------------------------------------------
 
+
 if __name__ == "__main__":
     ret = main()
     if ret == 2:
-        print usage()
-#    sys.exit(ret)
+        print usage_text()
