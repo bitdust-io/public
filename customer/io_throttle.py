@@ -44,9 +44,13 @@ We probably want to be able to send not only to suppliers but to any contacts.
 In future we can use that to do "overlay" communications to hide users.
 """
 
+#------------------------------------------------------------------------------
+
 import os
 import sys
 import time
+
+#------------------------------------------------------------------------------
 
 try:
     from twisted.internet import reactor
@@ -61,18 +65,22 @@ from system import bpio
 
 from lib import misc
 from lib import nameurl
+from lib import packetid
 
 from main import settings
 
 from userid import my_id
+from userid import global_id
 
 from p2p import commands
+from p2p import p2p_service
 from p2p import contact_status
 
 from crypt import signed
 
 from transport import gateway
 from transport import callback
+from transport import packet_out
 
 #------------------------------------------------------------------------------
 
@@ -113,6 +121,7 @@ def shutdown():
     throttle().DeleteBackupSendings('')
     throttle().DeleteSuppliers(throttle().supplierQueues.keys())
 
+#------------------------------------------------------------------------------
 
 def SetPacketReportCallbackFunc(func):
     """
@@ -127,6 +136,7 @@ def PacketReport(sendORrequest, supplier_idurl, packetID, result):
     """
     Called from other methods here to notify about packets events.
     """
+    lg.out(8, 'io_throttle.PacketReport %s : %s' % (packetID, supplier_idurl))
     global _PacketReportCallbackFunc
     if _PacketReportCallbackFunc is not None:
         _PacketReportCallbackFunc(sendORrequest, supplier_idurl, packetID, result)
@@ -183,21 +193,18 @@ def DeleteSuppliers(suppliers_IDURLs):
 
 def DeleteAllSuppliers():
     """
-    
     """
     return throttle().DeleteSuppliers(throttle().supplierQueues.keys())
 
 
 def OutboxStatus(pkt_out, status, error):
     """
-    
     """
     return throttle().OutboxStatus(pkt_out, status, error)
 
 
 def IsSendingQueueEmpty():
     """
-    
     """
     return throttle().IsSendingQueueEmpty()
 
@@ -249,10 +256,16 @@ class FileToRequest:
         self.callOnReceived = []
         self.callOnReceived.append(callOnReceived)
         self.creatorID = creatorID
-        self.packetID = packetID
+        self.packetID = global_id.CanonicalID(packetID)
+        parts = global_id.ParseGlobalID(packetID)
+        self.customerID = parts['customer']
+        self.remotePath = parts['path']
+        self.customerIDURL = parts['idurl']
+        customerGlobalID, remotePath, versionName, fileName = packetid.SplitVersionFilename(packetID)
+        self.backupID = packetid.MakeBackupID(customerGlobalID, remotePath, versionName)
+        self.fileName = fileName
         self.ownerID = ownerID
         self.remoteID = remoteID
-        self.backupID, x, self.fileName = packetID.rpartition('/')  # [0:packetID.find("-")]
         self.requestTime = None
         self.fileReceivedTime = None
         self.requestTimeout = max(30, 2 * int(settings.getBackupBlockSize() / settings.SendingSpeedLimit()))
@@ -274,7 +287,13 @@ class FileToSend:
         except:
             lg.exc()
             self.fileSize = 0
-        self.packetID = packetID
+        self.packetID = global_id.CanonicalID(packetID)
+        parts = global_id.ParseGlobalID(packetID)
+        self.customerID = parts['customer']
+        self.remotePath = parts['path']
+        self.customerIDURL = parts['idurl']
+        customerGlobalID, remotePath, versionName, _ = packetid.SplitVersionFilename(packetID)
+        self.backupID = packetid.MakeBackupID(customerGlobalID, remotePath, versionName)
         self.remoteID = remoteID
         self.ownerID = ownerID
         self.callOnAck = callOnAck
@@ -295,7 +314,10 @@ class FileToSend:
 
 class SupplierQueue:
 
-    def __init__(self, supplierIdentity, creatorID):
+    def __init__(self, supplierIdentity, creatorID, customerIDURL=None):
+        self.customerIDURL = customerIDURL
+        if self.customerIDURL is None:
+            self.customerIDURL = my_id.getLocalID()
         self.creatorID = creatorID
         self.remoteID = supplierIdentity
         self.remoteName = nameurl.GetName(self.remoteID)
@@ -337,7 +359,6 @@ class SupplierQueue:
 
     def RemoveSupplierWork(self):
         """
-        
         """
         # in the case that we're doing work with a supplier who has just been replaced ...
         # Need to remove the register interests
@@ -514,21 +535,22 @@ class SupplierQueue:
             lg.out(10, "io_throttle.FileSendAck finishing to %s, shutdown is True" % self.remoteName)
             return
         self.ackedCount += 1
-        if newpacket.PacketID not in self.fileSendQueue:
+        packetID = global_id.CanonicalID(newpacket.PacketID)
+        if packetID not in self.fileSendQueue:
             lg.warn("packet %s not in sending queue for %s" % (newpacket.PacketID, self.remoteName))
             return
-        if newpacket.PacketID not in self.fileSendDict.keys():
+        if packetID not in self.fileSendDict.keys():
             lg.warn("packet %s not in sending dict for %s" % (newpacket.PacketID, self.remoteName))
             return
-        self.fileSendDict[newpacket.PacketID].ackTime = time.time()
+        self.fileSendDict[packetID].ackTime = time.time()
         if newpacket.Command == commands.Ack():
-            self.fileSendDict[newpacket.PacketID].result = 'acked'
-            if self.fileSendDict[newpacket.PacketID].callOnAck:
-                reactor.callLater(0, self.fileSendDict[newpacket.PacketID].callOnAck, newpacket, newpacket.OwnerID, newpacket.PacketID)
+            self.fileSendDict[packetID].result = 'acked'
+            if self.fileSendDict[packetID].callOnAck:
+                reactor.callLater(0, self.fileSendDict[packetID].callOnAck, newpacket, newpacket.OwnerID, packetID)
         elif newpacket.Command == commands.Fail():
-            self.fileSendDict[newpacket.PacketID].result = 'failed'
-            if self.fileSendDict[newpacket.PacketID].callOnFail:
-                reactor.callLater(0, self.fileSendDict[newpacket.PacketID].callOnFail, newpacket.CreatorID, newpacket.PacketID, 'failed')
+            self.fileSendDict[packetID].result = 'failed'
+            if self.fileSendDict[packetID].callOnFail:
+                reactor.callLater(0, self.fileSendDict[packetID].callOnFail, newpacket.CreatorID, packetID, 'failed')
         import supplier_connector
         sc = supplier_connector.by_idurl(newpacket.OwnerID)
         if sc:
@@ -606,22 +628,32 @@ class SupplierQueue:
                     self.fileRequestDict[packetID].result = 'received'
                     packetsToRemove.add(packetID)
             if self.fileRequestDict[packetID].requestTime is None:
-                if not os.path.exists(os.path.join(settings.getLocalBackupsDir(), packetID)):
+                customer, pathID = packetid.SplitPacketID(packetID)
+                if not os.path.exists(os.path.join(settings.getLocalBackupsDir(), customer, pathID)):
                     fileRequest = self.fileRequestDict[packetID]
                     lg.out(10, "io_throttle.RunRequest for packetID " + fileRequest.packetID)
                     # transport_control.RegisterInterest(self.DataReceived,fileRequest.creatorID,fileRequest.packetID)
                     # callback.register_interest(self.DataReceived, fileRequest.creatorID, fileRequest.packetID)
-                    newpacket = signed.Packet(
-                        commands.Retrieve(),
+                    p2p_service.SendRetreive(
                         fileRequest.ownerID,
                         fileRequest.creatorID,
                         fileRequest.packetID,
-                        "",
-                        fileRequest.remoteID)
-                    # transport_control.outboxNoAck(newpacket)
-                    gateway.outbox(newpacket, callbacks={
-                        commands.Data(): self.DataReceived,
-                        commands.Fail(): self.DataReceived})
+                        fileRequest.remoteID,
+                        callbacks={
+                            commands.Data(): self.DataReceived,
+                            commands.Fail(): self.DataReceived,
+                        }
+                    )
+#                     newpacket = signed.Packet(
+#                         commands.Retrieve(),
+#                         fileRequest.ownerID,
+#                         fileRequest.creatorID,
+#                         packetid.RemotePath(fileRequest.packetID),
+#                         "",
+#                         fileRequest.remoteID)
+#                     gateway.outbox(newpacket, callbacks={
+#                         commands.Data(): self.DataReceived,
+#                         commands.Fail(): self.DataReceived})
                     fileRequest.requestTime = time.time()
                 else:
                     # we have the data file, no need to request it
@@ -668,24 +700,25 @@ class SupplierQueue:
         if self.shutdown:
             # if we're closing down this queue (supplier replaced, don't any anything new)
             return
-        if newpacket.PacketID in self.fileRequestQueue:
-            self.fileRequestQueue.remove(newpacket.PacketID)
+        packetID = global_id.CanonicalID(newpacket.PacketID)
+        if packetID in self.fileRequestQueue:
+            self.fileRequestQueue.remove(packetID)
         if newpacket.Command == commands.Data():
-            if newpacket.PacketID in self.fileRequestDict:
-                self.fileRequestDict[newpacket.PacketID].fileReceivedTime = time.time()
-                self.fileRequestDict[newpacket.PacketID].result = 'received'
-                for callBack in self.fileRequestDict[newpacket.PacketID].callOnReceived:
+            if packetID in self.fileRequestDict:
+                self.fileRequestDict[packetID].fileReceivedTime = time.time()
+                self.fileRequestDict[packetID].result = 'received'
+                for callBack in self.fileRequestDict[packetID].callOnReceived:
                     callBack(newpacket, 'received')
         elif newpacket.Command == commands.Fail():
-            if newpacket.PacketID in self.fileRequestDict:
-                self.fileRequestDict[newpacket.PacketID].fileReceivedTime = time.time()
-                self.fileRequestDict[newpacket.PacketID].result = 'failed'
-                for callBack in self.fileRequestDict[newpacket.PacketID].callOnReceived:
+            if packetID in self.fileRequestDict:
+                self.fileRequestDict[packetID].fileReceivedTime = time.time()
+                self.fileRequestDict[packetID].result = 'failed'
+                for callBack in self.fileRequestDict[packetID].callOnReceived:
                     callBack(newpacket, 'failed')
         else:
             raise Exception('incorrect response command')
-        if newpacket.PacketID in self.fileRequestDict:
-            del self.fileRequestDict[newpacket.PacketID]
+        if packetID in self.fileRequestDict:
+            del self.fileRequestDict[packetID]
         lg.out(10, "io_throttle.DataReceived %s from %s, queue=%d" % (
             newpacket, self.remoteName, len(self.fileRequestQueue)))
         self.DoRequest()
@@ -722,11 +755,17 @@ class SupplierQueue:
         for packetID in packetsToRemove:
             self.fileRequestQueue.remove(packetID)
             del self.fileRequestDict[packetID]
+        packetsToCancel = packet_out.search_by_backup_id(backupName)
+        for pkt_out in packetsToCancel:
+            if pkt_out.outpacket.Command == commands.Retrieve():
+                if pkt_out.outpacket.PacketID in packetsToRemove:
+                    lg.warn('sending "cancel" to %s' % pkt_out)
+                    pkt_out.automat('cancel')
         if len(self.fileRequestQueue) > 0:
             reactor.callLater(0, self.DoRequest)
 
     def OutboxStatus(self, pkt_out, status, error):
-        packetID = pkt_out.outpacket.PacketID
+        packetID = global_id.CanonicalID(pkt_out.outpacket.PacketID)
         if status != 'finished' and packetID in self.fileSendQueue:
             self.sendFailedPacketIDs.append(packetID)
             # reactor.callLater(0, self.DoSend)
@@ -802,7 +841,8 @@ class IOThrottle:
         # make sure that we don't actually already have the file
         # if packetID != settings.BackupInfoFileName():
         if packetID not in [settings.BackupInfoFileName(), settings.BackupInfoFileNameOld(), settings.BackupInfoEncryptedFileName(), ]:
-            filename = os.path.join(settings.getLocalBackupsDir(), packetID)
+            customer, pathID = packetid.SplitPacketID(packetID)
+            filename = os.path.join(settings.getLocalBackupsDir(), customer, pathID)
             if os.path.exists(filename):
                 lg.warn("%s already exist " % filename)
                 if callOnReceived:
@@ -868,7 +908,7 @@ class IOThrottle:
         if supplierIDURL not in self.supplierQueues:
             return False
         for packetID in self.supplierQueues[supplierIDURL].fileSendDict.keys():
-            if packetID.startswith(backupID):
+            if packetID.count(backupID):
                 return True
         return False
 
@@ -880,7 +920,7 @@ class IOThrottle:
         if supplierIDURL not in self.supplierQueues:
             return False
         for packetID in self.supplierQueues[supplierIDURL].fileRequestDict.keys():
-            if packetID.startswith(backupID):
+            if packetID.count(backupID):
                 return True
         return False
 

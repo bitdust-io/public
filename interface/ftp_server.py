@@ -23,6 +23,7 @@
 #
 #
 #
+from fileinput import fileno
 
 """
 ..
@@ -30,11 +31,12 @@
 module:: ftp_server
 """
 
+#------------------------------------------------------------------------------
+
 import os
 import time
-import pprint
-import traceback
-import fnmatch
+
+#------------------------------------------------------------------------------
 
 from twisted.internet import reactor
 from twisted.internet import defer
@@ -100,6 +102,9 @@ from storage import restore_monitor
 from storage import backup_monitor
 
 from userid import my_id
+from userid import global_id
+
+from interface import api
 
 #------------------------------------------------------------------------------
 
@@ -181,6 +186,7 @@ class BitDustFTP(FTP):
         return result
 
     def _cbFileSent(self, result):
+        lg.out(8, 'ftp_server._cbFileSent %s' % result)
         return (TXFR_COMPLETE_OK,)
 
     def _ebFileSent(self, err):
@@ -190,6 +196,7 @@ class BitDustFTP(FTP):
         return (CNX_CLOSED_TXFR_ABORTED,)
 
     def _cbReadOpened(self, file_obj, consumer):
+        lg.out(8, 'ftp_server._cbWriteOpened %s %s' % (file_obj, consumer))
         if self.dtpInstance.isConnected:
             self.reply(DATA_CNX_ALREADY_OPEN_START_XFR)
         else:
@@ -207,22 +214,37 @@ class BitDustFTP(FTP):
             return (err.value.errorCode, '/'.join(newsegs))
         return (FILE_NOT_FOUND, '/'.join(newsegs))
 
-    def _cbFileRecevied(self, consumer, upload_filename, newsegs):
+    def _cbFileRecevied(self, consumer, local_path, newsegs):
         #         receive_defer.addCallback(self._startFileBackup, upload_filename, newsegs, d)
 #         consumer.fObj.flush()
 #         os.fsync(consumer.fObj.fileno())
 #         consumer.fObj.close()
 #         consumer.close()
-        full_path = '/' + ('/'.join(newsegs))
-        path_id = backup_fs.ToID(full_path)
-        if not path_id:
-            path_id, _, _ = backup_fs.AddFile(full_path, read_stats=False)
-        item = backup_fs.GetByID(path_id)
-        item.read_stats(upload_filename)
-        backup_control.StartSingle(path_id, upload_filename)
-        # upload_task.result_defer.addCallback(self._cbFileBackup, result_defer, newsegs)
-        backup_fs.Calculate()
-        backup_control.Save()
+        # import pdb; pdb.set_trace()
+        remote_path = '/'.join(newsegs)
+        lg.out(8, 'ftp_server._cbFileRecevied %s %s' % (local_path, remote_path))
+        ret = api.file_info(remote_path)
+        if ret['status'] != 'OK':
+            ret = api.file_create(remote_path)
+            if ret['status'] != 'OK':
+                return defer.fail(FileNotFoundError(remote_path))
+        else:
+            if ret['result'][0]['type'] == 'dir':
+                return defer.fail(IsADirectoryError(remote_path))
+        ret = api.file_upload_start(local_path, remote_path, wait_result=False)
+        if ret['status'] != 'OK':
+            lg.warn('file_upload_start() returned: %s' % ret)
+            return defer.fail(FileNotFoundError(remote_path))
+
+#         shortPathID = backup_fs.ToID(full_path)
+#         if not shortPathID:
+#             shortPathID, _, _ = backup_fs.AddFile(full_path, read_stats=False)
+#         item = backup_fs.GetByID(shortPathID)
+#         item.read_stats(upload_filename)
+#         backup_control.StartSingle(shortPathID, upload_filename)
+#         # upload_task.result_defer.addCallback(self._cbFileBackup, result_defer, newsegs)
+#         backup_fs.Calculate()
+#         backup_control.Save()
         # result_defer.callback(None)
         # return consumer
         return (TXFR_COMPLETE_OK,)
@@ -234,6 +256,8 @@ class BitDustFTP(FTP):
         return (CNX_CLOSED_TXFR_ABORTED,)
 
     def _cbWriteOpened(self, consumer, upload_filename, newsegs):
+        remote_path = '/'.join(newsegs)
+        lg.out(8, 'ftp_server._cbWriteOpened %s %s' % (upload_filename, remote_path))
         d = consumer.receive()
         d.addCallback(self._startConsumer)
         d.addCallback(self._stopConsumer, consumer)
@@ -265,14 +289,18 @@ class BitDustFTP(FTP):
         consumer.close()
         return d
 
-    def _cbRestoreDone(self, backupID, result, restore_path, path_segments, result_defer):
-        if result != 'restore done':
-            return result_defer.errback(None, path_segments)
-        fp = filepath.FilePath(restore_path)
+    def _cbRestoreDone(self, ret, path_segments, result_defer):
+        pth = '/'.join(path_segments)
+        lg.out(8, 'ftp_server._cbRestoreDone %s %s' % (ret, pth))
+        if ret['status'] != 'OK':
+            return result_defer.errback(FileNotFoundError(pth))
+        if ret['result'][0] != 'restore done':
+            return result_defer.errback(FileNotFoundError(pth))
+        fp = filepath.FilePath(os.path.join(ret['local_path'], os.path.basename(ret['remote_path'])))
         try:
             fobj = fp.open('r')
         except:
-            return result_defer.errback(None, path_segments)
+            return result_defer.errback(FileNotFoundError(pth))
         fr = _FileReader(fobj)
         return result_defer.callback(fr)
 
@@ -293,28 +321,32 @@ class BitDustFTP(FTP):
             segments = toSegments(self.workingDirectory, path)
         except InvalidPath:
             return defer.fail(FileNotFoundError(path))
-        d = Deferred()
-        d.addCallback(self._dirListingResponse)
-        pth = '/' + ('/'.join(segments))
-        lst = backup_fs.ListByPathAdvanced(pth)
+        pth = '/'.join(segments)
+        ret = api.files_list(pth)
+        if ret['status'] != 'OK':
+            return defer.fail(FileNotFoundError(path))
+        lst = ret['result']
         result = []
         for itm in lst:
-            if itm[1] == 'index':
+            if itm['path'] == 'index':
                 continue
             # known_size = max(itm[7].size, 0)
-            if itm[7].any_version():
-                known_size = itm[7].versions[itm[7].get_latest_version()][1]
-            else:
-                known_size = 1
-            result.append((itm[7].filename(), [  # name
+#             if itm['versions']:
+#                 known_size = itm['size']
+#             else:
+#                 known_size = 1
+            known_size = max(itm['local_size'], 0)
+            result.append((os.path.basename(itm['path']), [  # name
                 known_size,  # size
-                True if itm[0] == 'dir' else False,  # folder or file ?
+                True if itm['type'] == 'dir' else False,  # folder or file ?
                 filepath.Permissions(07777),  # permissions
                 0,  # hardlinks
-                time.mktime(time.strptime(itm[4], '%Y-%m-%d %H:%M:%S')) if itm[4] else None,  # time
-                my_id.getIDName(),  # owner
-                my_id.getIDName(),    # group   TODO: implement groups and populate here
+                time.mktime(time.strptime(itm['latest'], '%Y-%m-%d %H:%M:%S')) if itm['latest'] else None,  # time
+                itm['customer'],  # owner
+                itm['key_id'],    # group
             ], ))
+        d = Deferred()
+        d.addCallback(self._dirListingResponse)
         d.callback(result)
         return d
 
@@ -324,10 +356,17 @@ class BitDustFTP(FTP):
         except InvalidPath:
             # XXX Eh, what to fail with here?
             return defer.fail(FileNotFoundError(path))
-        pth = '/' + ('/'.join(segments))
+        pth = '/'.join(segments)
         d = Deferred()
         d.addCallback(lambda r: self._accessGrantedResponse(r, segments))
-        if backup_fs.IsDir(pth):
+        if not pth or pth == '/':
+            d.callback(None)
+            return d
+        ret = api.file_info(pth, include_uploads=False, include_downloads=False)
+        if ret['status'] != 'OK':
+            d.errback(FileNotFoundError(path))
+            return d
+        if ret['result'][0]['type'] == 'dir':
             d.callback(None)
         else:
             d.errback(FileNotFoundError(path))
@@ -350,39 +389,20 @@ class BitDustFTP(FTP):
             consumer = ASCIIConsumerWrapper(self.dtpInstance)
         else:
             consumer = self.dtpInstance
-        pth = '/' + ('/'.join(newsegs))
-        path_id = backup_fs.ToID(pth)
-        if not path_id:
-            return defer.fail(FileNotFoundError(path))
-        item = backup_fs.GetByID(path_id)
-        if not item:
-            return defer.fail(FileNotFoundError(path))
-        version = item.get_latest_version()
-        if version is None:
-            return defer.fail(FileNotFoundError(path))
-        backupID = path_id + '/' + version
-        if backup_control.IsBackupInProcess(backupID):
-            # TODO: try older version, or return another error
-            return defer.fail(FileNotFoundError(path))
-        path_id, version = packetid.SplitBackupID(backupID)
-        if restore_monitor.IsWorking(backupID):
-            # TODO: wrap and consume existing restore process
-            return defer.fail(FileNotFoundError(path))
-        restore_filename = newsegs[-1]
-        restore_dir = tmpfile.make_dir('restore', prefix=(backupID.replace('/', '_') + '_'))
-        restore_path = os.path.join(restore_dir, restore_filename)
-
+        pth = '/'.join(newsegs)
+        restore_dir = tmpfile.make_dir('restore', prefix=('_'.join(newsegs) + '_'))
+        ret = api.file_download_start(pth, restore_dir, wait_result=True)
         d = Deferred()
         d.addCallback(self._cbReadOpened, consumer)
         d.addErrback(self._ebReadOpened, newsegs)
         d.addBoth(self._enableTimeoutLater)
-        restore_monitor.Start(
-            backupID,
-            restore_dir,
-            callback=lambda backup_id, result: self._cbRestoreDone(
-                backup_id, result, restore_path, newsegs, d,
-            ),
-        )
+        if isinstance(ret, dict):
+#             if ret['status'] != 'OK':
+#                 return defer.fail(FileNotFoundError(path))
+            self._cbRestoreDone(ret, newsegs, d)
+            return d
+        ret.addCallback(self._cbRestoreDone, newsegs, d)
+        ret.addErrback(lambda err: lg.exc(err))
         return d
 
     def ftp_STOR(self, path):
@@ -440,26 +460,29 @@ class BitDustFTP(FTP):
             newsegs = toSegments(self.workingDirectory, path)
         except InvalidPath:
             return defer.fail(FileNotFoundError(path))
-        full_path = '/' + ('/'.join(newsegs))
-        path_id = backup_fs.ToID(full_path)
-        if path_id is None:
+        full_path = '/'.join(newsegs)
+        ret = api.file_info(full_path)
+        if ret['status'] != 'OK':
             return defer.fail(FileNotFoundError(path))
-        item = backup_fs.GetByID(path_id)
-        if item is None:
-            return defer.fail(FileNotFoundError(path))
-        return succeed((FILE_STATUS, str(item.size), ))
-        # return self.shell.stat(newsegs, ('size',)).addCallback(self._cbStat)
+        return succeed((FILE_STATUS, str(ret['size']), ))
+
+#         shortPathID = backup_fs.ToID(full_path)
+#         if shortPathID is None:
+#             return defer.fail(FileNotFoundError(path))
+#         item = backup_fs.GetByID(shortPathID)
+#         if item is None:
+#             return defer.fail(FileNotFoundError(path))
+#         return succeed((FILE_STATUS, str(item.size), ))
 
     def ftp_MKD(self, path):
         try:
             newsegs = toSegments(self.workingDirectory, path)
         except InvalidPath:
             return defer.fail(FileNotFoundError(path))
-        full_path = '/' + ('/'.join(newsegs))
-        if backup_fs.Exists(full_path):
-            return defer.fail(FileExistsError(path))
-        path_id, _, _ = backup_fs.AddDir(path)
-        backup_control.Save()
+        full_path = '/'.join(newsegs)
+        ret = api.file_create(full_path, as_folder=True)
+        if ret['status'] != 'OK':
+            return defer.fail(FileExistsError(str(ret['errors'])))
         return succeed((MKD_REPLY, path))
 
     def ftp_RMD(self, path):
@@ -467,20 +490,10 @@ class BitDustFTP(FTP):
             newsegs = toSegments(self.workingDirectory, path)
         except InvalidPath:
             return defer.fail(FileNotFoundError(path))
-        full_path = '/' + ('/'.join(newsegs))
-        path_id = backup_fs.ToID(full_path)
-        if path_id is None:
-            return defer.fail(FileNotFoundError(path))
-        item = backup_fs.GetByID(path_id)
-        if item is None:
-            return defer.fail(FileNotFoundError(path))
-        backup_control.DeletePathBackups(path_id, saveDB=False, calculate=False)
-        backup_fs.DeleteLocalDir(settings.getLocalBackupsDir(), path_id)
-        backup_fs.DeleteByID(path_id)
-        backup_fs.Scan()
-        backup_fs.Calculate()
-        backup_control.Save()
-        backup_monitor.A('restart')
+        full_path = '/'.join(newsegs)
+        ret = api.file_delete(full_path)
+        if ret['status'] != 'OK':
+            return defer.fail(FileNotFoundError(str(ret['errors'])))
         return succeed((REQ_FILE_ACTN_COMPLETED_OK,))
 
     def ftp_DELE(self, path):
@@ -488,20 +501,10 @@ class BitDustFTP(FTP):
             newsegs = toSegments(self.workingDirectory, path)
         except InvalidPath:
             return defer.fail(FileNotFoundError(path))
-        full_path = '/' + ('/'.join(newsegs))
-        path_id = backup_fs.ToID(full_path)
-        if path_id is None:
-            return defer.fail(FileNotFoundError(path))
-        item = backup_fs.GetByID(path_id)
-        if item is None:
-            return defer.fail(FileNotFoundError(path))
-        backup_control.DeletePathBackups(path_id, saveDB=False, calculate=False)
-        backup_fs.DeleteLocalDir(settings.getLocalBackupsDir(), path_id)
-        backup_fs.DeleteByID(path_id)
-        backup_fs.Scan()
-        backup_fs.Calculate()
-        backup_control.Save()
-        backup_monitor.A('restart')
+        full_path = '/'.join(newsegs)
+        ret = api.file_delete(full_path)
+        if ret['status'] != 'OK':
+            return defer.fail(FileNotFoundError(str(ret['errors'])))
         return succeed((REQ_FILE_ACTN_COMPLETED_OK,))
 
     def ftp_RNTO(self, toName):

@@ -146,6 +146,14 @@ def getIDName():
             _LocalName = localIdent.getIDName()
     return _LocalName
 
+
+def getGlobalID():
+    """
+    Return my global user id - according to my current IDURL.
+    """
+    from userid import global_id
+    return global_id.UrlToGlobalID(getLocalID())
+
 #------------------------------------------------------------------------------
 
 
@@ -216,6 +224,12 @@ def forgetLocalIdentity():
 
 def eraseLocalIdentity():
     filename = bpio.portablePath(settings.LocalIdentityFilename())
+    if not os.path.exists(filename):
+        lg.out(6, "my_id.eraseLocalIdentity SKIP file %s not exist" % filename)
+        return True
+    if not os.path.isfile(filename):
+        lg.out(6, "my_id.eraseLocalIdentity ERROR path %s is not a file" % filename)
+        return False
     try:
         os.remove(filename)
     except:
@@ -306,7 +320,7 @@ def getOrderFromContacts(ident):
 #------------------------------------------------------------------------------
 
 
-def buildProtoContacts(id_obj):
+def buildProtoContacts(id_obj, skip_transports=[]):
     """
     Create a full list of needed transport methods to be able to accept
     incoming traffic from other nodes.
@@ -325,6 +339,8 @@ def buildProtoContacts(id_obj):
     # prepare list of active transports
     active_transports = []
     for proto in getValidTransports():
+        if proto in skip_transports:
+            continue
         if not settings.transportIsEnabled(proto):
             continue
         if not settings.transportReceivingIsEnabled(proto):
@@ -472,7 +488,7 @@ def buildDefaultIdentity(name='', ip='', idurls=[]):
     return ident
 
 
-def rebuildLocalIdentity():
+def rebuildLocalIdentity(skip_transports=[]):
     """
     If some transports was enabled or disabled we want to update identity
     contacts. Just empty all of the contacts and create it again in the same
@@ -487,7 +503,7 @@ def rebuildLocalIdentity():
     lg.out(4, 'my_id.rebuildLocalIdentity current identity is %d bytes long' % len(current_identity_xmlsrc))
     # create a full list of needed transport methods
     # to be able to accept incoming traffic from other nodes
-    new_contacts, new_order = buildProtoContacts(lid)
+    new_contacts, new_order = buildProtoContacts(lid, skip_transports=skip_transports)
     # erase current contacts from my identity
     lid.clearContacts()
     # add contacts data to the local identity

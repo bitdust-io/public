@@ -59,9 +59,12 @@ _DebugLevel = 8
 
 #------------------------------------------------------------------------------
 
+import random
 import cStringIO
 
 # from twisted.internet import reactor
+
+#------------------------------------------------------------------------------
 
 from logs import lg
 
@@ -303,14 +306,16 @@ class ProxyReceiver(automat.Automat):
             self.router_idurl, _, _ = s.split(' ')
         except:
             lg.exc()
+        if _Debug:
+            lg.out(_DebugLevel, 'proxy_receiver.doLoadRouterInfo : %s' % self.router_idurl)
 
     def doLookupRandomNode(self, arg):
         """
         Action method.
         """
-        # self._find_random_node()
+        self._find_random_node()
         # TODO: this is still under construction - so I am using this node for tests
-        self.automat('found-one-node', 'http://veselin-p2p.ru/bitdust_j2_vps1001.xml')
+        # self.automat('found-one-node', 'http://veselin-p2p.ru/bitdust_j2_vps1001.xml')
 
     def doSendMyIdentity(self, arg):
         """
@@ -319,12 +324,14 @@ class ProxyReceiver(automat.Automat):
         identity_source = config.conf().getData('services/proxy-transport/my-original-identity').strip()
         if identity_source:
             if _Debug:
-                lg.out(_DebugLevel, 'proxy_receiver.doSendMyIdentity use my previously stored identity')
+                lg.out(_DebugLevel, 'proxy_receiver.doSendMyIdentity to %s, use my previously stored identity of %d bytes' % (
+                    self.router_idurl, len(identity_source)))
         else:
             identity_source = my_id.getLocalIdentity().serialize()
             cur_contacts = my_id.getLocalIdentity().getContacts()
             if _Debug:
-                lg.out(_DebugLevel, 'proxy_receiver.doSendMyIdentity using my current identity, contacts=%s' % cur_contacts)
+                lg.out(_DebugLevel, 'proxy_receiver.doSendMyIdentity to %s, using my current identity, contacts=%s' % (
+                    self.router_idurl, cur_contacts))
         newpacket = signed.Packet(
             commands.Identity(), my_id.getLocalID(),
             my_id.getLocalID(), 'identity',
@@ -349,6 +356,8 @@ class ProxyReceiver(automat.Automat):
         self.router_identity = None
         self.router_proto_host = None
         self.request_service_packet_id = []
+        if _Debug:
+            lg.out(_DebugLevel, 'proxy_receiver.doRememberNode %s' % self.router_idurl)
 
     def doSendRequestService(self, arg):
         """
@@ -504,7 +513,7 @@ class ProxyReceiver(automat.Automat):
         """
         Action method.
         """
-        proxy_interface.interface_disconnected()
+        proxy_interface.interface_disconnected().addErrback(lambda _: None)
 
     def doNotifyFailed(self, arg):
         """
@@ -529,14 +538,34 @@ class ProxyReceiver(automat.Automat):
             remoteprotos = set(ident.getProtoOrder())
             myprotos = set(my_id.getLocalIdentity().getProtoOrder())
             if len(myprotos.intersection(remoteprotos)) > 0:
-                self.automat('found-one-user', idurl)
+                self.automat('found-one-node', idurl)
                 return
-        self.automat('users-not-found')
+        self.automat('nodes-not-found')
 
     def _find_random_node(self):
-        d = lookup.start()
-        d.addCallback(self._on_nodes_lookup_finished)
-        d.addErrback(lambda err: self.automat('users-not-found'))
+        # DEBUG
+        # self.automat('found-one-node', 'http://p2p-id.ru/seed0_cb67.xml')
+        # self.automat('found-one-node', 'http://bitdust.io:8084/seed2_b17a.xml')
+        # return
+        preferred_routers_raw = config.conf().getData('services/proxy-transport/preferred-routers').strip()
+        preferred_routers = []
+        if preferred_routers_raw:
+            preferred_routers.extend(preferred_routers_raw.split('\n'))
+        if preferred_routers:
+            known_router = random.choice(preferred_routers)
+            if _Debug:
+                lg.out(_DebugLevel, 'proxy_receiver._find_random_node selected random item from preferred_routers: %s' % known_router)
+            self.automat('found-one-node', known_router)
+            return
+        if _Debug:
+            lg.out(_DebugLevel, 'proxy_receiver._find_random_node')
+        tsk = lookup.start()
+        if tsk:
+            tsk.result_defer.addCallback(self._on_nodes_lookup_finished)
+            tsk.result_defer.addErrback(lambda err: self.automat('nodes-not-found'))
+        else:
+            self.automat('nodes-not-found')
+
 #         if _Debug:
 #             lg.out(_DebugLevel, 'proxy_receiver._find_random_node')
 #         # DEBUG
@@ -601,12 +630,12 @@ class ProxyReceiver(automat.Automat):
         self.automat('service-refused', (response, info))
 
     def _on_inbox_packet_received(self, newpacket, info, status, error_message):
-        if  newpacket.Command == commands.Identity() and \
+        if newpacket.Command == commands.Identity() and \
                 newpacket.CreatorID == self.router_idurl and \
                 newpacket.RemoteID == my_id.getLocalID():
             self.automat('router-id-received', (newpacket, info))
             return True
-        if  newpacket.Command == commands.Fail() and \
+        if newpacket.Command == commands.Fail() and \
                 newpacket.CreatorID == self.router_idurl and \
                 newpacket.RemoteID == my_id.getLocalID():
             # newpacket.Payload == 'route not exist':

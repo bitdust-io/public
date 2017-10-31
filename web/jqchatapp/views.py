@@ -48,6 +48,9 @@ from chat import message
 from contacts import contactsdb
 
 from userid import my_id
+from userid import global_id
+
+from interface import api
 
 #------------------------------------------------------------------------------
 
@@ -61,6 +64,14 @@ JQCHAT_DISPLAY_COUNT = getattr(settings, 'JQCHAT_DISPLAY_COUNT', 100)
 
 #------------------------------------------------------------------------------
 
+def first_page(request):
+    return render_to_response('jqchat/first_page.html', {
+        # 'known_ids': [],
+        # 'rooms': '<br>'.join(map(lambda r: '<a href="/chat/room/%d">%s</a>' % (r.id, r.name), Room.objects.all())),
+        'rooms': Room.objects.all(),
+    }, context_instance=RequestContext(request))
+
+#------------------------------------------------------------------------------
 
 def open_room(request):
     roomid = request.REQUEST.get('id', '')
@@ -72,7 +83,7 @@ def open_room(request):
             roomid = int(roomid)
         except:
             lg.exc()
-            return Http404('incorrect Room ID')
+            raise Http404('incorrect Room ID')
         try:
             ThisRoom = get_object_or_404(Room, id=roomid)
         except:
@@ -98,7 +109,7 @@ def open_room(request):
                                              room=ThisRoom)
         return HttpResponseRedirect('/chat/room/%d' % ThisRoom.id)
 
-    return Http404('need to provide a room info')
+    raise Http404('need to provide a room info')
 
 #------------------------------------------------------------------------------
 
@@ -106,8 +117,8 @@ def open_room(request):
 def room_by_id(request, id):
     try:
         ThisRoom = get_object_or_404(Room, id=id)
-    except:
-        raise Http404
+    except Exception as e:
+        raise e
     return render_to_response('jqchat/chat_test.html',
                               {'room': ThisRoom},
                               context_instance=RequestContext(request))
@@ -170,9 +181,23 @@ class Ajax(object):
                         my_id.getLocalID(),
                         self.ThisRoom,
                         escape(msg_text))
-                    message.SendMessage(
-                        str(self.ThisRoom.idurl),
-                        str(msg_text))
+                    key_id = 'master'  # self.ThisRoom.name or 'master'
+                    recipient = global_id.MakeGlobalID(
+                        idurl=str(self.ThisRoom.idurl), key_id=key_id,
+                    )
+                    # recipient = '%s$%s' % (key_id, global_id.UrlToGlobalID(str(self.ThisRoom.idurl)))
+                    from twisted.internet.defer import Deferred
+                    ret = api.send_message(recipient, str(msg_text))
+                    if isinstance(ret, Deferred):
+                        ret.addCallback(lambda resp: lg.out(2, 'CHAT: %s' % str(resp)))
+                        ret.addErrback(lambda resp: lg.err('CHAT: %s' % str(resp)))
+                    else:
+                        lg.out(2, 'CHAT: %s' % str(ret))
+#                     message.SendMessage(
+#                         str(msg_text),
+#                         str(self.ThisRoom.idurl),
+#                         'master',
+#                     )
             else:
                 # If a GET, make sure that no action was specified.
                 if self.request.GET.get('action', None):

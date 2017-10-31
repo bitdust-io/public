@@ -51,6 +51,7 @@ _DebugLevel = 8
 
 import os
 import sys
+import time
 
 try:
     from twisted.internet import reactor
@@ -151,12 +152,12 @@ def start(AckHandler=None, wide=False):
     return propagate(contactsdb.contacts_remote(), AckHandler, wide)
 
 
-def suppliers(AckHandler=None, wide=False):
+def suppliers(AckHandler=None, wide=False, customer_idurl=None):
     """
     Call ``propagate()`` for all suppliers.
     """
     lg.out(6, 'propagate.suppliers')
-    return propagate(contactsdb.suppliers(), AckHandler, wide)
+    return propagate(contactsdb.suppliers(customer_idurl=customer_idurl), AckHandler, wide)
 
 
 def customers(AckHandler=None, wide=False):
@@ -176,14 +177,14 @@ def allcontacts(AckHandler=None, wide=False):
     return propagate(contactsdb.contacts_full(), AckHandler, wide)
 
 
-def single(idurl, ack_handler=None, wide=False):
+def single(idurl, ack_handler=None, wide=False, fail_handler=None):
     """
     Do "propagate" for a single contact.
     """
     d = FetchSingle(idurl)
-    d.addCallback(lambda x: SendToIDs([idurl], ack_handler, wide))
+    d.addCallback(lambda x: SendToIDs([idurl, ], ack_handler, wide))
     if ack_handler:
-        d.addErrback(lambda err: ack_handler(err))
+        d.addErrback(fail_handler or ack_handler)
     return d
 
 
@@ -197,11 +198,15 @@ def update():
 
 def write_to_dht():
     """
-    
+
     """
     lg.out(6, "propagate.write_to_dht")
     LocalIdentity = my_id.getLocalIdentity()
-    return dht_service.set_value(LocalIdentity.getIDURL(), LocalIdentity.serialize())
+    return dht_service.set_value(
+        LocalIdentity.getIDURL(),
+        LocalIdentity.serialize(),
+        age=int(time.time()),
+    )
 
 #------------------------------------------------------------------------------
 
@@ -221,11 +226,11 @@ def Fetch(idslist):
     return fetch(idslist)
 
 
-def FetchSuppliers():
+def FetchSuppliers(customer_idurl=None):
     """
     Fetch identity files of all supplier.
     """
-    return fetch(contactsdb.suppliers())
+    return fetch(contactsdb.suppliers(customer_idurl=customer_idurl))
 
 
 def FetchCustomers():
@@ -266,12 +271,12 @@ def SendServers():
     return dl
 
 
-def SendSuppliers():
+def SendSuppliers(customer_idurl=None):
     """
     Send my identity file to all my suppliers, calls to ``SendToIDs()`` method.
     """
     lg.out(6, "propagate.SendSuppliers")
-    SendToIDs(contactsdb.suppliers(), HandleSuppliersAck)
+    SendToIDs(contactsdb.suppliers(customer_idurl=customer_idurl), HandleSuppliersAck)
 
 
 def SendCustomers():
@@ -282,7 +287,7 @@ def SendCustomers():
     SendToIDs(contactsdb.customers(), HandleCustomersAck)
 
 
-def SlowSendSuppliers(delay=1):
+def SlowSendSuppliers(delay=1, customer_idurl=None):
     """
     Doing same thing, but puts delays before sending to every next supplier.
 
@@ -296,7 +301,7 @@ def SlowSendSuppliers(delay=1):
 
     def _send(index, payload, delay):
         global _SlowSendIsWorking
-        idurl = contactsdb.supplier(index)
+        idurl = contactsdb.supplier(index, customer_idurl=customer_idurl)
         if not idurl:
             _SlowSendIsWorking = False
             return

@@ -46,11 +46,8 @@ from logs import lg
 from system import bpio
 
 from lib import diskspace
-from lib import nameurl
 
 from main import config
-
-# import userconfig
 
 #------------------------------------------------------------------------------
 
@@ -198,6 +195,7 @@ def convert_key(key):
 #--- CONSTANTS ----------------------------------------------------------------
 #------------------------------------------------------------------------------
 
+
 """
 Below is a set of global constants.
 """
@@ -239,7 +237,7 @@ def defaultDebugLevel():
     """
     Default debug level, lower values produce less messages.
     """
-    return 0
+    return 10
 
 
 def IntSize():
@@ -1061,9 +1059,9 @@ def BackupIndexFilePath():
     return os.path.join(MetaDataDir(), BackupIndexFileName())
 
 
-def SupplierPath(idurl, filename=None):
+def SupplierPath(idurl, customer_idurl, filename=None):
     """
-    A location to given supplie's data.
+    A location to given supplier's data.
 
     If ``filename`` is provided - return a full path to that file.
     Currently those data are stored for every supplier:
@@ -1072,23 +1070,26 @@ def SupplierPath(idurl, filename=None):
         - "disconnected" : date and time when this suppler was fired
         - "listfiles" : a list of our local files stored on his machine
     """
+    from userid import global_id
+    from lib import nameurl
+    customer = global_id.UrlToGlobalID(customer_idurl)
     if filename is not None:
-        return os.path.join(SuppliersDir(), nameurl.UrlFilename(idurl), filename)
-    return os.path.join(SuppliersDir(), nameurl.UrlFilename(idurl))
+        return os.path.join(SuppliersDir(), customer, nameurl.UrlFilename(idurl), filename)
+    return os.path.join(SuppliersDir(), customer, nameurl.UrlFilename(idurl))
 
 
-def SupplierListFilesFilename(idurl):
+def SupplierListFilesFilename(idurl, customer_idurl):
     """
     Return a "listfiles" file location for given supplier.
     """
-    return os.path.join(SupplierPath(idurl), 'listfiles')
+    return os.path.join(SupplierPath(idurl, customer_idurl), 'listfiles')
 
 
-def SupplierServiceFilename(idurl):
+def SupplierServiceFilename(idurl, customer_idurl):
     """
     Return a "service" file location for given supplier.
     """
-    return os.path.join(SupplierPath(idurl), 'service')
+    return os.path.join(SupplierPath(idurl, customer_idurl), 'service')
 
 
 def LocalTesterLogFilename():
@@ -1411,6 +1412,7 @@ def getCustomerFilesDir(idurl):
     Alias to get a given customer's files inside our donated location from
     settings.
     """
+    from lib import nameurl
     return os.path.join(getCustomersFilesDir(), nameurl.UrlFilename(idurl))
 
 
@@ -2346,9 +2348,9 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('logs/memdebug-enabled', 'false')
     config.conf().setDefaultValue('logs/memdebug-port', '9996')
     config.conf().setDefaultValue('logs/memprofile-enabled', 'false')
-    config.conf().setDefaultValue('logs/stream-enabled', 'false')
+    config.conf().setDefaultValue('logs/stream-enabled', 'true')
     config.conf().setDefaultValue('logs/stream-port', DefaultWebLogPort())
-    config.conf().setDefaultValue('logs/traffic-enabled', 'false')
+    config.conf().setDefaultValue('logs/traffic-enabled', 'true')
     config.conf().setDefaultValue('logs/traffic-port', DefaultWebTrafficPort())
 
     config.conf().setDefaultValue('paths/backups', '')
@@ -2375,9 +2377,9 @@ def _setUpDefaultSettings():
                                   diskspace.MakeStringFromBytes(DefaultBackupMaxBlockSize()))
     config.conf().setDefaultValue('services/backups/max-copies', '2')
     config.conf().setDefaultValue('services/backups/keep-local-copies-enabled', 'false')
-    config.conf().setDefaultValue('services/backups/wait-suppliers-enabled', 'true')
+    config.conf().setDefaultValue('services/backups/wait-suppliers-enabled', 'false')
 
-    config.conf().setDefaultValue('services/broadcasting/enabled', 'true')
+    config.conf().setDefaultValue('services/broadcasting/enabled', 'false')
     config.conf().setDefaultValue('services/broadcasting/routing-enabled', 'false')
     config.conf().setDefaultValue('services/broadcasting/max-broadcast-connections', '3')
 
@@ -2387,11 +2389,11 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/customer/needed-space',
                                   diskspace.MakeStringFromBytes(DefaultNeededBytes()))
     config.conf().setDefaultValue('services/customer/suppliers-number', DefaultDesiredSuppliers())
-    
+
     config.conf().setDefaultValue('services/customer-patrol/enabled', 'true')
-    
+
     config.conf().setDefaultValue('services/customer-support/enabled', 'true')
-    
+
     config.conf().setDefaultValue('services/customer-contracts/enabled', 'false')
 
     config.conf().setDefaultValue('services/data-motion/enabled', 'true')
@@ -2433,15 +2435,15 @@ def _setUpDefaultSettings():
 
     config.conf().setDefaultValue('services/p2p-hookups/enabled', 'true')
 
-    config.conf().setDefaultValue('services/private-messages/enabled', 'false')
+    config.conf().setDefaultValue('services/private-messages/enabled', 'true')
 
     config.conf().setDefaultValue('services/proxy-server/enabled', 'false')
     config.conf().setDefaultValue('services/proxy-server/routes-limit', 10)
     config.conf().setDefaultValue('services/proxy-server/current-routes', '{}')
 
-    config.conf().setDefaultValue('services/proxy-transport/enabled', 'false')
+    config.conf().setDefaultValue('services/proxy-transport/enabled', 'true')
     config.conf().setDefaultValue('services/proxy-transport/sending-enabled', 'true')
-    config.conf().setDefaultValue('services/proxy-transport/receiving-enabled', 'false')
+    config.conf().setDefaultValue('services/proxy-transport/receiving-enabled', 'true')
     config.conf().setDefaultValue('services/proxy-transport/priority', 30)
     config.conf().setDefaultValue('services/proxy-transport/my-original-identity', '')
     config.conf().setDefaultValue('services/proxy-transport/current-router', '')
@@ -2457,6 +2459,8 @@ def _setUpDefaultSettings():
                                   diskspace.MakeStringFromBytes(DefaultDonatedBytes()))
 
     config.conf().setDefaultValue('services/supplier-contracts/enabled', 'false')
+
+    config.conf().setDefaultValue('services/supplier-relations/enabled', 'true')
 
     config.conf().setDefaultValue('services/tcp-connections/enabled', 'true')
     config.conf().setDefaultValue('services/tcp-connections/tcp-port', DefaultTCPPort())

@@ -64,6 +64,7 @@ class ProxyTransportService(LocalService):
             lg.warn('no transports available')
             return False
         self._check_update_original_identity()
+        # self._reset_my_original_identity(skip_transports=['proxy', ])
         self.starting_deferred = Deferred()
         self.interface = proxy_interface.GateInterface()
         self.transport = network_transport.NetworkTransport(
@@ -111,12 +112,12 @@ class ProxyTransportService(LocalService):
             atransports.append('service_udp_transport')
         return atransports
 
-    def _reset_my_original_identity(self):
+    def _reset_my_original_identity(self, skip_transports=[]):
         from userid import my_id
         from main.config import conf
         conf().setData('services/proxy-transport/my-original-identity', '')
         conf().setString('services/proxy-transport/current-router', '')
-        my_id.rebuildLocalIdentity()
+        my_id.rebuildLocalIdentity(skip_transports=skip_transports)
 
     def _check_update_original_identity(self):
         from logs import lg
@@ -132,7 +133,8 @@ class ProxyTransportService(LocalService):
                 lg.warn(
                     'current-router is %s, but my-original-identity is empty' %
                     current_router_idurl)
-                self._reset_my_original_identity()
+#                 self._reset_my_original_identity()
+            self._reset_my_original_identity()
             return
         orig_ident = identity.identity(xmlsrc=orig_ident_xmlsrc)
         if not orig_ident.isCorrect() or not orig_ident.Valid():

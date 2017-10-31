@@ -46,8 +46,8 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = False
-_DebugLevel = 14
+_Debug = True
+_DebugLevel = 12
 
 #------------------------------------------------------------------------------
 
@@ -117,6 +117,33 @@ def create(transfer_id):
 
 def get(transfer_id):
     return items().get(transfer_id, None)
+
+
+def search(sender_idurl=None, proto=None, host=None):
+    """
+    Returns list of transfer ids of incoming packets which satisfies given criteria.
+    """
+    if sender_idurl and not isinstance(sender_idurl, list):
+        sender_idurl = [sender_idurl, ]
+    results = set()
+    for transfer_id, itm in items().items():
+        if sender_idurl:
+            if itm.sender_idurl and itm.sender_idurl == sender_idurl:
+                results.add(transfer_id)
+                continue
+        if proto and host:
+            if itm.proto and itm.proto == proto and itm.host and itm.host == host:
+                results.add(transfer_id)
+                continue
+        if host:
+            if itm.host and itm.host == host:
+                results.add(transfer_id)
+                continue
+        if proto:
+            if itm.proto and itm.proto == proto:
+                results.add(transfer_id)
+                continue
+    return list(results)
 
 
 def history():
@@ -197,9 +224,6 @@ class PacketIn(automat.Automat):
         self.label = 'in_%d_%s' % (get_packets_counter(), self.transfer_id)
         automat.Automat.__init__(self, self.label, 'AT_STARTUP', _DebugLevel, _Debug)
         increment_packets_counter()
-
-    def __repr__(self):
-        return self.label
 
     def is_timed_out(self):
         return False

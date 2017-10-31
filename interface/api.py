@@ -23,6 +23,7 @@
 #
 #
 #
+from twisted.conch.test.test_recvline import down
 
 """
 .. module:: api.
@@ -68,7 +69,6 @@ def OK(result='', message=None, status='OK', extra_fields=None):
 
 
 def RESULT(result=[], message=None, status='OK', errors=None, source=None):
-    
     o = {}
     if source is not None:
         o.update(source)
@@ -81,11 +81,13 @@ def RESULT(result=[], message=None, status='OK', errors=None, source=None):
     return o
 
 
-def ERROR(errors=[], message=None, status='ERROR'):
+def ERROR(errors=[], message=None, status='ERROR', extra_fields=None):
     o = {'status': status,
          'errors': errors if isinstance(errors, list) else [errors, ]}
     if message is not None:
         o['message'] = message
+    if extra_fields is not None:
+        o.update(extra_fields)
     o = on_api_result_prepared(o)
     return o
 
@@ -292,7 +294,7 @@ def key_get(key_id, include_private=False):
     from crypt import my_keys
     from crypt import key
     from userid import my_id
-    from lib import nameurl
+    from userid import global_id
     key_id = str(key_id)
     if key_id == 'master':
         r = {
@@ -313,8 +315,8 @@ def key_get(key_id, include_private=False):
         return ERROR('icorrect key_id format')
     key_object = my_keys.known_keys().get(key_id)
     if not key_object:
-        key_id_form_1 = my_keys.make_key_id(key_alias, creator_idurl, output_format=nameurl._FORMAT_GLOBAL_ID_KEY_USER)
-        key_id_form_2 = my_keys.make_key_id(key_alias, creator_idurl, output_format=nameurl._FORMAT_GLOBAL_ID_USER_KEY)
+        key_id_form_1 = my_keys.make_key_id(key_alias, creator_idurl, output_format=global_id._FORMAT_GLOBAL_ID_KEY_USER)
+        key_id_form_2 = my_keys.make_key_id(key_alias, creator_idurl, output_format=global_id._FORMAT_GLOBAL_ID_USER_KEY)
         key_object = my_keys.known_keys().get(key_id_form_1)
         if key_object:
             key_id = key_id_form_1
@@ -448,6 +450,7 @@ def key_create(key_alias, key_size=4096, include_private=False):
         'ssh_type': str(key_object.sshType()),
         'size': str(key_object.size()),
         'public': str(key_object.public().toString('openssh')),
+        'private': '',
     }
     if include_private:
         r['private'] = str(key_object.toString('openssh'))
@@ -477,7 +480,7 @@ def key_erase(key_id):
     return OK(message='private key "%s" was erased successfully' % key_alias)
 
 
-def key_share(key_id, idurl):
+def key_share(full_key_id, idurl):
     """
     Connect to remote node identified by `idurl` parameter and transfer private key `key_id` to that machine.
     This way remote user will be able to access those of your files which were encrypted with that private key.
@@ -486,18 +489,19 @@ def key_share(key_id, idurl):
 
     """
     from crypt import my_keys
-    key_id = str(key_id)
+    from userid import global_id
+    full_key_id = str(full_key_id)
     idurl = str(idurl)
     if not driver.is_started('service_keys_registry'):
         return succeed(ERROR('service_keys_registry() is not started'))
-    if key_id == 'master':
+    glob_id = global_id.ParseGlobalID(full_key_id)
+    if glob_id['key_id'] == 'master':
         return ERROR('"master" key can not be shared')
-    key_alias, creator_idurl = my_keys.split_key_id(key_id)
-    if not key_alias or not creator_idurl:
+    if not glob_id['key_id'] or not glob_id['idurl']:
         return ERROR('icorrect key_id format')
     from access import key_ring
     result = Deferred()
-    d = key_ring.share_private_key(key_id, idurl)
+    d = key_ring.share_private_key(full_key_id, idurl)
     d.addCallback(
         lambda resp: result.callback(
             OK(str(resp))))
@@ -548,703 +552,457 @@ def filemanager(json_request):
 #------------------------------------------------------------------------------
 
 
-def backups_update():
+def files_sync():
     """
     Sends "restart" event to backup_monitor() Automat, this should start "data
-    synchronization" process with remote nodes.
+    synchronization" process with remote nodes. Normally all situations
+    should be handled automatically so you wont run this method manually,
+    but just in case.
 
     Return:
 
-        {'status': 'OK', 'result': 'the main loop has been restarted'}
+        {'status': 'OK', 'result': 'the main files sync loop has been restarted'}
     """
     if not driver.is_started('service_backups'):
         return ERROR('service_backups() is not started')
     from storage import backup_monitor
     backup_monitor.A('restart')
-    lg.out(4, 'api.backups_update')
-    return OK('the main loop has been restarted')
+    lg.out(4, 'api.files_sync')
+    return OK('the main files sync loop has been restarted')
 
 
-def backups_list():
+def files_list(remote_path=None):
     """
-    Returns a whole tree of files and folders in the catalog.
-
-    Return:
-
-        {'status': 'OK',
-         'result': [{
-            'path': '/Users/veselin/Documents',
-            'versions': [],
-            'type': 'parent',
-            'id': '0/0/1',
-            'size': 38992196
-          }, {
-            'path': '/Users/veselin/Documents/python',
-            'versions': [],
-            'type': 'parent',
-            'id': '0/0/1/0',
-            'size': 5754439
-          }, {
-            'path': '/Users/veselin/Documents/python/python27.chm',
-            'versions': [{
-                'version': 'F20160313043757PM',
-                'blocks': 1,
-                'size': '11 MB'
-            }],
-            'type': 'file',
-            'id': '0/0/1/0/0',
-            'size': 5754439
-        }]}
     """
     if not driver.is_started('service_backups'):
         return ERROR('service_backups() is not started')
     from storage import backup_fs
-    from lib import diskspace
+    from system import bpio
+    from userid import global_id
+    glob_path = global_id.ParseGlobalID(remote_path)
+    norm_path = global_id.NormalizeGlobalID(glob_path.copy())
+    remotePath = bpio.remotePath(norm_path['path'])
     result = []
-    for pathID, localPath, item in backup_fs.IterateIDs():
+    lookup = backup_fs.ListChildsByPath(
+        remotePath,
+        iter=backup_fs.fs(norm_path['idurl']),
+        iterID=backup_fs.fsID(norm_path['idurl']),
+    )
+    if not isinstance(lookup, list):
+        return ERROR(lookup)
+    for i in lookup:
+        glob_path_child = norm_path.copy()
+        glob_path_child['path'] = i['path']
+        if not i['item']['k']:
+            i['item']['k'] = 'master'
+        if glob_path['key_id'] and i['item']['k']:
+            if i['item']['k'] != glob_path['key_id']:
+                continue
         result.append({
-            'id': pathID,
-            'path': localPath,
-            'type': backup_fs.TYPES.get(item.type, '').lower(),
-            'size': item.size,
-            'versions': map(
-                lambda v: {
-                    'version': v,
-                    'blocks': max(0, item.versions[v][0] + 1),
-                    'size': diskspace.MakeStringFromBytes(max(0, item.versions[v][1]))},
-                item.versions.keys())})
-    lg.out(4, 'api.backups_list %d items returned' % len(result))
+            'glob_id': global_id.MakeGlobalID(**glob_path_child),
+            'customer': norm_path['customer'],
+            'idurl': norm_path['idurl'],
+            'id': i['path_id'],
+            'name': i['name'],
+            'path': i['path'],
+            'type': backup_fs.TYPES.get(i['type'], '').lower(),
+            'size': i['total_size'],
+            'local_size': i['item']['s'],
+            'latest': i['latest'],
+            'key_id': i['item']['k'],
+            'childs': i['childs'],
+            'versions': i['versions'],
+        })
+    lg.out(4, 'api.files_list %d items returned' % len(result))
     return RESULT(result)
 
 
-def backups_id_list():
+def file_info(remote_path, include_uploads=True, include_downloads=True):
     """
-    Returns only list of items uploaded on remote machines.
-
-    Return:
-
-        {'status': 'OK',
-         'result': [{
-            'backupid': '0/0/1/0/0/F20160313043757PM',
-            'path': '/Users/veselin/Documents/python/python27.chm',
-            'size': '11 MB'
-         }, {
-            'backupid': '0/0/0/0/0/0/F20160315052257PM',
-            'path': '/Users/veselin/Music/Bob Marley/01-Soul Rebels (1970)/01-Put It On.mp3',
-            'size': '8.27 MB'
-        }]}
     """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
+    if not driver.is_started('service_restores'):
+        return ERROR('service_restores() is not started')
     from storage import backup_fs
-    from contacts import contactsdb
-    from lib import diskspace
-    result = []
-    for _, backupID, versionInfo, localPath in backup_fs.ListAllBackupIDsFull(True, True):
-        if versionInfo[1] >= 0 and contactsdb.num_suppliers() > 0:
-            szver = diskspace.MakeStringFromBytes(versionInfo[1]) + ' / ' + diskspace.MakeStringFromBytes(versionInfo[1] / contactsdb.num_suppliers())
-        else:
-            szver = '?'
-        szver = diskspace.MakeStringFromBytes(versionInfo[1]) if versionInfo[1] >= 0 else '?'
-        result.append({
-            'backupid': backupID,
-            'size': szver,
-            'path': localPath})
-    lg.out(4, 'api.backups_id_list %d items returned' % len(result))
-    return RESULT(result)
-
-
-def backup_start_id(pathID):
-    """
-    Start uploading a given item already existed in the catalog by its path ID.
-
-    Return:
-
-        {'status': 'OK', 'result': 'uploading 0/0/1/0/0 started, local path is: /Users/veselin/Documents/python/python27.chm'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
+    from lib import misc
     from system import bpio
-    from storage import backup_fs
-    from storage import backup_control
-    from web import control
-    pathID = str(pathID)
-    local_path = backup_fs.ToPath(pathID)
-    if local_path is not None:
-        if bpio.pathExist(local_path):
-            tsk = backup_control.StartSingle(pathID, local_path)
-            backup_fs.Calculate()
-            backup_control.Save()
-            control.request_update([('pathID', pathID), ])
-            lg.out(4, 'api.backup_start_id %s OK!' % pathID)
-            return OK(
-                'uploading %s started, local path is: %s' % (pathID, local_path),
-                extra_fields={'id': pathID, 'key_id': tsk.keyID})
-    lg.out(4, 'api.backup_start_id %s not found' % pathID)
-    return ERROR('item %s not found' % pathID)
-
-
-def backup_start_path(path, mount_path=None, key_id=None):
-    """
-    Start uploading file or folder to remote nodes. It will generate a new path
-    ID for this file or folder and add it to the catalog.
-    If `mount_path` is `None` method will create a new file (or folder) and
-    all parent sub folders will be also added to the catalog:
-
-        ["Users", "Users/veselin", "Users/veselin/Documents", "Users/veselin/Documents/python",]
-
-    Final ID of that item will be combined from parent IDs and target file or folder ID:
-
-        0/0/1/0/0
-
-    In case `mount_path` is set it will act like backup_map_path()
-    and start the backup process: item will be created in the `mount_path` location.
-
-    Return:
-
-        {'status': 'OK',
-         'result': 'uploading of item 0/0/1/0/0 started, local path is: /Users/veselin/Documents/python/python27.chm',
-         'id': '0/0/1/0/0',
-         'type': 'file',
-         'key_id': 'abc'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from system import bpio
-    from system import dirsize
-    from storage import backup_fs
-    from storage import backup_control
-    from web import control
-    localPath = bpio.portablePath(unicode(path))
-    if not bpio.pathExist(localPath):
-        lg.out(4, 'api.backup_start_path local path %s not found' % path)
-        return ERROR('local path %s not found' % path)
-    result = ''
-    pathID = backup_fs.ToID(localPath)
-    if pathID is None:
-        if mount_path:
-            parent_path = os.path.dirname(mount_path)
-            if backup_fs.IsFile(parent_path):
-                return ERROR('mount path can not be created, file already exist: %s' % parent_path)
-            iter_and_iterID = backup_fs.GetIteratorsByPath(parent_path)
-            if iter_and_iterID is None:
-                _, parent_iter, parent_iterID = backup_fs.AddDir(parent_path, read_stats=False)
-                return ERROR('mount path already exist in catalog')
-            pathID, _, _ = backup_fs.MapPath(localPath, read_stats=True, iter=parent_iter, iterID=parent_iterID, keyID=key_id)
-            fileorfolder = 'folder' if bpio.pathIsDir(localPath) else 'file'
-            if fileorfolder == 'folder':
-                dirsize.ask(localPath, backup_control.OnFoundFolderSize, (pathID, None))
-        else:
-            if bpio.pathIsDir(localPath):
-                fileorfolder = 'folder'
-                pathID, _, _ = backup_fs.AddDir(localPath, read_stats=True, key_id=key_id)
-                result += 'new folder was added to catalog: %s, ' % localPath
-            else:
-                fileorfolder = 'file'
-                pathID, _, _ = backup_fs.AddFile(localPath, read_stats=True, key_id=key_id)
-        result += 'uploading of item %s started, ' % pathID
-        result += 'new %s was added to catalog: %s, ' % (fileorfolder, localPath)
-    else:
-        item_info = backup_fs.GetByID(pathID)
-        if item_info is None:
-            lg.out(4, 'api.backup_start_path ERROR failed reading item %s' % pathID)
-            return ERROR('failed reading item %s' % pathID)
-        fileorfolder = 'file' if item_info.type == backup_fs.FILE else 'folder'
-        result += 'uploading of item %s started, ' % pathID
-        result += 'local %s path is: %s' % (fileorfolder, localPath)
-    backup_control.StartSingle(pathID, localPath, keyID=item_info.key_id)
-    backup_fs.Calculate()
-    backup_control.Save()
-    control.request_update([('pathID', pathID), ])
-    lg.out(4, 'api.backup_start_path %s OK!' % path)
-    return OK(result, extra_fields={'id': pathID, 'type': fileorfolder, 'key_id': key_id})
-
-
-def backup_map_path(path, mount_path, key_id=None):
-    """
-    Create a new top level item in the catalog and point it to given local
-    path. This is the simplest way to upload a file and get an ID for that
-    remote copy. Given local `path` will be mapped to virtual `mount_path`,
-    which must not exist in the catalog yet.
-
-    Return:
-
-        {'status': 'OK',
-         'result': [ 'new file was added: 1, local path is /Users/veselin/Pictures/bitdust.png'],
-         'id': '1',
-         'type': 'file',
-         'key_id': 'abc'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from storage import backup_fs
-    from storage import backup_control
-    from system import dirsize
-    from system import bpio
-    from web import control
-    path = bpio.portablePath(unicode(path))
-    pathID = backup_fs.ToID(path)
-    if pathID:
-        return ERROR('path already exist in catalog: %s' % pathID)
-    if backup_fs.Exists(mount_path):
-        return ERROR('mount path already exist in catalog')
-    parent_path = os.path.dirname(bpio.portablePath(unicode(mount_path)))
-    if backup_fs.IsFile(parent_path):
-        return ERROR('mount path can not be created, file already exist: %s' % parent_path)
-    iter_and_iterID = backup_fs.GetIteratorsByPath(parent_path)
-    if iter_and_iterID is None:
-        _, parent_iter, parent_iterID = backup_fs.AddDir(parent_path, read_stats=False)
-    else:
-        parent_iter, parent_iterID = iter_and_iterID
-    newPathID, _, _ = backup_fs.MapPath(path, read_stats=True, iter=parent_iter, iterID=parent_iterID, key_id=key_id)
-    if os.path.isdir(path):
-        fileorfolder = 'folder'
-        dirsize.ask(path, backup_control.OnFoundFolderSize, (newPathID, None))
-    else:
-        fileorfolder = 'file'
-    backup_fs.Calculate()
-    backup_control.Save()
-    control.request_update([('pathID', newPathID), ])
-    return OK(
-        'new %s was added: %s, local path is %s' % (fileorfolder, newPathID, path),
-        extra_fields={'id': newPathID, 'type': fileorfolder, 'key_id': key_id})
-
-
-def backup_dir_make(dirpath, key_id=None):
-    """
-    Creates empty folder in catalog.
-
-    Return:
-
-        {'status': 'OK', 'result': 'new folder was added: 0/0/8, local path is /Users/veselin/Desktop/', 'key_id': 'abc'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from storage import backup_fs
-    from storage import backup_control
-    from system import bpio
-    from web import control
-    dirpath = '/' + (dirpath.lstrip('/'))
-    dirpath = bpio.portablePath(unicode(dirpath))
-    pathID = backup_fs.ToID(dirpath)
-    if pathID:
-        return ERROR('path already exist in catalog: %s' % pathID)
-    newPathID, _, _ = backup_fs.AddDir(dirpath, read_stats=False, keyID=key_id)
-    backup_fs.Calculate()
-    backup_control.Save()
-    control.request_update([('pathID', newPathID), ])
-    return OK('new folder was added: %s, local path is %s' % (newPathID, dirpath),
-              extra_fields={'id': newPathID, 'type': 'folder', 'key_id': key_id})
-
-
-def backup_dir_add(dirpath, key_id=None):
-    """
-    Add given folder to the catalog but do not start uploading process. This
-    method will create all sub folders in the catalog and keeps the same
-    structure as your local folders structure. So the final ID will be
-    combination of all parent IDs, separated with "/".
-
-    Return:
-
-        {'status': 'OK', 'result': 'new folder was added: 0/0/2, local path is /Users/veselin/Movies/', 'key_id': 'abc'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from storage import backup_fs
-    from storage import backup_control
-    from system import dirsize
-    from system import bpio
-    from web import control
-    dirpath = bpio.portablePath(unicode(dirpath))
-    pathID = backup_fs.ToID(dirpath)
-    if pathID:
-        return ERROR('path already exist in catalog: %s' % pathID)
-    newPathID, _, _ = backup_fs.AddDir(dirpath, read_stats=True, keyID=key_id)
-    dirsize.ask(dirpath, backup_control.OnFoundFolderSize, (newPathID, None))
-    backup_fs.Calculate()
-    backup_control.Save()
-    control.request_update([('pathID', newPathID), ])
-    return OK('new folder was added: %s, local path is %s' % (newPathID, dirpath),
-              extra_fields={'id': newPathID, 'type': 'folder', 'key_id': key_id})
-
-
-def backup_file_add(filepath, key_id=None):
-    """
-    Add a single file to the catalog, skip uploading. This method will create
-    all sub folders in the catalog and keeps the same structure as your local
-    file path structure. So the final ID of that file in the catalog will be
-    combination of all parent IDs, separated with "/".
-
-    Return:
-
-        {'status': 'OK', 'result': 'new file was added: 0/0/3/0, local path is /Users/veselin/Downloads/pytest-2.9.0.tar.gz', 'key_id': 'abc'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from storage import backup_fs
-    from storage import backup_control
-    from system import bpio
-    from web import control
-    filepath = bpio.portablePath(unicode(filepath))
-    pathID = backup_fs.ToID(filepath)
-    if pathID:
-        return ERROR('path already exist in catalog: %s' % pathID)
-    newPathID, _, _ = backup_fs.AddFile(filepath, read_stats=True, keyID=key_id)
-    backup_fs.Calculate()
-    backup_control.Save()
-    control.request_update([('pathID', newPathID), ])
-    return OK('new file was added: %s, local path is %s' % (newPathID, filepath),
-              extra_fields={'id': newPathID, 'type': 'file', 'key_id': key_id})
-
-
-def backup_tree_add(dirpath, key_id=None):
-    """
-    Recursively reads the entire folder and create items in the catalog. For
-    all files and folders it will keeping the same files/folders structure.
-    This method will not start any uploads, just append items to the catalog.
-
-    Return:
-
-        {'status': 'OK',
-         'result': '21 items were added to catalog, parent path ID is 0/0/1/2, root folder is /Users/veselin/Documents/reports',
-         'key_id': 'abc'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from storage import backup_fs
-    from storage import backup_control
-    from system import bpio
-    from web import control
-    dirpath = bpio.portablePath(unicode(dirpath))
-    newPathID, _, _, num = backup_fs.AddLocalPath(dirpath, read_stats=True, key_id=key_id)
-    backup_fs.Calculate()
-    backup_control.Save()
-    control.request_update([('pathID', newPathID), ])
-    if not newPathID:
-        return ERROR('nothing was added to catalog')
-    return OK('%d items were added to catalog, parent path ID is %s, root folder is %s' % (
-        num, newPathID, dirpath),
-        extra_fields={'parent_id': newPathID, 'new_items': num, 'key_id': key_id})
-
-
-def backup_delete_local(backupID):
-    """
-    Remove only local files belongs to this particular backup. All remote data
-    stored on suppliers' machines remain unchanged.
-
-    Return:
-
-        {'status': 'OK',   'result': '8 files were removed with total size of 16 Mb'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from storage import backup_fs
-    from storage import backup_matrix
-    from main import settings
-    from web import control
-    num, sz = backup_fs.DeleteLocalBackup(settings.getLocalBackupsDir(), backupID)
-    lg.out(4, 'api.backup_delete_local %s : %d, %s' % (backupID, num, sz))
-    backup_matrix.EraseBackupLocalInfo(backupID)
-    backup_fs.Scan()
-    backup_fs.Calculate()
-    control.request_update([('backupID', backupID), ])
-    return OK("%d files were removed with total size of %s" % (num, sz))
-
-
-def backup_delete_id(pathID_or_backupID):
-    """
-    Delete local and remote copies of given item in catalog. This will
-    completely remove your data from BitDust network. You can specify either
-    path ID of that location or specific version.
-
-    Return:
-
-        {'status': 'OK',   'result': 'version 0/0/1/1/0/F20160313043419PM was deleted from remote peers'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from storage import backup_fs
-    from storage import backup_control
-    from storage import backup_monitor
-    from main import settings
-    from web import control
-    from lib import packetid
-    if not packetid.Valid(pathID_or_backupID):
-        lg.out(4, 'api.backup_delete_id invalid item %s' % pathID_or_backupID)
-        return OK('invalid item id: %s' % pathID_or_backupID)
-    version = None
-    if packetid.IsBackupIDCorrect(pathID_or_backupID):
-        pathID, version = packetid.SplitBackupID(pathID_or_backupID)
-        backupID = pathID + '/' + version
-    if version:
-        result = backup_control.DeleteBackup(backupID, saveDB=False)
-        if not result:
-            lg.out(4, 'api.backup_delete_id not found %s' % backupID)
-            return ERROR('item %s is not found in catalog' % backupID)
-        backup_control.Save()
-        backup_monitor.A('restart')
-        control.request_update([('backupID', backupID), ])
-        lg.out(4, 'api.backup_delete_id %s was deleted' % pathID)
-        return OK('version %s was deleted from remote peers' % backupID)
-    pathID = pathID_or_backupID
-    result = backup_control.DeletePathBackups(pathID, saveDB=False, calculate=False)
-    if not result:
-        lg.out(4, 'api.backup_delete_id not found %s' % pathID)
-        return ERROR('item %s is not found in catalog' % pathID)
-    backup_fs.DeleteLocalDir(settings.getLocalBackupsDir(), pathID)
-    backup_fs.DeleteByID(pathID)
-    backup_fs.Scan()
-    backup_fs.Calculate()
-    backup_control.Save()
-    backup_monitor.A('restart')
-    control.request_update([('pathID', pathID), ])
-    lg.out(4, 'api.backup_delete_id %s was deleted' % pathID)
-    return OK('item %s was deleted from remote peers' % pathID)
-
-
-def backup_delete_path(localPath):
-    """
-    Completely remove any data stored on given location from BitDust network.
-    All data for given item will be removed from remote peers. Any local files
-    related to this path will be removed as well.
-
-    Return:
-
-        {'status': 'OK',   'result': 'item 0/1/2 was deleted from remote peers'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from storage import backup_fs
-    from storage import backup_control
-    from storage import backup_monitor
-    from main import settings
-    from web import control
-    from lib import packetid
-    from system import bpio
-    localPath = bpio.portablePath(unicode(localPath))
-    lg.out(4, 'api.backup_delete_path %s' % localPath)
-    pathID = backup_fs.ToID(localPath)
+    from userid import global_id
+    glob_path = global_id.ParseGlobalID(remote_path)
+    norm_path = global_id.NormalizeGlobalID(glob_path.copy())
+    remotePath = bpio.remotePath(norm_path['path'])
+    pathID = backup_fs.ToID(remotePath, iter=backup_fs.fs(norm_path['idurl']))
     if not pathID:
-        lg.out(4, 'api.backup_delete_path %s not found' % localPath)
-        return ERROR('path %s is not found in catalog' % localPath)
+        return ERROR('path "%s" was not found in catalog' % remotePath)
+    item = backup_fs.GetByID(pathID, iterID=backup_fs.fsID(norm_path['idurl']))
+    if not item:
+        return ERROR('item "%s" is not found in catalog' % pathID)
+    (item_size, item_time, versions) = backup_fs.ExtractVersions(pathID, item, customer_id=norm_path['customer'])
+    item_key = item.key_id
+    r = {
+        'glob_id': global_id.MakeGlobalID(**norm_path),
+        'customer': norm_path['idurl'],
+        'id': pathID,
+        'path': remotePath,
+        'type': backup_fs.TYPES.get(item.type, '').lower(),
+        'size': item_size,
+        'latest': item_time,
+        'key_id': item_key,
+        'versions': versions,
+        'uploads': {
+            'running': [],
+            'pending': [],
+        },
+        'downloads': [],
+    }
+    if include_uploads:
+        from storage import backup_control
+        backup_control.tasks()
+        running = []
+        for backupID in backup_control.FindRunningBackup(pathID=pathID):
+            j = backup_control.jobs().get(backupID)
+            if j:
+                running.append({
+                    'backup_id': j.backupID,
+                    'key_id': j.keyID,
+                    'source_path': j.sourcePath,
+                    'eccmap': j.eccmap.name,
+                    'pipe': 'closed' if not j.pipe else j.pipe.state(),
+                    'block_size': j.blockSize,
+                    'aborting': j.ask4abort,
+                    'terminating': j.terminating,
+                    'eof_state': j.stateEOF,
+                    'reading': j.stateReading,
+                    'closed': j.closed,
+                    'work_blocks': len(j.workBlocks),
+                    'block_number': j.blockNumber,
+                    'bytes_processed': j.dataSent,
+                    'progress': misc.percent2string(j.progress()),
+                    'total_size': j.totalSize,
+                })
+        pending = []
+        t = backup_control.GetPendingTask(pathID)
+        if t:
+            pending.append({
+                'id': t.number,
+                'path_id': t.pathID,
+                'source_path': t.localPath,
+                'created': time.asctime(time.localtime(t.created)),
+            })
+        r['uploads']['running'] = running
+        r['uploads']['pending'] = pending
+    if include_downloads:
+        from storage import restore_monitor
+        downloads = []
+        for backupID in restore_monitor.FindWorking(pathID=pathID):
+            d = restore_monitor.GetWorkingRestoreObject(backupID)
+            if d:
+                downloads.append({
+                    'backup_id': r.BackupID,
+                    'creator_id': r.CreatorID,
+                    'path_id': r.PathID,
+                    'version': r.Version,
+                    'block_number': r.BlockNumber,
+                    'bytes_processed': r.BytesWritten,
+                    'created': time.asctime(time.localtime(r.Started)),
+                    'aborted': r.AbortState,
+                    'done': r.Done,
+                    'eccmap': '' if not r.EccMap else r.EccMap.name,
+                })
+        r['downloads'] = downloads
+    lg.out(4, 'api.file_info %s' % r['glob_id'])
+    return RESULT([r, ])
+
+
+def file_create(remote_path, as_folder=False):
+    """
+    """
+    if not driver.is_started('service_backups'):
+        return ERROR('service_backups() is not started')
+    from storage import backup_fs
+    from storage import backup_control
+    from system import bpio
+    from web import control
+    from userid import global_id
+    parts = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
+    if not parts['path']:
+        return ERROR('invalid "remote_path" format')
+    path = bpio.remotePath(parts['path'])
+    pathID = backup_fs.ToID(path, iter=backup_fs.fs(parts['idurl']))
+    if pathID:
+        return ERROR('remote path "%s" already exist in catalog: "%s"' % (path, pathID))
+    if as_folder:
+        newPathID, parent_iter, parent_iterID = backup_fs.AddDir(
+            path,
+            read_stats=False,
+            iter=backup_fs.fs(parts['idurl']),
+            iterID=backup_fs.fsID(parts['idurl']),
+            key_id=parts['key_id'],
+        )
+    else:
+        parent_path = os.path.dirname(path)
+        if not backup_fs.IsDir(parent_path, iter=backup_fs.fs(parts['idurl'])):
+            if backup_fs.IsFile(parent_path, iter=backup_fs.fs(parts['idurl'])):
+                return ERROR('remote path can not be assigned, file already exist: "%s"' % parent_path)
+            backup_fs.AddDir(
+                parent_path,
+                read_stats=False,
+                iter=backup_fs.fs(parts['idurl']),
+                iterID=backup_fs.fsID(parts['idurl']),
+                key_id=parts['key_id'],
+            )
+        iter_and_iterID = backup_fs.GetIteratorsByPath(
+            parent_path,
+            iter=backup_fs.fs(parts['idurl']),
+            iterID=backup_fs.fsID(parts['idurl']),
+        )
+        if not iter_and_iterID:
+            return ERROR('remote path can not be assigned, parent folder not found: "%s"' % parent_path)
+        _, _, _ = backup_fs.PutItem(
+            name=os.path.basename(path),
+            as_folder=as_folder,
+            iter=iter_and_iterID[0],
+            iterID=iter_and_iterID[1],
+            key_id=parts['key_id'],
+        )
+        newPathID = backup_fs.ToID(path)
+        if not newPathID:
+            return ERROR('remote path can not be assigned, failed to create a new item: "%s"' % path)
+#         iter_and_iterID = backup_fs.GetIteratorsByPath(
+#             parent_path,
+#             iter=backup_fs.fs(parts['idurl']),
+#             iterID=backup_fs.fsID(parts['idurl']),
+#         )
+#         if iter_and_iterID is None:
+#             _, parent_iter, parent_iterID = backup_fs.AddDir(
+#                 parent_path,
+#                 read_stats=False,
+#                 iter=backup_fs.fs(parts['idurl']),
+#                 iterID=backup_fs.fsID(parts['idurl']),
+#                 key_id=parts['key_id'],
+#             )
+#         else:
+#             parent_iter, parent_iterID = iter_and_iterID
+#         newPathID, _, _ = backup_fs.PutItem(
+#             name=os.path.basename(path),
+#             as_folder=as_folder,
+#             iter=parent_iter,
+#             iterID=parent_iterID,
+#             key_id=parts['key_id'],
+#         )
+    backup_control.Save()
+    control.request_update([('pathID', newPathID), ])
+    lg.out(4, 'api.file_create %s with %s' % (global_id.MakeGlobalID(**parts), newPathID))
+    return OK(
+        'new %s "%s" was added at remote path "%s"' % (('folder' if as_folder else 'file'), newPathID, path),
+        extra_fields={
+            'id': newPathID,
+            'key_id': parts['key_id'],
+            'customer': parts['idurl'],
+            'path': path,
+            'type': ('dir' if as_folder else 'file'),
+        })
+
+
+def file_delete(remote_path):
+    """
+    """
+    if not driver.is_started('service_backups'):
+        return ERROR('service_backups() is not started')
+    from storage import backup_fs
+    from storage import backup_control
+    from storage import backup_monitor
+    from main import settings
+    from web import control
+    from lib import packetid
+    from system import bpio
+    from userid import global_id
+    parts = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
+    if not parts['idurl'] or not parts['path']:
+        return ERROR('invalid "remote_path" format')
+    path = bpio.remotePath(parts['path'])
+    pathID = backup_fs.ToID(path, iter=backup_fs.fs(parts['idurl']))
+    if not pathID:
+        return ERROR('remote path "%s" was not found' % parts['path'])
     if not packetid.Valid(pathID):
-        lg.out(4, 'api.backup_delete_path invalid %s' % pathID)
-        return ERROR('invalid pathID found %s' % pathID)
-    result = backup_control.DeletePathBackups(pathID, saveDB=False, calculate=False)
+        return ERROR('invalid item found: "%s"' % pathID)
+    pathIDfull = packetid.MakeBackupID(parts['customer'], pathID)
+    result = backup_control.DeletePathBackups(
+        pathIDfull, saveDB=False, calculate=False)
     if not result:
-        lg.out(4, 'api.backup_delete_path %s not found' % pathID)
-        return ERROR('item %s is not found in catalog' % pathID)
-    backup_fs.DeleteLocalDir(settings.getLocalBackupsDir(), pathID)
-    backup_fs.DeleteByID(pathID)
+        return ERROR('remote item "%s" was not found' % pathIDfull)
+    backup_fs.DeleteLocalDir(settings.getLocalBackupsDir(), pathIDfull)
+    backup_fs.DeleteByID(pathID, iter=backup_fs.fs(parts['idurl']), iterID=backup_fs.fsID(parts['idurl']))
     backup_fs.Scan()
     backup_fs.Calculate()
     backup_control.Save()
     backup_monitor.A('restart')
-    control.request_update([('pathID', pathID), ])
-    lg.out(4, 'api.backup_delete_path %s was deleted' % pathID)
-    return OK('item %s was deleted from remote peers' % pathID)
+    control.request_update([('pathID', pathIDfull), ])
+    lg.out(4, 'api.file_delete %s' % parts)
+    return OK('item "%s" was deleted from remote peers' % pathIDfull)
 
 
-def backups_queue():
+def files_uploads(include_running=True, include_pending=True):
     """
-    Returns a list of paths to be backed up as soon as currently running
-    backups finish.
+    Returns a list of currently running uploads and
+    list of pending items to be uploaded.
 
     Return:
 
-        {'status': 'OK',
-         'result': [{
-             'created': 'Wed Apr 27 15:11:13 2016',
-             'id': 3,
-             'local_path': '/Users/veselin/Downloads/some-ZIP-file.zip',
-             'path_id': '0/0/3/1'
-        }]}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from storage import backup_control
-    lg.out(4, 'api.backups_queue %d tasks in the queue' % len(backup_control.tasks()))
-    if not backup_control.tasks():
-        return RESULT([], message='there are no tasks in the queue at the moment')
-    return RESULT([{
-        'id': t.number,
-        'path_id': t.pathID,
-        'local_path': t.localPath,
-        'created': time.asctime(time.localtime(t.created)),
-    } for t in backup_control.tasks()])
-
-
-def backups_running():
-    """
-    Returns a list of currently running uploads.
-
-    Return:
-
-        {'status': 'OK',
-         'result': [{
-             'aborting': False,
-             'backup_id': '0/0/3/1/F20160424013912PM',
-             'block_number': 4,
-             'block_size': 16777216,
-             'bytes_processed': 67108864,
-             'closed': False,
-             'eccmap': 'ecc/4x4',
-             'eof_state': False,
-             'pipe': 0,
-             'progress': 75.0142815704418,
-             'reading': False,
-             'source_path': '/Users/veselin/Downloads/some-ZIP-file.zip',
-             'terminating': False,
-             'total_size': 89461450,
-             'work_blocks': 4
-        }]}
+        { 'status': 'OK',
+          'result': {
+            'running': [{
+                'aborting': False,
+                'version': '0/0/3/1/F20160424013912PM',
+                'block_number': 4,
+                'block_size': 16777216,
+                'bytes_processed': 67108864,
+                'closed': False,
+                'eccmap': 'ecc/4x4',
+                'eof_state': False,
+                'pipe': 0,
+                'progress': 75.0142815704418,
+                'reading': False,
+                'source_path': '/Users/veselin/Downloads/some-ZIP-file.zip',
+                'terminating': False,
+                'total_size': 89461450,
+                'work_blocks': 4
+            }],
+            'pending': [{
+                'created': 'Wed Apr 27 15:11:13 2016',
+                'id': 3,
+                'source_path': '/Users/veselin/Downloads/another-ZIP-file.zip',
+                'path_id': '0/0/3/2'
+            }]
+        }
     """
     if not driver.is_started('service_backups'):
         return ERROR('service_backups() is not started')
     from lib import misc
     from storage import backup_control
-    lg.out(4, 'api.backups_running %d items running at the moment' % len(backup_control.jobs()))
-    if not backup_control.jobs():
-        return RESULT([], message='there are no jobs running at the moment')
-    return RESULT([{
-        'backup_id': j.backupID,
-        'source_path': j.sourcePath,
-        'eccmap': j.eccmap.name,
-        'pipe': 'closed' if not j.pipe else j.pipe.state(),
-        'block_size': j.blockSize,
-        'aborting': j.ask4abort,
-        'terminating': j.terminating,
-        'eof_state': j.stateEOF,
-        'reading': j.stateReading,
-        'closed': j.closed,
-        'work_blocks': len(j.workBlocks),
-        'block_number': j.blockNumber,
-        'bytes_processed': j.dataSent,
-        'progress': misc.percent2string(j.progress()),
-        'total_size': j.totalSize,
-    } for j in backup_control.jobs().values()])
+    lg.out(4, 'api.files_uploads  %d is running, %d is pending' % (
+        len(backup_control.jobs()), len(backup_control.tasks())))
+    r = {'running': [], 'pending': [], }
+    if include_running:
+        r['running'].extend([{
+            'version': j.backupID,
+            'key_id': j.keyID,
+            'source_path': j.sourcePath,
+            'eccmap': j.eccmap.name,
+            'pipe': 'closed' if not j.pipe else j.pipe.state(),
+            'block_size': j.blockSize,
+            'aborting': j.ask4abort,
+            'terminating': j.terminating,
+            'eof_state': j.stateEOF,
+            'reading': j.stateReading,
+            'closed': j.closed,
+            'work_blocks': len(j.workBlocks),
+            'block_number': j.blockNumber,
+            'bytes_processed': j.dataSent,
+            'progress': misc.percent2string(j.progress()),
+            'total_size': j.totalSize,
+        } for j in backup_control.jobs().values()])
+    if include_pending:
+        r['pending'].extend([{
+            'id': t.number,
+            'path_id': t.pathID,
+            'source_path': t.localPath,
+            'created': time.asctime(time.localtime(t.created)),
+        } for t in backup_control.tasks()])
+    return RESULT(r)
 
 
-def backup_cancel_pending(path_id):
+def file_upload_start(local_path, remote_path, wait_result=True):
     """
-    Cancel pending task to run backup of given item.
-
-    Return:
-
-        {'status': 'OK', 'result': 'item 123 cancelled'}
-    """
-    if not driver.is_started('service_backups'):
-        return ERROR('service_backups() is not started')
-    from storage import backup_control
-    lg.out(4, 'api.backup_cancel_pending %s' % path_id)
-    if not backup_control.AbortPendingTask(path_id):
-        return ERROR(path_id, message='item %s is present in pending queue' % path_id)
-    return OK(path_id, message='item %s cancelled' % path_id)
-
-
-def backup_abort_running(backup_id):
-    """
-    Abort currently running backup.
-
-    Return:
-
-        {'status': 'OK', 'result': 'backup 0/0/3/1/F20160424013912PM aborted'}
     """
     if not driver.is_started('service_backups'):
         return ERROR('service_backups() is not started')
-    from storage import backup_control
-    lg.out(4, 'api.backup_abort_running %s' % backup_id)
-    if not backup_control.AbortRunningBackup(backup_id):
-        return ERROR(backup_id, message='backup %s is not running at the moment' % backup_id)
-    return OK(backup_id, message='backup %s aborted' % backup_id)
-
-#------------------------------------------------------------------------------
-
-
-def restore_single(pathID_or_backupID_or_localPath, destinationPath=None):
-    """
-    Download data from remote peers to your local machine. You can use
-    different methods to select the target data:
-
-      + item ID in the catalog
-      + full version identifier
-      + local path
-
-    It is possible to select the destination folder to extract requested files to.
-    By default this method uses known location from catalog for given item.
-
-    WARNING: Your existing local data will be overwritten!
-
-    Return:
-
-        {'status': 'OK', 'result': 'downloading of version 0/0/1/1/0/F20160313043419PM has been started to /Users/veselin/Downloads/restore/'}
-    """
-    if not driver.is_started('service_restores'):
-        return ERROR('service_restores() is not started')
+    from system import bpio
     from storage import backup_fs
     from storage import backup_control
-    from storage import restore_monitor
-    from web import control
-    from system import bpio
     from lib import packetid
-    if not packetid.Valid(pathID_or_backupID_or_localPath):
-        localPath = bpio.portablePath(unicode(pathID_or_backupID_or_localPath))
-        pathID = backup_fs.ToID(localPath)
-        if not pathID:
-            lg.out(4, 'api.restore_single path %s not found' % localPath)
-            return ERROR('path %s is not found in catalog' % localPath)
-        item = backup_fs.GetByID(pathID)
-        if not item:
-            lg.out(4, 'api.restore_single item %s not found' % pathID)
-            return ERROR('item %s is not found in catalog' % pathID)
-        version = item.get_latest_version()
-        backupID = pathID + '/' + version
-    else:
-        if packetid.IsBackupIDCorrect(pathID_or_backupID_or_localPath):
-            pathID, version = packetid.SplitBackupID(pathID_or_backupID_or_localPath)
-            backupID = pathID + '/' + version
-        elif packetid.IsPathIDCorrect(pathID_or_backupID_or_localPath):
-            pathID = pathID_or_backupID_or_localPath
-            item = backup_fs.GetByID(pathID)
-            if not item:
-                lg.out(4, 'api.restore_single item %s not found' % pathID)
-                return ERROR('path %s is not found in catalog' % pathID)
-            version = item.get_latest_version()
-            if not version:
-                lg.out(4, 'api.restore_single not found versions %s' % pathID)
-                return ERROR('not found any versions for %s' % pathID)
-            backupID = pathID + '/' + version
-        else:
-            lg.out(4, 'api.restore_single %s not valid location' % pathID_or_backupID_or_localPath)
-            return ERROR('not valid location')
-    if backup_control.IsBackupInProcess(backupID):
-        lg.out(4, 'api.restore_single %s in process' % backupID)
-        return ERROR('download not possible, uploading %s is in process' % backupID)
-    pathID, version = packetid.SplitBackupID(backupID)
-    if restore_monitor.IsWorking(backupID):
-        lg.out(4, 'api.restore_single %s scheduled already' % pathID)
-        return OK('downloading task for %s already scheduled' % pathID)
-    localPath = backup_fs.ToPath(pathID)
-    if not localPath:
-        lg.out(4, 'api.restore_single %s not found' % pathID)
-        return ERROR('location %s not found in catalog' % pathID)
-    if destinationPath:
-        if len(localPath) > 3 and localPath[1] == ':' and localPath[2] == '/':
-            # TODO: - also may need to check other options like network drive (//) or so
-            localPath = localPath[3:]
-        localDir = os.path.dirname(localPath.lstrip('/'))
-        restoreDir = os.path.join(destinationPath, localDir)
-        restore_monitor.Start(backupID, restoreDir)
-        control.request_update([('pathID', pathID), ])
-    else:
-        restoreDir = os.path.dirname(localPath)
-        restore_monitor.Start(backupID, restoreDir)
-        control.request_update([('pathID', pathID), ])
-    lg.out(4, 'api.restore_single %s OK!' % backupID)
-    return OK('downloading of version %s has been started to %s' % (backupID, restoreDir))
+    from web import control
+    from userid import global_id
+    if not bpio.pathExist(local_path):
+        return ERROR('local file or folder "%s" not exist' % local_path)
+    parts = global_id.NormalizeGlobalID(remote_path)
+    if not parts['idurl'] or not parts['path']:
+        return ERROR('invalid "remote_path" format')
+    path = bpio.remotePath(parts['path'])
+    pathID = backup_fs.ToID(path, iter=backup_fs.fs(parts['idurl']))
+    if not pathID:
+        return ERROR('path "%s" not registered yet' % path)
+    pathIDfull = packetid.MakeBackupID(parts['customer'], pathID)
+    if wait_result:
+        d = Deferred()
+        tsk = backup_control.StartSingle(pathIDfull, local_path, keyID=parts['key_id'])
+        tsk.result_defer.addCallback(lambda backupID, result: d.callback(OK(
+            'item "%s" uploaded, local path is: "%s"' % (remote_path, local_path),
+            extra_fields={
+                'id': remote_path,
+                'version': backupID,
+                'key_id': tsk.keyID,
+                'source_path': local_path,
+                'path_id': pathID,
+            }
+        )))
+        tsk.result_defer.addErrback(lambda pathID, err: d.callback(ERROR(
+            'upload task %d for "%s" failed: %s' % (tsk.number, tsk.pathID, err)
+        )))
+        backup_fs.Calculate()
+        backup_control.Save()
+        control.request_update([('pathID', pathIDfull), ])
+        lg.out(4, 'api.file_upload_start %s with %s, wait_result=True' % (remote_path, pathIDfull))
+        return d
+    tsk = backup_control.StartSingle(pathIDfull, local_path, keyID=parts['key_id'])
+    backup_fs.Calculate()
+    backup_control.Save()
+    control.request_update([('pathID', pathIDfull), ])
+    lg.out(4, 'api.file_upload_start %s with %s' % (remote_path, pathIDfull))
+    return OK(
+        'uploading "%s" started, local path is: "%s"' % (remote_path, local_path),
+        extra_fields={
+            'id': remote_path,
+            'key_id': tsk.keyID,
+            'source_path': local_path,
+            'path_id': pathID,
+        })
 
 
-def restores_running():
+def file_upload_stop(remote_path):
+    """
+    """
+    if not driver.is_started('service_backups'):
+        return ERROR('service_backups() is not started')
+    from storage import backup_control
+    from storage import backup_fs
+    from system import bpio
+    from userid import global_id
+    from lib import packetid
+    parts = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
+    if not parts['idurl'] or not parts['path']:
+        return ERROR('invalid "remote_path" format')
+    remotePath = bpio.remotePath(parts['path'])
+    pathID = backup_fs.ToID(remotePath, iter=backup_fs.fs(parts['idurl']))
+    if not pathID:
+        return ERROR('remote path "%s" was not found' % parts['path'])
+    if not packetid.Valid(pathID):
+        return ERROR('invalid item found: "%s"' % pathID)
+    pathIDfull = packetid.MakeBackupID(parts['customer'], pathID)
+    r = []
+    msg = []
+    if backup_control.AbortPendingTask(pathIDfull):
+        r.append(pathIDfull)
+        msg.append('pending item "%s" removed' % pathIDfull)
+    for backupID in backup_control.FindRunningBackup(pathIDfull):
+        if backup_control.AbortRunningBackup(backupID):
+            r.append(backupID)
+            msg.append('backup "%s" aborted' % backupID)
+    if not r:
+        return ERROR('no running or pending tasks for "%s" found' % pathIDfull)
+    lg.out(4, 'api.file_upload_stop %s' % r)
+    return RESULT(r, message=(', '.join(msg)))
+
+
+def files_downloads():
     """
     Returns a list of currently running downloads.
 
@@ -1258,6 +1016,7 @@ def restores_running():
             'bytes_processed': 0,
             'creator_id': 'http://veselin-p2p.ru/veselin.xml',
             'done': False,
+            'key_id': 'abc',
             'created': 'Wed Apr 27 15:11:13 2016',
             'eccmap': 'ecc/4x4',
             'path_id': '0/0/3/1',
@@ -1267,9 +1026,7 @@ def restores_running():
     if not driver.is_started('service_restores'):
         return ERROR('service_restores() is not started')
     from storage import restore_monitor
-    lg.out(4, 'api.restores_running %d items downloading at the moment' % len(restore_monitor.GetWorkingObjects()))
-    if not restore_monitor.GetWorkingObjects():
-        return RESULT([], message='there are no downloads running at the moment')
+    lg.out(4, 'api.files_downloads %d items downloading at the moment' % len(restore_monitor.GetWorkingObjects()))
     return RESULT([{
         'backup_id': r.BackupID,
         'creator_id': r.CreatorID,
@@ -1280,25 +1037,184 @@ def restores_running():
         'created': time.asctime(time.localtime(r.Started)),
         'aborted': r.AbortState,
         'done': r.Done,
+        'key_id': r.KeyID,
         'eccmap': '' if not r.EccMap else r.EccMap.name,
     } for r in restore_monitor.GetWorkingObjects()])
 
 
-def restore_abort(backup_id):
+def file_download_start(remote_path, destination_path=None, wait_result=False):
+    """
+    Download data from remote peers to your local machine. You can use
+    different methods to select the target data with `remote_path` input:
+
+      + "remote path" of the file
+      + item ID in the catalog
+      + full version identifier with item ID
+
+    It is possible to select the destination folder to extract requested files to.
+    By default this method uses specified value from local settings or user home folder
+
+    WARNING: Your existing local data will be overwritten!
+
+    Return:
+
+        {'status': 'OK', 'result': 'downloading of version 0/0/1/1/0/F20160313043419PM has been started to /Users/veselin/'}
+    """
+    if not driver.is_started('service_restores'):
+        return ERROR('service_restores() is not started')
+    from storage import backup_fs
+    from storage import backup_control
+    from storage import restore_monitor
+    from web import control
+    from system import bpio
+    from lib import packetid
+    from main import settings
+    from userid import my_id
+    from userid import global_id
+    lg.out(4, 'api.file_download_start %s to %s, wait_result=%s' % (
+        remote_path, destination_path, wait_result))
+    glob_path = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
+    if packetid.Valid(glob_path['path']):
+        customerGlobalID, pathID, version = packetid.SplitBackupID(remote_path)
+        if not customerGlobalID:
+            customerGlobalID = global_id.UrlToGlobalID(my_id.getLocalID())
+        item = backup_fs.GetByID(pathID, iterID=backup_fs.fsID(glob_path['customer']))
+        if not item:
+            return ERROR('path "%s" is not found in catalog' % remote_path)
+        if not version:
+            version = item.get_latest_version()
+        if not version:
+            return ERROR('not found any remote versions for "%s"' % remote_path)
+        backupID = packetid.MakeBackupID(customerGlobalID, pathID, version)
+    else:
+        remotePath = bpio.remotePath(glob_path['path'])
+        knownPathID = backup_fs.ToID(remotePath, iter=backup_fs.fs(glob_path['idurl']))
+        if not knownPathID:
+            return ERROR('path "%s" was not found in catalog' % remotePath)
+        item = backup_fs.GetByID(knownPathID, iterID=backup_fs.fsID(glob_path['idurl']))
+        if not item:
+            return ERROR('item "%s" is not found in catalog' % knownPathID)
+        version = glob_path['version']
+        if not version:
+            version = item.get_latest_version()
+        if not version:
+            return ERROR('not found any remote versions for "%s"' % remote_path)
+        backupID = packetid.MakeBackupID(glob_path['customer'], knownPathID, version)
+    if backup_control.IsBackupInProcess(backupID):
+        return ERROR('download not possible, uploading "%s" is in process' % backupID)
+    if restore_monitor.IsWorking(backupID):
+        return ERROR('downloading task for "%s" already scheduled' % backupID)
+    customerGlobalID, pathID_target, version = packetid.SplitBackupID(backupID)
+    if not customerGlobalID:
+        customerGlobalID = global_id.UrlToGlobalID(my_id.getLocalID())
+    knownPath = backup_fs.ToPath(pathID_target, iterID=backup_fs.fsID(global_id.GlobalUserToIDURL(customerGlobalID)))
+    if not knownPath:
+        return ERROR('location "%s" not found in catalog' % knownPath)
+    if not destination_path:
+        destination_path = settings.getRestoreDir()
+    if wait_result:
+        d = Deferred()
+
+        def _on_result(backupID, result):
+            if result == 'restore done':
+                d.callback(OK(
+                    result,
+                    'version "%s" downloaded to "%s"' % (backupID, destination_path),
+                    extra_fields={
+                        'backup_id': backupID,
+                        'local_path': destination_path,
+                        'path_id': pathID_target,
+                        'remote_path': knownPath,
+                    },
+                ))
+            else:
+                d.callback(ERROR(
+                    'downloading version "%s" failed, result: %s' % (backupID, result),
+                    extra_fields={
+                        'backup_id': backupID,
+                        'local_path': destination_path,
+                        'path_id': pathID_target,
+                        'remote_path': knownPath,
+                    },
+                ))
+            return True
+
+        restore_monitor.Start(
+            backupID, destination_path,
+            keyID=glob_path['key_id'],
+            callback=_on_result)
+        control.request_update([('pathID', knownPath), ])
+        lg.out(4, 'api.file_download_start %s to %s, wait_result=True' % (backupID, destination_path))
+        return d
+    restore_monitor.Start(backupID, destination_path, keyID=glob_path['key_id'])
+    control.request_update([('pathID', knownPath), ])
+    lg.out(4, 'api.download_start %s to %s' % (backupID, destination_path))
+    return OK(
+        'started',
+        'downloading of version "%s" has been started to "%s"' % (backupID, destination_path),
+        extra_fields={
+            'backup_id': backupID,
+            'local_path': destination_path,
+            'path_id': pathID_target,
+            'remote_path': knownPath,
+        },)
+
+
+def file_download_stop(remote_path):
     """
     Abort currently running restore process.
 
     Return:
 
-        {'status': 'OK',  'result': 'restoring of item 123 aborted'}
+        {'status': 'OK', 'result': 'restoring of "alice@p2p-host.com:0/1/2" aborted'}
     """
     if not driver.is_started('service_restores'):
         return ERROR('service_restores() is not started')
+    from storage import backup_fs
     from storage import restore_monitor
-    lg.out(4, 'api.restore_abort %s' % backup_id)
-    if not restore_monitor.Abort(backup_id):
-        return ERROR(backup_id, 'item %s is not restoring at the moment' % backup_id)
-    return OK(backup_id, 'restoring of item %s aborted' % backup_id)
+    from system import bpio
+    from lib import packetid
+    from userid import my_id
+    from userid import global_id
+    glob_path = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
+    backupIDs = []
+    if packetid.Valid(glob_path['path']):
+        customerGlobalID, pathID, version = packetid.SplitBackupID(remote_path)
+        if not customerGlobalID:
+            customerGlobalID = global_id.UrlToGlobalID(my_id.getLocalID())
+        item = backup_fs.GetByID(pathID, iterID=backup_fs.fsID(glob_path['customer']))
+        if not item:
+            return ERROR('path "%s" is not found in catalog' % remote_path)
+        versions = []
+        if version:
+            versions.append(version)
+        if not versions:
+            versions.extend(item.get_versions())
+        for version in versions:
+            backupIDs.append(packetid.MakeBackupID(customerGlobalID, pathID, version))
+    else:
+        remotePath = bpio.remotePath(glob_path['path'])
+        knownPathID = backup_fs.ToID(remotePath, iter=backup_fs.fs(glob_path['idurl']))
+        if not knownPathID:
+            return ERROR('path "%s" was not found in catalog' % remotePath)
+        item = backup_fs.GetByID(knownPathID, iterID=backup_fs.fsID(glob_path['idurl']))
+        if not item:
+            return ERROR('item "%s" is not found in catalog' % knownPathID)
+        versions = []
+        if glob_path['version']:
+            versions.append(glob_path['version'])
+        if not versions:
+            versions.extend(item.get_versions())
+        for version in versions:
+            backupIDs.append(packetid.MakeBackupID(glob_path['customer'], knownPathID, version))
+    if not backupIDs:
+        return ERROR('not found any remote versions for "%s"' % remote_path)
+    r = []
+    for backupID in backupIDs:
+        r.append({'backup_id': backupID, 'aborted': restore_monitor.Abort(backupID), })
+    lg.out(4, 'api.file_download_stop %s' % r)
+    return RESULT(r)
+
 
 #------------------------------------------------------------------------------
 
@@ -1329,11 +1245,12 @@ def suppliers_list():
     from contacts import contactsdb
     from p2p import contact_status
     from lib import misc
+    from userid import my_id
     return RESULT([{
         'position': s[0],
         'idurl': s[1],
-        'connected': misc.readSupplierData(s[1], 'connected'),
-        'numfiles': len(misc.readSupplierData(s[1], 'listfiles').split('\n')) - 1,
+        'connected': misc.readSupplierData(s[1], 'connected', my_id.getLocalID()),
+        'numfiles': len(misc.readSupplierData(s[1], 'listfiles', my_id.getLocalID()).split('\n')) - 1,
         'status': contact_status.getStatusLabel(s[1]),
     } for s in enumerate(contactsdb.suppliers())])
 
@@ -1359,7 +1276,7 @@ def supplier_replace(index_or_idurl):
         from customer import fire_hire
         fire_hire.AddSupplierToFire(idurl)
         fire_hire.A('restart')
-        return OK('supplier %s will be replaced by new peer' % idurl)
+        return OK('supplier "%s" will be replaced by new peer' % idurl)
     return ERROR('supplier not found')
 
 
@@ -1380,13 +1297,13 @@ def supplier_change(index_or_idurl, new_idurl):
     if not idurl or not contactsdb.is_supplier(idurl):
         return ERROR('supplier not found')
     if contactsdb.is_supplier(new_idurl):
-        return ERROR('peer %s is your supplier already' % new_idurl)
+        return ERROR('peer "%s" is your supplier already' % new_idurl)
     from customer import fire_hire
     from customer import supplier_finder
     supplier_finder.AddSupplierToHire(new_idurl)
     fire_hire.AddSupplierToFire(idurl)
     fire_hire.A('restart')
-    return OK('supplier %s will be replaced by %s' % (idurl, new_idurl))
+    return OK('supplier "%s" will be replaced by "%s"' % (idurl, new_idurl))
 
 
 def suppliers_ping():
@@ -1443,6 +1360,7 @@ def customer_reject(idurl):
     from contacts import contactsdb
     from storage import accounting
     from main import settings
+    from main import events
     from supplier import local_tester
     from p2p import p2p_service
     from lib import packetid
@@ -1462,9 +1380,10 @@ def customer_reject(idurl):
     consumed_space = accounting.count_consumed_space(space_dict)
     space_dict['free'] = settings.getDonatedBytes() - int(consumed_space)
     accounting.write_customers_quotas(space_dict)
+    events.send('existing-customer-terminated', dict(idurl=idurl))
     # restart local tester
     local_tester.TestUpdateCustomers()
-    return OK('customer %s rejected, %s bytes were freed' % (idurl, consumed_by_cutomer))
+    return OK('customer "%s" rejected, "%s" bytes were freed' % (idurl, consumed_by_cutomer))
 
 
 def customers_ping():
@@ -1672,7 +1591,7 @@ def service_info(service_name):
         service_name = 'service_' + service_name.replace('-', '_')
         svc = driver.services().get(service_name, None)
     if svc is None:
-        return ERROR('service %s not found' % service_name)
+        return ERROR('service "%s" not found' % service_name)
     return RESULT([{
         'index': svc.index,
         'name': svc.service_name,
@@ -1705,17 +1624,17 @@ def service_start(service_name):
         svc = driver.services().get(service_name, None)
     if svc is None:
         lg.out(4, 'api.service_start %s not found' % service_name)
-        return ERROR('service %s was not found' % service_name)
+        return ERROR('service "%s" was not found' % service_name)
     if svc.state == 'ON':
         lg.out(4, 'api.service_start %s already started' % service_name)
-        return ERROR('service %s already started' % service_name)
+        return ERROR('service "%s" already started' % service_name)
     current_config = config.conf().getBool(svc.config_path)
     if current_config:
         lg.out(4, 'api.service_start %s already enabled' % service_name)
-        return ERROR('service %s already enabled' % service_name)
+        return ERROR('service "%s" already enabled' % service_name)
     config.conf().setBool(svc.config_path, True)
     lg.out(4, 'api.service_start (%s)' % service_name)
-    return OK('%s was switched on' % service_name)
+    return OK('"%s" was switched on' % service_name)
 
 
 def service_stop(service_name):
@@ -1738,17 +1657,17 @@ def service_stop(service_name):
         svc = driver.services().get(service_name, None)
     if svc is None:
         lg.out(4, 'api.service_stop %s not found' % service_name)
-        return ERROR('service %s not found' % service_name)
+        return ERROR('service "%s" not found' % service_name)
     current_config = config.conf().getBool(svc.config_path)
     if current_config is None:
         lg.out(4, 'api.service_stop config item %s was not found' % svc.config_path)
-        return ERROR('config item %s was not found' % svc.config_path)
+        return ERROR('config item "%s" was not found' % svc.config_path)
     if current_config is False:
         lg.out(4, 'api.service_stop %s already disabled' % service_name)
-        return ERROR('service %s already disabled' % service_name)
+        return ERROR('service "%s" already disabled' % service_name)
     config.conf().setBool(svc.config_path, False)
     lg.out(4, 'api.service_stop (%s)' % service_name)
-    return OK('%s was switched off' % service_name)
+    return OK('"%s" was switched off' % service_name)
 
 #------------------------------------------------------------------------------
 
@@ -2022,7 +1941,7 @@ def find_peer_by_nickname(nickname):
 
 def send_message(recipient, message_body):
     """
-    Sends a text message to remote peer.
+    Sends a text message to remote peer, `recipient` is a string with nickname or global_id.
 
     Return:
 
@@ -2031,11 +1950,28 @@ def send_message(recipient, message_body):
     if not driver.is_started('service_private_messages'):
         return ERROR('service_private_messages() is not started')
     from chat import message
-    recipient = str(recipient)
-    if not recipient.startswith('http://'):
+    from userid import global_id
+    from crypt import my_keys
+    if not recipient.count('@'):
         from contacts import contactsdb
-        recipient = contactsdb.find_correspondent_by_nickname(recipient) or recipient
-    result = message.SendMessage(recipient, message_body)
+        recipient_idurl = contactsdb.find_correspondent_by_nickname(recipient)
+        if not recipient_idurl:
+            return ERROR('recipient not found')
+        recipient = global_id.UrlToGlobalID(recipient_idurl)
+    glob_id = global_id.ParseGlobalID(recipient)
+    if not glob_id['idurl']:
+        return ERROR('wrong recipient')
+    if not glob_id['key_id']:
+        glob_id['key_id'] = 'master'
+    target_glob_id = global_id.MakeGlobalID(**glob_id)
+    if not my_keys.is_valid_key_id(target_glob_id):
+        return ERROR('invalid key_id: %s' % target_glob_id)
+#     if not my_keys.is_key_registered(target_glob_id):
+#         return ERROR('unknown key_id: %s' % target_glob_id)
+    result = message.SendMessage(
+        message_body=message_body,
+        recipient_global_id=target_glob_id,
+    )
     if isinstance(result, Deferred):
         ret = Deferred()
         result.addCallback(
@@ -2079,6 +2015,7 @@ def receive_one_message():
         }))
         message.RemoveIncomingMessageCallback(_message_received)
         return True
+
     message.AddIncomingMessageCallback(_message_received)
     return ret
 
@@ -2107,3 +2044,13 @@ def broadcast_send_message(payload):
         current_states[broadcast_listener.A().name] = broadcast_listener.A().state
     lg.out(4, 'api.broadcast_send_message : %s, %s' % (msg, current_states))
     return RESULT([msg, current_states, ])
+
+#------------------------------------------------------------------------------
+
+def event_send(event_id, json_data=None):
+    import json
+    from main import events
+    events.send(event_id, json.loads(json_data or '{}'))
+    return OK('event "%s" sent' % event_id)
+
+#------------------------------------------------------------------------------

@@ -3105,7 +3105,7 @@ class MainPage(Page):
         elif action == 'idlist':
             src = ''
             src += html_comment('  %s %s %s' % ('[path ID]'.ljust(37), '[size]'.ljust(20), '[local path]'))
-            for itemName, backupID, versionInfo, localPath in backup_fs.ListAllBackupIDsFull(True, True):
+            for itemName, backupID, versionInfo, localPath, itemInfo in backup_fs.ListAllBackupIDsFull(True, True):
                 if versionInfo[1] >= 0 and contactsdb.num_suppliers() > 0:
                     szver = diskspace.MakeStringFromBytes(versionInfo[1]) + ' / ' + diskspace.MakeStringFromBytes(versionInfo[1] / contactsdb.num_suppliers())
                 else:
@@ -6674,9 +6674,9 @@ class ConversationPage(Page):
         body = arg(request, 'body')
         action = arg(request, 'action').strip()
         if action == 'send':
-            msgbody = message.MakeMessage(self.recipient, self.subject, body)
-            message.SendMessage(self.recipient, msgbody)
-            message.SaveMessage(msgbody)
+            # msgbody = message.MakeMessage(self.recipient, self.subject, body)
+            # message.SendMessage(self.recipient, msgbody)
+            # message.SaveMessage(msgbody)
             body = ''
         src = ''
         src += '<h1>%s</h1>\n' % self.subject
@@ -6878,9 +6878,9 @@ class NewMessagePage(Page):
         errmsg = ''
         if action == 'send':
             if recipient:
-                msgbody = message.MakeMessage(recipient, subject, body)
-                message.SendMessage(recipient, msgbody)
-                message.SaveMessage(msgbody)
+                # msgbody = message.MakeMessage(recipient, subject, body)
+                # message.SendMessage(recipient, msgbody)
+                # message.SaveMessage(msgbody)
                 request.redirect('/' + _PAGE_MESSAGES)
                 request.finish()
                 return NOT_DONE_YET

@@ -55,11 +55,12 @@ from logs import lg
 
 from system import bpio
 
-from lib import nameurl
-
 from main import settings
 
+from crypt import key
+
 from userid import my_id
+from userid import global_id
 
 #------------------------------------------------------------------------------
 
@@ -91,16 +92,25 @@ def known_keys():
 
 #------------------------------------------------------------------------------
 
+def is_key_registered(key_id, include_master=True):
+    """
+    Returns True if this key is known.
+    """
+    if include_master and key_id == global_id.MakeGlobalID(idurl=my_id.getLocalID(), key_id='master'):
+        return True
+    return key_id in known_keys()
+
+
 def make_key_id(alias, creator_idurl=None, output_format=None):
     """
     Every key has a creator, and we include his IDURL in the final key_id string.
     Here is a global unique address to a remote copy of `cat.png` file:
 
-        alice!group_abc@first-machine.com:animals/cat.png#F20160313043757PM
+        group_abc$alice@first-machine.com:animals/cat.png#F20160313043757PM
 
     key_id here is:
 
-        alice!group_abc@first-machine.com
+        group_abc$alice@first-machine.com
 
     key alias is `group_abc` and creator IDURL is:
 
@@ -111,10 +121,9 @@ def make_key_id(alias, creator_idurl=None, output_format=None):
     """
     if creator_idurl is None:
         creator_idurl = my_id.getLocalID()
-    return nameurl.MakeGlobalID(
+    return global_id.MakeGlobalID(
         idurl=creator_idurl,
-        key_alias=alias,
-        output_format=output_format,
+        key_id=alias,
     )
 
 def split_key_id(key_id):
@@ -122,33 +131,40 @@ def split_key_id(key_id):
     Return "alias" and "creator" IDURL of that key as a tuple object.
     For example from input string:
 
-        "bob!secret_key_xyz@remote-server.net"
+        "secret_key_xyz$bob@remote-server.net"
 
     output will be like that:
 
         "secret_key_xyz", "http://remote-server.net/bob.xml"
     """
-    parts = nameurl.ParseGlobalID(key_id)
-    if not parts['key'] or not parts['idurl']:
+    parts = global_id.ParseGlobalID(key_id)
+    if not parts['key_id'] or not parts['idurl']:
         return None, None
-    return parts['key'], parts['idurl']
+    return parts['key_id'], parts['idurl']
 
-def is_valid_key_id(key_id):
+def is_valid_key_id(global_key_id):
     """
     """
-    parts = nameurl.ParseGlobalID(key_id)
-    if not parts['key'] or not parts['idurl']:
+    parts = global_id.ParseGlobalID(global_key_id)
+    if not parts['key_id']:
+        lg.warn('no key_id found in the input')
         return False
-    if len(parts['key']) > settings.MaximumUsernameLength():
-        lg.warn("key alias: %s" % parts['key'])
+    if not parts['idurl']:
+        lg.warn('no idurl found in the input')
         return False
-    if len(parts['key']) < settings.MinimumUsernameLength():
-        lg.warn("key alias: %s" % parts['key'])
+    key_id = parts['key_id']
+    if len(key_id) > settings.MaximumUsernameLength():
+        lg.warn("key_id too long: %d" % len(key_id))
         return False
-    for c in parts['key']:
+    if len(key_id) < settings.MinimumUsernameLength():
+        lg.warn("key_id too short: %d" % len(key_id))
+        return False
+    pos = 0
+    for c in key_id:
         if c not in settings.LegalUsernameChars():
-            lg.warn("key alias: %s" % parts['key'])
+            lg.warn("key_id has illegal character at position: %d" % pos)
             return False
+        pos += 1
     return True
 
 #------------------------------------------------------------------------------
@@ -308,6 +324,12 @@ def encrypt(key_id, inp):
 
     Return encrypted string.
     """
+    if key_id == 'master':
+        return key.EncryptLocalPublicKey(inp)
+    if key_id == 'master$%s' % my_id.getGlobalID():
+        return key.EncryptLocalPublicKey(inp)
+    if key_id == my_id.getGlobalID():
+        return key.EncryptLocalPublicKey(inp)
     key_object = known_keys().get(key_id)
     if not key_object:
         lg.warn('key %s is unknown' % key_id)
@@ -328,6 +350,12 @@ def decrypt(key_id, inp):
 
     Return decrypted string or raise exception.
     """
+    if key_id == 'master':
+        return key.DecryptLocalPrivateKey(inp)
+    if key_id == 'master$%s' % my_id.getGlobalID():
+        return key.DecryptLocalPrivateKey(inp)
+    if key_id == my_id.getGlobalID():
+        return key.DecryptLocalPrivateKey(inp)
     key_object = known_keys().get(key_id)
     if not key_object:
         lg.warn('key %s is unknown' % key_id)

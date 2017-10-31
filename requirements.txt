@@ -1,3 +1,4 @@
+pip
 twisted
 pyasn1
 pycrypto
@@ -8,5 +9,8 @@ CodernityDB
 cryptography
 service_identity
 psutil
-django==1.7  # if only you want to have a gui
+enum34
+ipaddress
+cffi
 pkgversion
+django==1.7  # if only you want to have a gui
