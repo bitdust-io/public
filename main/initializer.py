@@ -140,30 +140,32 @@ class Initializer(automat.Automat):
 
     def A(self, event, arg):
         #--- AT_STARTUP
+        #---AT_STARTUP---
         if self.state == 'AT_STARTUP':
             if event == 'run':
                 self.state = 'LOCAL'
                 shutdowner.A('init')
                 self.doInitLocal(arg)
-                self.flagCmdLine = False
+                self.flagCmdLine=False
             elif event == 'run-cmd-line-register':
                 self.state = 'INSTALL'
                 shutdowner.A('init')
-                self.flagCmdLine = True
+                self.flagCmdLine=True
                 installer.A('register-cmd-line', arg)
                 shutdowner.A('ready')
             elif event == 'run-cmd-line-recover':
                 self.state = 'INSTALL'
                 shutdowner.A('init')
-                self.flagCmdLine = True
+                self.flagCmdLine=True
                 installer.A('recover-cmd-line', arg)
                 shutdowner.A('ready')
-        #--- LOCAL
+        #---LOCAL---
         elif self.state == 'LOCAL':
             if event == 'init-local-done' and not self.isInstalled(arg) and self.isGUIPossible(arg):
                 self.state = 'INSTALL'
                 installer.A('init')
                 shutdowner.A('ready')
+                self.doInitInterfaces(arg)
                 self.doShowGUI(arg)
                 self.doUpdate(arg)
             elif event == 'init-local-done' and not self.isInstalled(arg) and not self.isGUIPossible(arg):
@@ -174,57 +176,57 @@ class Initializer(automat.Automat):
             elif event == 'init-local-done' and self.isInstalled(arg):
                 self.state = 'INTERFACES'
                 self.doInitInterfaces(arg)
-        #--- MODULES
+        #---MODULES---
         elif self.state == 'MODULES':
             if event == 'init-modules-done':
                 self.state = 'READY'
                 self.doUpdate(arg)
                 self.doShowGUI(arg)
-            elif (event == 'shutdowner.state' and arg == 'FINISHED'):
+            elif ( event == 'shutdowner.state' and arg == 'FINISHED' ):
                 self.state = 'EXIT'
                 self.doDestroyMe(arg)
-        #--- INSTALL
+        #---INSTALL---
         elif self.state == 'INSTALL':
-            if not self.flagCmdLine and (event == 'installer.state' and arg == 'DONE'):
+            if not self.flagCmdLine and ( event == 'installer.state' and arg == 'DONE' ):
                 self.state = 'STOPPING'
                 shutdowner.A('stop', "restartnshow")
-            elif self.flagCmdLine and (event == 'installer.state' and arg == 'DONE'):
+            elif self.flagCmdLine and ( event == 'installer.state' and arg == 'DONE' ):
                 self.state = 'STOPPING'
                 shutdowner.A('stop', "exit")
-            elif (event == 'shutdowner.state' and arg == 'FINISHED'):
+            elif ( event == 'shutdowner.state' and arg == 'FINISHED' ):
                 self.state = 'EXIT'
                 self.doDestroyMe(arg)
-        #--- READY
+        #---READY---
         elif self.state == 'READY':
-            if (event == 'shutdowner.state' and arg == 'FINISHED'):
+            if ( event == 'shutdowner.state' and arg == 'FINISHED' ):
                 self.state = 'EXIT'
                 self.doDestroyMe(arg)
-        #--- STOPPING
+        #---STOPPING---
         elif self.state == 'STOPPING':
-            if (event == 'shutdowner.state' and arg == 'FINISHED'):
+            if ( event == 'shutdowner.state' and arg == 'FINISHED' ):
                 self.state = 'EXIT'
                 self.doUpdate(arg)
                 self.doDestroyMe(arg)
-        #--- EXIT
+        #---EXIT---
         elif self.state == 'EXIT':
             pass
-        #--- SERVICES
+        #---SERVICES---
         elif self.state == 'SERVICES':
-            if (event == 'shutdowner.state' and arg == 'FINISHED'):
-                self.state = 'EXIT'
-                self.doDestroyMe(arg)
-            elif event == 'init-services-done':
+            if event == 'init-services-done':
                 self.state = 'MODULES'
                 self.doInitModules(arg)
                 shutdowner.A('ready')
-        #--- INTERFACES
-        elif self.state == 'INTERFACES':
-            if (event == 'shutdowner.state' and arg == 'FINISHED'):
+            elif ( event == 'shutdowner.state' and arg == 'FINISHED' ):
                 self.state = 'EXIT'
                 self.doDestroyMe(arg)
-            elif event == 'init-interfaces-done':
+        #---INTERFACES---
+        elif self.state == 'INTERFACES':
+            if event == 'init-interfaces-done':
                 self.state = 'SERVICES'
                 self.doInitServices(arg)
+            elif ( event == 'shutdowner.state' and arg == 'FINISHED' ):
+                self.state = 'EXIT'
+                self.doDestroyMe(arg)
         return None
 
     def isInstalled(self, arg):
@@ -268,6 +270,9 @@ class Initializer(automat.Automat):
         if settings.enableJsonRPCServer():
             from interface import jsonrpc_server
             jsonrpc_server.init()
+        if settings.enableRESTHTTPServer():
+            from interface import rest_http_server
+            rest_http_server.init(port=settings.getRESTHTTPServerPort())
         reactor.callLater(0, self.automat, 'init-interfaces-done')
 
     def doInitModules(self, arg):
@@ -446,16 +451,11 @@ class Initializer(automat.Automat):
                 shutdowner.A('stop', 'exit')
 
             elif cmd == 'restart':
-                # appList = bpio.find_process(['bpgui.',])
-                # if len(appList) > 0:
-                #     shutdowner.A('stop', 'restartnshow') # ('restart', 'show'))
-                # else:
-                #     shutdowner.A('stop', 'restart') # ('restart', ''))
                 shutdowner.A('stop', 'restart')
 
             elif cmd == 'reconnect':
                 from p2p import network_connector
-                if driver.is_started('service_network'):
+                if driver.is_on('service_network'):
                     network_connector.A('reconnect')
 
             elif cmd == 'show':

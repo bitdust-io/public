@@ -43,9 +43,14 @@ Commands:
   stop
   show
   alias
+  id
+  idurl
   identity create <username> [private key size]
-  identity restore <private key source file> [IDURL]
+  identity backup [private key file path]
+  identity restore <private key file path> [IDURL]
   identity erase
+  identity show
+  identity server [start | stop]
   key list
   key create <key id>
   key delete <key id>
@@ -57,10 +62,13 @@ Commands:
   set list
   file sync
   file list
+  file create <remote path>
+  file delete <remote path>
+  dir create <remote path>
+  dir delete <remote path>
   file upload <local path> <remote path>
   file download <remote path> <local path>
   file cancel <upload | download> <remote path>
-  file delete <remote path>
   file progress [upload | download]
   supplier list
   supplier replace <IDURL or position>
@@ -105,16 +113,33 @@ Commands:
   alias                 helper to create a binary command-alias in OS,
                         you can put it in /usr/local/bin/bitdust for ex.
 
+  id                    print your global ID in BitDust network
+
+  idurl                 print your global IDURL: global address of
+                        your identity file in the Internet
+
   identity create <nickname> [private key size]
                         generate a new private key and
                         new identity file for you
                         key size can be 1024, 2048 or 4096
 
-  identity restore <private key source file> [IDURL]
+  identity backup [private key file path]
+                        backup your IDURL and private key to the file,
+                        to be able to restore your data in case of lost
+                        ATTENTION! always keep a backup copy of your
+                        master key in safe place, this is the only
+                        possible way to recover access to your lost data
+
+  identity restore <private key file path> [IDURL]
                         recover existing identity file
                         with your private key file
 
   identity erase        delete local identity from this machine
+
+  identity show         displays your current identity file content
+
+  identity server start|stop
+                        start/stop stand alone identity server on that machine
 
   key list              list details for known private keys
 
@@ -144,10 +169,24 @@ Commands:
 
   file list             show a list of known files and folders on remote peers
 
+  file create <remote path>
+                        creates "virtual" remote file in the catalog,
+                        "remote path" have such format in all commands:
+                        {key_alias}${user_name}@{id_host}:{remote_path}
+
+  file delete <remote path>
+                        remove give file from the catalog and remote suppliers
+
+  dir create <remote path>
+                        create "virtual" remote folder in the catalog
+
+  dir delete <remote path>
+                        erase folder and all sub-folders from the catalog
+                        and remote suppliers
+
   file upload <local path> <remote path>
-                        start uploading a file or folder to remote peers,
-                        "remote path" have such format:
-                        {key_id}${user_name}@{id_host}:{remote_path}
+                        start uploading a file or folder to remote suppliers,
+                        first you need to create "remote path" in the catalog
 
   file download <remote path> [local path]
                         download file or folder from remote peers to local drive
@@ -155,11 +194,6 @@ Commands:
 
   file cancel <upload | download> <remote path>
                         abort currently running file upload or download process
-
-  file delete <remote path>
-                        remove a file or folder (with all sub folders)
-                        from remote peers, "remote path" have such format:
-                        {key_id}${user_name}@{id_host}:{remote_path}
 
   file progress <upload | download>
                         show a list of currently running uploads or/and downloads

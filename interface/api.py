@@ -23,7 +23,6 @@
 #
 #
 #
-from twisted.conch.test.test_recvline import down
 
 """
 .. module:: api.
@@ -102,9 +101,11 @@ def stop():
 
         {'status': 'OK', 'result': 'stopped'}
     """
-    lg.out(2, 'api.stop sending event "stop" to the shutdowner() machine')
+    lg.out(4, 'api.stop sending event "stop" to the shutdowner() machine')
+    from twisted.internet import reactor
     from main import shutdowner
-    shutdowner.A('stop', 'exit')
+    reactor.callLater(0.1, shutdowner.A, 'stop', 'exit')
+    # shutdowner.A('stop', 'exit')
     return OK('stopped')
 
 
@@ -117,31 +118,17 @@ def restart(showgui=False):
 
         {'status': 'OK', 'result': 'restarted'}
     """
+    from twisted.internet import reactor
     from main import shutdowner
     if showgui:
-        lg.out(2, 'api.restart forced for GUI, added param "show", sending event "stop" to the shutdowner() machine')
-        shutdowner.A('stop', 'restartnshow')
+        lg.out(4, 'api.restart forced for GUI, added param "show", sending event "stop" to the shutdowner() machine')
+        reactor.callLater(0.1, shutdowner.A, 'stop', 'restartnshow')
+        # shutdowner.A('stop', 'restartnshow')
         return OK('restarted with GUI')
-    lg.out(2, 'api.restart did not found bpgui process nor forced for GUI, just do the restart, sending event "stop" to the shutdowner() machine')
-    shutdowner.A('stop', 'restart')
+    lg.out(4, 'api.restart did not found bpgui process nor forced for GUI, just do the restart, sending event "stop" to the shutdowner() machine')
+    # shutdowner.A('stop', 'restart')
+    reactor.callLater(0.1, shutdowner.A, 'stop', 'restart')
     return OK('restarted')
-
-
-def reconnect():
-    """
-    Sends "reconnect" event to network_connector() Automat in order to refresh
-    network connection.
-
-    Return:
-
-        {'status': 'OK', 'result': 'reconnected'}
-    """
-    if not driver.is_started('service_network'):
-        return ERROR('service_network() is not started')
-    from p2p import network_connector
-    lg.out(2, 'api.reconnect')
-    network_connector.A('reconnect')
-    return OK('reconnected')
 
 
 def show():
@@ -165,7 +152,7 @@ def show():
 #------------------------------------------------------------------------------
 
 
-def config_get(key, default=None):
+def config_get(key):
     """
     Returns current value for specific option from program settings.
 
@@ -173,19 +160,34 @@ def config_get(key, default=None):
 
         {'status': 'OK',   'result': [{'type': 'positive integer', 'value': '8', 'key': 'logs/debug-level'}]}
     """
-    key = str(key)
+    try:
+        key = str(key).strip('/')
+    except:
+        return ERROR('wrong key')
     lg.out(4, 'api.config_get [%s]' % key)
     from main import config
-    if not config.conf().exist(key):
+    if key and not config.conf().exist(key):
         return ERROR('option "%s" not exist' % key)
-    return RESULT([{
-        'key': key,
-        'value': config.conf().getData(key, default),
-        'type': config.conf().getTypeLabel(key),
-        # 'code': config.conf().getType(key),
-        # 'label': config.conf().getLabel(key),
-        # 'info': config.conf().getInfo(key)
-    }])
+    if key and not config.conf().hasChilds(key):
+        return RESULT([{
+            'key': key,
+            'value': config.conf().getData(key),
+            'type': config.conf().getTypeLabel(key),
+        }])
+    childs = []
+    for child in config.conf().listEntries(key):
+        if config.conf().hasChilds(child):
+            childs.append({
+                'key': child,
+                'childs': len(config.conf().listEntries(child)),
+            })
+        else:
+            childs.append({
+                'key': child,
+                'value': config.conf().getData(child),
+                'type': config.conf().getTypeLabel(child),
+            })
+    return RESULT(childs)
 
 
 def config_set(key, value):
@@ -281,7 +283,7 @@ def key_get(key_id, include_private=False):
          'result': [{
             'alias': 'cool',
             'creator': 'http://p2p-id.ru/testveselin.xml',
-            'id': 'cool$testveselin@p2p-id.ru',
+            'key_id': 'cool$testveselin@p2p-id.ru',
             'fingerprint': '50:f9:f1:6d:e3:e4:25:61:0c:81:6f:79:24:4e:78:17',
             'size': '4096',
             'ssh_type': 'ssh-rsa',
@@ -298,7 +300,7 @@ def key_get(key_id, include_private=False):
     key_id = str(key_id)
     if key_id == 'master':
         r = {
-            'id': key_id,
+            'key_id': my_id.getGlobalID(key_id),
             'alias': 'master',
             'creator': my_id.getLocalID(),
             'fingerprint': str(key.MyPrivateKeyObject().fingerprint()),
@@ -315,8 +317,16 @@ def key_get(key_id, include_private=False):
         return ERROR('icorrect key_id format')
     key_object = my_keys.known_keys().get(key_id)
     if not key_object:
-        key_id_form_1 = my_keys.make_key_id(key_alias, creator_idurl, output_format=global_id._FORMAT_GLOBAL_ID_KEY_USER)
-        key_id_form_2 = my_keys.make_key_id(key_alias, creator_idurl, output_format=global_id._FORMAT_GLOBAL_ID_USER_KEY)
+        key_id_form_1 = my_keys.make_key_id(
+            alias=key_alias,
+            creator_idurl=creator_idurl,
+            output_format=global_id._FORMAT_GLOBAL_ID_KEY_USER,
+        )
+        key_id_form_2 = my_keys.make_key_id(
+            alias=key_alias,
+            creator_idurl=creator_idurl,
+            output_format=global_id._FORMAT_GLOBAL_ID_USER_KEY,
+        )
         key_object = my_keys.known_keys().get(key_id_form_1)
         if key_object:
             key_id = key_id_form_1
@@ -327,7 +337,7 @@ def key_get(key_id, include_private=False):
     if not key_object:
         return ERROR('key not found')
     r = {
-        'id': key_id,
+        'key_id': key_id,
         'alias': key_alias,
         'creator': creator_idurl,
         'fingerprint': str(key_object.fingerprint()),
@@ -381,7 +391,7 @@ def keys_list(sort=False, include_private=False):
             lg.warn('incorrect key_id: %s' % key_id)
             continue
         i = {
-            'id': key_id,
+            'key_id': key_id,
             'alias': key_alias,
             'creator': creator_idurl,
             'fingerprint': str(key_object.fingerprint()),
@@ -396,7 +406,7 @@ def keys_list(sort=False, include_private=False):
     if sort:
         r = sorted(r, key=lambda i: i['alias'])
     i = {
-        'id': my_keys.make_key_id('master', creator_idurl=my_id.getLocalID()),
+        'key_id': my_keys.make_key_id('master', creator_idurl=my_id.getLocalID()),
         'alias': 'master',
         'creator': my_id.getLocalID(),
         'fingerprint': key.MyPrivateKeyObject().fingerprint(),
@@ -437,12 +447,14 @@ def key_create(key_alias, key_size=4096, include_private=False):
     # TODO: add validation for key_alias
     key_alias = key_alias.strip().lower()
     key_id = my_keys.make_key_id(key_alias, creator_idurl=my_id.getLocalID())
+    if my_keys.is_key_registered(key_id):
+        return ERROR('key "%s" already exist' % key_id)
     lg.out(4, 'api.key_create id=%s, size=%s' % (key_id, key_size))
     key_object = my_keys.generate_key(key_id, key_size=key_size)
     if key_object is None:
         return ERROR('failed to generate private key "%s"' % key_id)
     r = {
-        'id': key_id,
+        'key_id': key_id,
         'alias': key_alias,
         'creator': my_id.getLocalID(),
         'fingerprint': str(key_object.fingerprint()),
@@ -480,7 +492,7 @@ def key_erase(key_id):
     return OK(message='private key "%s" was erased successfully' % key_alias)
 
 
-def key_share(full_key_id, idurl):
+def key_share(key_id, trusted_global_id_or_idurl, timeout=10):
     """
     Connect to remote node identified by `idurl` parameter and transfer private key `key_id` to that machine.
     This way remote user will be able to access those of your files which were encrypted with that private key.
@@ -488,20 +500,26 @@ def key_share(full_key_id, idurl):
     Returns:
 
     """
-    from crypt import my_keys
     from userid import global_id
-    full_key_id = str(full_key_id)
-    idurl = str(idurl)
-    if not driver.is_started('service_keys_registry'):
+    try:
+        trusted_global_id_or_idurl = str(trusted_global_id_or_idurl)
+        full_key_id = str(key_id)
+    except:
+        return succeed(ERROR('error input parameters'))
+    if not driver.is_on('service_keys_registry'):
         return succeed(ERROR('service_keys_registry() is not started'))
     glob_id = global_id.ParseGlobalID(full_key_id)
-    if glob_id['key_id'] == 'master':
-        return ERROR('"master" key can not be shared')
-    if not glob_id['key_id'] or not glob_id['idurl']:
-        return ERROR('icorrect key_id format')
+    if glob_id['key_alias'] == 'master':
+        return succeed(ERROR('"master" key can not be shared'))
+    if not glob_id['key_alias'] or not glob_id['idurl']:
+        return succeed(ERROR('icorrect key_id format'))
+    if global_id.IsValidGlobalUser(trusted_global_id_or_idurl):
+        idurl = global_id.GlobalUserToIDURL(trusted_global_id_or_idurl)
+    else:
+        idurl = trusted_global_id_or_idurl
     from access import key_ring
     result = Deferred()
-    d = key_ring.share_private_key(full_key_id, idurl)
+    d = key_ring.share_private_key(key_id=full_key_id, trusted_idurl=idurl, timeout=timeout)
     d.addCallback(
         lambda resp: result.callback(
             OK(str(resp))))
@@ -544,7 +562,7 @@ def filemanager(json_request):
 
     WARNING: Those methods here will be deprecated and removed, use regular API methods instead.
     """
-    if not driver.is_started('service_restores'):
+    if not driver.is_on('service_restores'):
         return ERROR('service_restores() is not started')
     from storage import filemanager_api
     return filemanager_api.process(json_request)
@@ -563,7 +581,7 @@ def files_sync():
 
         {'status': 'OK', 'result': 'the main files sync loop has been restarted'}
     """
-    if not driver.is_started('service_backups'):
+    if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
     from storage import backup_monitor
     backup_monitor.A('restart')
@@ -573,12 +591,48 @@ def files_sync():
 
 def files_list(remote_path=None):
     """
+    Returns list of known files registered in the catalog under given `remote_path` folder.
+    By default returns items from root of the catalog.
+
+    Return:
+        { u'execution': u'0.001040',
+          u'result': [
+                       { u'childs': False,
+                         u'customer': u'veselin@veselin-p2p.ru',
+                         u'glob_id': u'master$veselin@veselin-p2p.ru:1',
+                         u'idurl': u'http://veselin-p2p.ru/veselin.xml',
+                         u'key_id': u'master$veselin@veselin-p2p.ru',
+                         u'latest': u'',
+                         u'local_size': -1,
+                         u'name': u'cats.png',
+                         u'path': u'cats.png',
+                         u'path_id': u'1',
+                         u'size': 0,
+                         u'type': u'file',
+                         u'versions': []},
+                       { u'childs': False,
+                         u'customer': u'veselin@veselin-p2p.ru',
+                         u'glob_id': u'master$veselin@veselin-p2p.ru:2',
+                         u'idurl': u'http://veselin-p2p.ru/veselin.xml',
+                         u'key_id': u'master$veselin@veselin-p2p.ru',
+                         u'latest': u'',
+                         u'local_size': 345418,
+                         u'name': u'dogs.jpg',
+                         u'path': u'dogs.jpg',
+                         u'path_id': u'2',
+                         u'size': 0,
+                         u'type': u'file',
+                         u'versions': []},
+                      ],
+          u'status': u'OK'}
     """
-    if not driver.is_started('service_backups'):
+    if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
     from storage import backup_fs
     from system import bpio
     from userid import global_id
+    from userid import my_id
+    from crypt import my_keys
     glob_path = global_id.ParseGlobalID(remote_path)
     norm_path = global_id.NormalizeGlobalID(glob_path.copy())
     remotePath = bpio.remotePath(norm_path['path'])
@@ -592,17 +646,17 @@ def files_list(remote_path=None):
         return ERROR(lookup)
     for i in lookup:
         glob_path_child = norm_path.copy()
-        glob_path_child['path'] = i['path']
+        glob_path_child['path'] = i['path_id']
         if not i['item']['k']:
-            i['item']['k'] = 'master'
-        if glob_path['key_id'] and i['item']['k']:
-            if i['item']['k'] != glob_path['key_id']:
+            i['item']['k'] = my_id.getGlobalID(key_alias='master')
+        if glob_path['key_alias'] and i['item']['k']:
+            if i['item']['k'] != my_keys.make_key_id(alias=glob_path['key_alias'], creator_glob_id=glob_path['customer']):
                 continue
         result.append({
             'glob_id': global_id.MakeGlobalID(**glob_path_child),
             'customer': norm_path['customer'],
             'idurl': norm_path['idurl'],
-            'id': i['path_id'],
+            'path_id': i['path_id'],
             'name': i['name'],
             'path': i['path'],
             'type': backup_fs.TYPES.get(i['type'], '').lower(),
@@ -620,7 +674,7 @@ def files_list(remote_path=None):
 def file_info(remote_path, include_uploads=True, include_downloads=True):
     """
     """
-    if not driver.is_started('service_restores'):
+    if not driver.is_on('service_restores'):
         return ERROR('service_restores() is not started')
     from storage import backup_fs
     from lib import misc
@@ -637,10 +691,13 @@ def file_info(remote_path, include_uploads=True, include_downloads=True):
         return ERROR('item "%s" is not found in catalog' % pathID)
     (item_size, item_time, versions) = backup_fs.ExtractVersions(pathID, item, customer_id=norm_path['customer'])
     item_key = item.key_id
+    glob_path_item = norm_path.copy()
+    glob_path_item['path'] = pathID
+    full_global_id = global_id.MakeGlobalID(**glob_path_item)
     r = {
-        'glob_id': global_id.MakeGlobalID(**norm_path),
+        'glob_id': full_global_id,
         'customer': norm_path['idurl'],
-        'id': pathID,
+        'path_id': pathID,
         'path': remotePath,
         'type': backup_fs.TYPES.get(item.type, '').lower(),
         'size': item_size,
@@ -682,7 +739,7 @@ def file_info(remote_path, include_uploads=True, include_downloads=True):
         t = backup_control.GetPendingTask(pathID)
         if t:
             pending.append({
-                'id': t.number,
+                'task_id': t.number,
                 'path_id': t.pathID,
                 'source_path': t.localPath,
                 'created': time.asctime(time.localtime(t.created)),
@@ -708,25 +765,27 @@ def file_info(remote_path, include_uploads=True, include_downloads=True):
                     'eccmap': '' if not r.EccMap else r.EccMap.name,
                 })
         r['downloads'] = downloads
-    lg.out(4, 'api.file_info %s' % r['glob_id'])
+    lg.out(4, 'api.file_info : "%s"' % full_global_id)
     return RESULT([r, ])
 
 
 def file_create(remote_path, as_folder=False):
     """
     """
-    if not driver.is_started('service_backups'):
+    if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
     from storage import backup_fs
     from storage import backup_control
     from system import bpio
     from web import control
     from userid import global_id
+    from crypt import my_keys
     parts = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
     if not parts['path']:
         return ERROR('invalid "remote_path" format')
     path = bpio.remotePath(parts['path'])
     pathID = backup_fs.ToID(path, iter=backup_fs.fs(parts['idurl']))
+    keyID = my_keys.make_key_id(alias=parts['key_alias'], creator_glob_id=parts['customer'])
     if pathID:
         return ERROR('remote path "%s" already exist in catalog: "%s"' % (path, pathID))
     if as_folder:
@@ -735,69 +794,51 @@ def file_create(remote_path, as_folder=False):
             read_stats=False,
             iter=backup_fs.fs(parts['idurl']),
             iterID=backup_fs.fsID(parts['idurl']),
-            key_id=parts['key_id'],
+            key_id=keyID,
         )
     else:
         parent_path = os.path.dirname(path)
         if not backup_fs.IsDir(parent_path, iter=backup_fs.fs(parts['idurl'])):
             if backup_fs.IsFile(parent_path, iter=backup_fs.fs(parts['idurl'])):
                 return ERROR('remote path can not be assigned, file already exist: "%s"' % parent_path)
-            backup_fs.AddDir(
+            parentPathID, parent_iter, parent_iterID = backup_fs.AddDir(
                 parent_path,
                 read_stats=False,
                 iter=backup_fs.fs(parts['idurl']),
                 iterID=backup_fs.fsID(parts['idurl']),
-                key_id=parts['key_id'],
+                key_id=keyID,
             )
-        iter_and_iterID = backup_fs.GetIteratorsByPath(
+            lg.out(4, 'api.file_create parent folder "%s" was created at "%s"' % (parent_path, parentPathID))
+        id_iter_iterID = backup_fs.GetIteratorsByPath(
             parent_path,
             iter=backup_fs.fs(parts['idurl']),
             iterID=backup_fs.fsID(parts['idurl']),
         )
-        if not iter_and_iterID:
+        if not id_iter_iterID:
             return ERROR('remote path can not be assigned, parent folder not found: "%s"' % parent_path)
-        _, _, _ = backup_fs.PutItem(
+        parentPathID = id_iter_iterID[0]
+        newPathID, _, _ = backup_fs.PutItem(
             name=os.path.basename(path),
+            parent_path_id=parentPathID,
             as_folder=as_folder,
-            iter=iter_and_iterID[0],
-            iterID=iter_and_iterID[1],
-            key_id=parts['key_id'],
+            iter=id_iter_iterID[1],
+            iterID=id_iter_iterID[2],
+            key_id=keyID,
         )
-        newPathID = backup_fs.ToID(path)
         if not newPathID:
             return ERROR('remote path can not be assigned, failed to create a new item: "%s"' % path)
-#         iter_and_iterID = backup_fs.GetIteratorsByPath(
-#             parent_path,
-#             iter=backup_fs.fs(parts['idurl']),
-#             iterID=backup_fs.fsID(parts['idurl']),
-#         )
-#         if iter_and_iterID is None:
-#             _, parent_iter, parent_iterID = backup_fs.AddDir(
-#                 parent_path,
-#                 read_stats=False,
-#                 iter=backup_fs.fs(parts['idurl']),
-#                 iterID=backup_fs.fsID(parts['idurl']),
-#                 key_id=parts['key_id'],
-#             )
-#         else:
-#             parent_iter, parent_iterID = iter_and_iterID
-#         newPathID, _, _ = backup_fs.PutItem(
-#             name=os.path.basename(path),
-#             as_folder=as_folder,
-#             iter=parent_iter,
-#             iterID=parent_iterID,
-#             key_id=parts['key_id'],
-#         )
     backup_control.Save()
     control.request_update([('pathID', newPathID), ])
-    lg.out(4, 'api.file_create %s with %s' % (global_id.MakeGlobalID(**parts), newPathID))
+    full_glob_id = global_id.MakeGlobalID(customer=parts['customer'], path=newPathID)
+    lg.out(4, 'api.file_create : "%s"' % full_glob_id)
     return OK(
-        'new %s "%s" was added at remote path "%s"' % (('folder' if as_folder else 'file'), newPathID, path),
+        'new %s was created in "%s"' % (('folder' if as_folder else 'file'), full_glob_id),
         extra_fields={
-            'id': newPathID,
-            'key_id': parts['key_id'],
-            'customer': parts['idurl'],
+            'path_id': newPathID,
+            'key_id': keyID,
             'path': path,
+            'glob_id': full_glob_id,
+            'customer': parts['idurl'],
             'type': ('dir' if as_folder else 'file'),
         })
 
@@ -805,7 +846,7 @@ def file_create(remote_path, as_folder=False):
 def file_delete(remote_path):
     """
     """
-    if not driver.is_started('service_backups'):
+    if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
     from storage import backup_fs
     from storage import backup_control
@@ -825,8 +866,8 @@ def file_delete(remote_path):
     if not packetid.Valid(pathID):
         return ERROR('invalid item found: "%s"' % pathID)
     pathIDfull = packetid.MakeBackupID(parts['customer'], pathID)
-    result = backup_control.DeletePathBackups(
-        pathIDfull, saveDB=False, calculate=False)
+    full_glob_id = global_id.MakeGlobalID(customer=parts['customer'], path=pathID)
+    result = backup_control.DeletePathBackups(pathID=pathIDfull, saveDB=False, calculate=False)
     if not result:
         return ERROR('remote item "%s" was not found' % pathIDfull)
     backup_fs.DeleteLocalDir(settings.getLocalBackupsDir(), pathIDfull)
@@ -837,7 +878,12 @@ def file_delete(remote_path):
     backup_monitor.A('restart')
     control.request_update([('pathID', pathIDfull), ])
     lg.out(4, 'api.file_delete %s' % parts)
-    return OK('item "%s" was deleted from remote peers' % pathIDfull)
+    return OK('item "%s" was deleted from remote suppliers' % pathIDfull, extra_fields={
+        'path_id': pathIDfull,
+        'path': path,
+        'glob_id': full_glob_id,
+        'customer': parts['idurl'],
+    })
 
 
 def files_uploads(include_running=True, include_pending=True):
@@ -874,7 +920,7 @@ def files_uploads(include_running=True, include_pending=True):
             }]
         }
     """
-    if not driver.is_started('service_backups'):
+    if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
     from lib import misc
     from storage import backup_control
@@ -902,7 +948,7 @@ def files_uploads(include_running=True, include_pending=True):
         } for j in backup_control.jobs().values()])
     if include_pending:
         r['pending'].extend([{
-            'id': t.number,
+            'task_id': t.number,
             'path_id': t.pathID,
             'source_path': t.localPath,
             'created': time.asctime(time.localtime(t.created)),
@@ -913,7 +959,7 @@ def files_uploads(include_running=True, include_pending=True):
 def file_upload_start(local_path, remote_path, wait_result=True):
     """
     """
-    if not driver.is_started('service_backups'):
+    if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
     from system import bpio
     from storage import backup_fs
@@ -921,6 +967,7 @@ def file_upload_start(local_path, remote_path, wait_result=True):
     from lib import packetid
     from web import control
     from userid import global_id
+    from crypt import my_keys
     if not bpio.pathExist(local_path):
         return ERROR('local file or folder "%s" not exist' % local_path)
     parts = global_id.NormalizeGlobalID(remote_path)
@@ -928,31 +975,44 @@ def file_upload_start(local_path, remote_path, wait_result=True):
         return ERROR('invalid "remote_path" format')
     path = bpio.remotePath(parts['path'])
     pathID = backup_fs.ToID(path, iter=backup_fs.fs(parts['idurl']))
+    keyID = my_keys.make_key_id(alias=parts['key_alias'], creator_glob_id=parts['customer'])
     if not pathID:
         return ERROR('path "%s" not registered yet' % path)
     pathIDfull = packetid.MakeBackupID(parts['customer'], pathID)
     if wait_result:
         d = Deferred()
-        tsk = backup_control.StartSingle(pathIDfull, local_path, keyID=parts['key_id'])
-        tsk.result_defer.addCallback(lambda backupID, result: d.callback(OK(
+        tsk = backup_control.StartSingle(
+            pathID=pathIDfull,
+            localPath=local_path,
+            keyID=keyID,
+        )
+        tsk.result_defer.addCallback(lambda result: d.callback(OK(
             'item "%s" uploaded, local path is: "%s"' % (remote_path, local_path),
             extra_fields={
-                'id': remote_path,
-                'version': backupID,
+                'remote_path': remote_path,
+                'version': result[0],
                 'key_id': tsk.keyID,
                 'source_path': local_path,
                 'path_id': pathID,
             }
         )))
-        tsk.result_defer.addErrback(lambda pathID, err: d.callback(ERROR(
-            'upload task %d for "%s" failed: %s' % (tsk.number, tsk.pathID, err)
+        tsk.result_defer.addErrback(lambda result: d.callback(ERROR(
+            'upload task %d for "%s" failed: %s' % (tsk.number, tsk.pathID, result[1], )
         )))
         backup_fs.Calculate()
         backup_control.Save()
         control.request_update([('pathID', pathIDfull), ])
         lg.out(4, 'api.file_upload_start %s with %s, wait_result=True' % (remote_path, pathIDfull))
         return d
-    tsk = backup_control.StartSingle(pathIDfull, local_path, keyID=parts['key_id'])
+    tsk = backup_control.StartSingle(
+        pathID=pathIDfull,
+        localPath=local_path,
+        keyID=keyID,
+    )
+    tsk.result_defer.addCallback(lambda result: lg.warn(
+        'callback from api.file_upload_start.task(%s) done with %s' % (result[0], result[1], )))
+    tsk.result_defer.addErrback(lambda result: lg.err(
+        'errback from api.file_upload_start.task(%s) failed with %s' % (result[0], result[1], )))
     backup_fs.Calculate()
     backup_control.Save()
     control.request_update([('pathID', pathIDfull), ])
@@ -960,7 +1020,7 @@ def file_upload_start(local_path, remote_path, wait_result=True):
     return OK(
         'uploading "%s" started, local path is: "%s"' % (remote_path, local_path),
         extra_fields={
-            'id': remote_path,
+            'remote_path': remote_path,
             'key_id': tsk.keyID,
             'source_path': local_path,
             'path_id': pathID,
@@ -970,7 +1030,7 @@ def file_upload_start(local_path, remote_path, wait_result=True):
 def file_upload_stop(remote_path):
     """
     """
-    if not driver.is_started('service_backups'):
+    if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
     from storage import backup_control
     from storage import backup_fs
@@ -1016,14 +1076,14 @@ def files_downloads():
             'bytes_processed': 0,
             'creator_id': 'http://veselin-p2p.ru/veselin.xml',
             'done': False,
-            'key_id': 'abc',
+            'key_id': 'abc$veselin@veselin-p2p.ru',
             'created': 'Wed Apr 27 15:11:13 2016',
             'eccmap': 'ecc/4x4',
             'path_id': '0/0/3/1',
             'version': 'F20160427011209PM'
         }]}
     """
-    if not driver.is_started('service_restores'):
+    if not driver.is_on('service_restores'):
         return ERROR('service_restores() is not started')
     from storage import restore_monitor
     lg.out(4, 'api.files_downloads %d items downloading at the moment' % len(restore_monitor.GetWorkingObjects()))
@@ -1044,7 +1104,7 @@ def files_downloads():
 
 def file_download_start(remote_path, destination_path=None, wait_result=False):
     """
-    Download data from remote peers to your local machine. You can use
+    Download data from remote suppliers to your local machine. You can use
     different methods to select the target data with `remote_path` input:
 
       + "remote path" of the file
@@ -1060,7 +1120,7 @@ def file_download_start(remote_path, destination_path=None, wait_result=False):
 
         {'status': 'OK', 'result': 'downloading of version 0/0/1/1/0/F20160313043419PM has been started to /Users/veselin/'}
     """
-    if not driver.is_started('service_restores'):
+    if not driver.is_on('service_restores'):
         return ERROR('service_restores() is not started')
     from storage import backup_fs
     from storage import backup_control
@@ -1071,6 +1131,7 @@ def file_download_start(remote_path, destination_path=None, wait_result=False):
     from main import settings
     from userid import my_id
     from userid import global_id
+    from crypt import my_keys
     lg.out(4, 'api.file_download_start %s to %s, wait_result=%s' % (
         remote_path, destination_path, wait_result))
     glob_path = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
@@ -1141,12 +1202,12 @@ def file_download_start(remote_path, destination_path=None, wait_result=False):
 
         restore_monitor.Start(
             backupID, destination_path,
-            keyID=glob_path['key_id'],
+            keyID=my_keys.make_key_id(alias=glob_path['key_alias'], creator_glob_id=glob_path['customer']),
             callback=_on_result)
         control.request_update([('pathID', knownPath), ])
         lg.out(4, 'api.file_download_start %s to %s, wait_result=True' % (backupID, destination_path))
         return d
-    restore_monitor.Start(backupID, destination_path, keyID=glob_path['key_id'])
+    restore_monitor.Start(backupID, destination_path, keyID=my_keys.make_key_id(alias=glob_path['key_alias'], creator_glob_id=glob_path['customer']))
     control.request_update([('pathID', knownPath), ])
     lg.out(4, 'api.download_start %s to %s' % (backupID, destination_path))
     return OK(
@@ -1168,7 +1229,7 @@ def file_download_stop(remote_path):
 
         {'status': 'OK', 'result': 'restoring of "alice@p2p-host.com:0/1/2" aborted'}
     """
-    if not driver.is_started('service_restores'):
+    if not driver.is_on('service_restores'):
         return ERROR('service_restores() is not started')
     from storage import backup_fs
     from storage import restore_monitor
@@ -1240,7 +1301,7 @@ def suppliers_list():
             'status': 'offline'
         }]}
     """
-    if not driver.is_started('service_customer'):
+    if not driver.is_on('service_customer'):
         return ERROR('service_customer() is not started')
     from contacts import contactsdb
     from p2p import contact_status
@@ -1266,7 +1327,7 @@ def supplier_replace(index_or_idurl):
 
         {'status': 'OK', 'result': 'supplier http://p2p-id.ru/alice.xml will be replaced by new peer'}
     """
-    if not driver.is_started('service_customer'):
+    if not driver.is_on('service_customer'):
         return ERROR('service_customer() is not started')
     from contacts import contactsdb
     idurl = index_or_idurl
@@ -1288,7 +1349,7 @@ def supplier_change(index_or_idurl, new_idurl):
 
         {'status': 'OK', 'result': 'supplier http://p2p-id.ru/alice.xml will be replaced by http://p2p-id.ru/bob.xml'}
     """
-    if not driver.is_started('service_customer'):
+    if not driver.is_on('service_customer'):
         return ERROR('service_customer() is not started')
     from contacts import contactsdb
     idurl = index_or_idurl
@@ -1314,7 +1375,7 @@ def suppliers_ping():
 
         {'status': 'OK',  'result': 'requests to all suppliers was sent'}
     """
-    if not driver.is_started('service_customer'):
+    if not driver.is_on('service_customer'):
         return ERROR('service_customer() is not started')
     from p2p import propagate
     propagate.SlowSendSuppliers(0.1)
@@ -1335,7 +1396,7 @@ def customers_list():
                         'status': 'offline'
         }]}
     """
-    if not driver.is_started('service_supplier'):
+    if not driver.is_on('service_supplier'):
         return ERROR('service_supplier() is not started')
     from contacts import contactsdb
     from p2p import contact_status
@@ -1355,7 +1416,7 @@ def customer_reject(idurl):
 
         {'status': 'OK', 'result': 'customer http://p2p-id.ru/bob.xml rejected, 536870912 bytes were freed'}
     """
-    if not driver.is_started('service_supplier'):
+    if not driver.is_on('service_supplier'):
         return ERROR('service_supplier() is not started')
     from contacts import contactsdb
     from storage import accounting
@@ -1395,7 +1456,7 @@ def customers_ping():
 
         {'status': 'OK',  'result': 'requests to all customers was sent'}
     """
-    if not driver.is_started('service_supplier'):
+    if not driver.is_on('service_supplier'):
         return ERROR('service_supplier() is not started')
     from p2p import propagate
     propagate.SlowSendCustomers(0.1)
@@ -1633,7 +1694,6 @@ def service_start(service_name):
         lg.out(4, 'api.service_start %s already enabled' % service_name)
         return ERROR('service "%s" already enabled' % service_name)
     config.conf().setBool(svc.config_path, True)
-    lg.out(4, 'api.service_start (%s)' % service_name)
     return OK('"%s" was switched on' % service_name)
 
 
@@ -1666,7 +1726,6 @@ def service_stop(service_name):
         lg.out(4, 'api.service_stop %s already disabled' % service_name)
         return ERROR('service "%s" already disabled' % service_name)
     config.conf().setBool(svc.config_path, False)
-    lg.out(4, 'api.service_stop (%s)' % service_name)
     return OK('"%s" was switched off' % service_name)
 
 #------------------------------------------------------------------------------
@@ -1697,7 +1756,7 @@ def packets_stats():
                 'unknown_packets': 0
         }}]}
     """
-    if not driver.is_started('service_gateway'):
+    if not driver.is_on('service_gateway'):
         return ERROR('service_gateway() is not started')
     from transport import stats
     return RESULT([{
@@ -1710,7 +1769,7 @@ def packets_list():
     """
     Return list of incoming and outgoing packets.
     """
-    if not driver.is_started('service_gateway'):
+    if not driver.is_on('service_gateway'):
         return ERROR('service_gateway() is not started')
     from transport import packet_in
     from transport import packet_out
@@ -1739,7 +1798,7 @@ def connections_list(wanted_protos=None):
 
         connections_list(wanted_protos=['tcp', 'udp'])
     """
-    if not driver.is_started('service_gateway'):
+    if not driver.is_on('service_gateway'):
         return ERROR('service_gateway() is not started')
     from transport import gateway
     result = []
@@ -1800,7 +1859,7 @@ def streams_list(wanted_protos=None):
     """
     Return list of active sending/receiveing files.
     """
-    if not driver.is_started('service_gateway'):
+    if not driver.is_on('service_gateway'):
         return ERROR('service_gateway() is not started')
     from transport import gateway
     from lib import misc
@@ -1811,7 +1870,7 @@ def streams_list(wanted_protos=None):
         for stream in gateway.list_active_streams(proto):
             item = {
                 'proto': proto,
-                'id': '',
+                'stream_id': '',
                 'type': '',
                 'bytes_current': -1,
                 'bytes_total': -1,
@@ -1820,7 +1879,7 @@ def streams_list(wanted_protos=None):
             if proto == 'tcp':
                 if hasattr(stream, 'bytes_received'):
                     item.update({
-                        'id': stream.file_id,
+                        'stream_id': stream.file_id,
                         'type': 'in',
                         'bytes_current': stream.bytes_received,
                         'bytes_total': stream.size,
@@ -1828,7 +1887,7 @@ def streams_list(wanted_protos=None):
                     })
                 elif hasattr(stream, 'bytes_sent'):
                     item.update({
-                        'id': stream.file_id,
+                        'stream_id': stream.file_id,
                         'type': 'out',
                         'bytes_current': stream.bytes_sent,
                         'bytes_total': stream.size,
@@ -1837,7 +1896,7 @@ def streams_list(wanted_protos=None):
             elif proto == 'udp':
                 if hasattr(stream.consumer, 'bytes_received'):
                     item.update({
-                        'id': stream.stream_id,
+                        'stream_id': stream.stream_id,
                         'type': 'in',
                         'bytes_current': stream.consumer.bytes_received,
                         'bytes_total': stream.consumer.size,
@@ -1845,7 +1904,7 @@ def streams_list(wanted_protos=None):
                     })
                 elif hasattr(stream.consumer, 'bytes_sent'):
                     item.update({
-                        'id': stream.stream_id,
+                        'stream_id': stream.stream_id,
                         'type': 'out',
                         'bytes_current': stream.consumer.bytes_sent,
                         'bytes_total': stream.consumer.size,
@@ -1873,7 +1932,7 @@ def ping(idurl, timeout=10):
 
         {'status': 'OK', 'result': '(signed.Packet[Ack(Identity) bob|bob for alice], in_70_19828906(DONE))'}
     """
-    if not driver.is_started('service_identity_propagate'):
+    if not driver.is_on('service_identity_propagate'):
         return succeed(ERROR('service_identity_propagate() is not started'))
     from p2p import propagate
     result = Deferred()
@@ -1886,6 +1945,59 @@ def ping(idurl, timeout=10):
             ERROR(err.getErrorMessage())))
     return result
 
+def user_ping(idurl, timeout=10):
+    """
+    Sends Identity packet to remote peer and wait for Ack packet to check connection status.
+    The "ping" command performs following actions:
+
+      1. Request remote identity source by idurl,
+      2. Sends my Identity to remote contact addresses, taken from identity,
+      3. Wait first Ack packet from remote peer,
+      4. Failed by timeout or identity fetching error.
+
+    You can use this method to check and be sure that remote node is alive at the moment.
+
+    Return:
+
+        {'status': 'OK', 'result': '(signed.Packet[Ack(Identity) bob|bob for alice], in_70_19828906(DONE))'}
+    """
+    if not driver.is_on('service_identity_propagate'):
+        return succeed(ERROR('service_identity_propagate() is not started'))
+    from p2p import propagate
+    result = Deferred()
+    d = propagate.PingContact(idurl, int(timeout))
+    d.addCallback(
+        lambda resp: result.callback(
+            OK(str(resp))))
+    d.addErrback(
+        lambda err: result.callback(
+            ERROR(err.getErrorMessage())))
+    return result
+
+def user_search(nickname):
+    """
+    Starts nickname_observer() Automat to lookup existing nickname registered
+    in DHT network.
+    """
+    if not driver.is_on('service_private_messages'):
+        return ERROR('service_private_messages() is not started')
+    from chat import nickname_observer
+    nickname_observer.stop_all()
+    ret = Deferred()
+
+    def _result(result, nik, pos, idurl):
+        return ret.callback(RESULT([{
+            'result': result,
+            'nickname': nik,
+            'position': pos,
+            'idurl': idurl,
+        }]))
+    nickname_observer.find_one(nickname,
+                               results_callback=_result)
+    # nickname_observer.observe_many(nickname,
+    # results_callback=lambda result, nik, idurl: d.callback((result, nik, idurl)))
+    return ret
+
 #------------------------------------------------------------------------------
 
 
@@ -1894,7 +2006,7 @@ def set_my_nickname(nickname):
     Starts nickname_holder() machine to register and keep your nickname in DHT
     network.
     """
-    if not driver.is_started('service_private_messages'):
+    if not driver.is_on('service_private_messages'):
         return ERROR('service_private_messages() is not started')
     from chat import nickname_holder
     from main import settings
@@ -1917,7 +2029,7 @@ def find_peer_by_nickname(nickname):
     Starts nickname_observer() Automat to lookup existing nickname registered
     in DHT network.
     """
-    if not driver.is_started('service_private_messages'):
+    if not driver.is_on('service_private_messages'):
         return ERROR('service_private_messages() is not started')
     from chat import nickname_observer
     nickname_observer.stop_all()
@@ -1947,7 +2059,7 @@ def send_message(recipient, message_body):
 
         {'status': 'OK', 'result': ['signed.Packet[Message(146681300413)]']}
     """
-    if not driver.is_started('service_private_messages'):
+    if not driver.is_on('service_private_messages'):
         return ERROR('service_private_messages() is not started')
     from chat import message
     from userid import global_id
@@ -1961,14 +2073,14 @@ def send_message(recipient, message_body):
     glob_id = global_id.ParseGlobalID(recipient)
     if not glob_id['idurl']:
         return ERROR('wrong recipient')
-    if not glob_id['key_id']:
-        glob_id['key_id'] = 'master'
+    if not glob_id['key_alias']:
+        glob_id['key_alias'] = 'master'
     target_glob_id = global_id.MakeGlobalID(**glob_id)
     if not my_keys.is_valid_key_id(target_glob_id):
         return ERROR('invalid key_id: %s' % target_glob_id)
 #     if not my_keys.is_key_registered(target_glob_id):
 #         return ERROR('unknown key_id: %s' % target_glob_id)
-    result = message.SendMessage(
+    result = message.send_message(
         message_body=message_body,
         recipient_global_id=target_glob_id,
     )
@@ -2003,20 +2115,121 @@ def receive_one_message():
             'message': 'Hello my dear Friend!'
         }]}
     """
-    if not driver.is_started('service_private_messages'):
+    if not driver.is_on('service_private_messages'):
         return ERROR('service_private_messages() is not started')
     from chat import message
     ret = Deferred()
 
-    def _message_received(packet, text):
+    def _message_received(request, private_message_object, decrypted_message_body):
         ret.callback(OK({
-            'message': text,
-            'from': packet.OwnerID,
+            'message': decrypted_message_body,
+            'recipient': private_message_object.recipient,
+            'decrypted': bool(private_message_object.encrypted_session),
+            'from': request.OwnerID,
         }))
         message.RemoveIncomingMessageCallback(_message_received)
         return True
 
     message.AddIncomingMessageCallback(_message_received)
+    return ret
+
+#------------------------------------------------------------------------------
+
+def message_send(recipient, message_body):
+    """
+    Sends a text message to remote peer, `recipient` is a string with nickname or global_id.
+
+    Return:
+
+        {'status': 'OK', 'result': ['signed.Packet[Message(146681300413)]']}
+    """
+    if not driver.is_on('service_private_messages'):
+        return ERROR('service_private_messages() is not started')
+    from chat import message
+    from userid import global_id
+    from crypt import my_keys
+    if not recipient.count('@'):
+        from contacts import contactsdb
+        recipient_idurl = contactsdb.find_correspondent_by_nickname(recipient)
+        if not recipient_idurl:
+            return ERROR('recipient not found')
+        recipient = global_id.UrlToGlobalID(recipient_idurl)
+    glob_id = global_id.ParseGlobalID(recipient)
+    if not glob_id['idurl']:
+        return ERROR('wrong recipient')
+    if not glob_id['key_alias']:
+        glob_id['key_alias'] = 'master'
+    target_glob_id = global_id.MakeGlobalID(**glob_id)
+    if not my_keys.is_valid_key_id(target_glob_id):
+        return ERROR('invalid key_id: %s' % target_glob_id)
+#     if not my_keys.is_key_registered(target_glob_id):
+#         return ERROR('unknown key_id: %s' % target_glob_id)
+    lg.out(4, 'api.message_send to "%s" with %d bytes' % (target_glob_id, len(message_body)))
+    result = message.send_message(
+        message_body=message_body,
+        recipient_global_id=target_glob_id,
+    )
+    if isinstance(result, Deferred):
+        ret = Deferred()
+        result.addCallback(
+            lambda packet: ret.callback(
+                OK(str(packet.outpacket))))
+        result.addErrback(
+            lambda err: ret.callback(
+                ERROR(err.getErrorMessage())))
+        return ret
+    return OK(str(result.outpacket))
+
+
+def message_receive(consumer_id):
+    """
+    This method can be used to listen and process incoming chat messages by specific consumer.
+    If there are no messages received yet, this method will be waiting for any incomings.
+    If some messages was already received, but not "consumed" yet method will return them imediately.
+    After you got response and processed the messages you should call this method again to listen
+    for more incomings again. This is simillar to message queue polling interface.
+    If you do not "consume" messages, after 100 un-collected messages "consumer" will be dropped.
+    Both, incoming and outgoing, messages will be populated here.
+
+    Return:
+
+        {'status': 'OK',
+         'result': [{
+            'type': 'private_message',
+            'dir': 'incoming',
+            'id': '123456788',
+            'sender': 'abc$alice@first-host.com',
+            'recipient': 'abc$bob@second-host.net',
+            'message': 'Hello World!',
+            'time': 123456789
+        }]}
+    """
+    if not driver.is_on('service_private_messages'):
+        return ERROR('service_private_messages() is not started')
+    from chat import message
+    ret = Deferred()
+
+    def _on_pending_messages(pending_messages):
+        result = []
+        for msg in pending_messages:
+            if msg['type'] != 'private_message':
+                continue
+            result.append({
+                'message': msg['body'],
+                'recipient': msg['to'],
+                'sender': msg['from'],
+                'time': msg['time'],
+                'message_id': msg['id'],
+                'dir': msg['dir'],
+            })
+        lg.out(4, 'api.message_consumer_request._on_pending_messages returning : %s' % result)
+        ret.callback(OK(result))
+        return len(result) > 0
+
+    d = message.consume_messages(consumer_id)
+    d.addCallback(_on_pending_messages)
+    d.addErrback(lambda err: ret.callback(ERROR(str(err))))
+    lg.out(4, 'api.message_consumer_request "%s"' % consumer_id)
     return ret
 
 #------------------------------------------------------------------------------
@@ -2031,7 +2244,7 @@ def broadcast_send_message(payload):
     WARNING! Please, do not send too often and do not send more then
     several kilobytes per message.
     """
-    if not driver.is_started('service_broadcasting'):
+    if not driver.is_on('service_broadcasting'):
         return ERROR('service_broadcasting() is not started')
     from broadcast import broadcast_service
     from broadcast import broadcast_listener
@@ -2052,5 +2265,32 @@ def event_send(event_id, json_data=None):
     from main import events
     events.send(event_id, json.loads(json_data or '{}'))
     return OK('event "%s" sent' % event_id)
+
+#------------------------------------------------------------------------------
+
+def network_stun(udp_port=None, dht_port=None):
+    """
+    """
+    from stun import stun_client
+    ret = Deferred()
+    d = stun_client.safe_stun(udp_port=udp_port, dht_port=udp_port)
+    d.addBoth(lambda r: ret.callback(RESULT([r, ])))
+    return ret
+
+def network_reconnect():
+    """
+    Sends "reconnect" event to network_connector() Automat in order to refresh
+    network connection.
+
+    Return:
+
+        {'status': 'OK', 'result': 'reconnected'}
+    """
+    if not driver.is_on('service_network'):
+        return ERROR('service_network() is not started')
+    from p2p import network_connector
+    lg.out(4, 'api.network_reconnect')
+    network_connector.A('reconnect')
+    return OK('reconnected')
 
 #------------------------------------------------------------------------------

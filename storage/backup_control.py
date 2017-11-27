@@ -75,6 +75,7 @@ from raid import eccmap
 
 from crypt import encrypted
 from crypt import key
+from crypt import my_keys
 
 from userid import global_id
 from userid import my_id
@@ -255,7 +256,7 @@ def Save(filepath=None):
         return False
     commit()
     WriteIndex(filepath)
-    if driver.is_started('service_backup_db'):
+    if driver.is_on('service_backup_db'):
         from storage import index_synchronizer
         index_synchronizer.A('push')
 
@@ -333,7 +334,7 @@ def IncomingSupplierBackupIndex(newpacket):
         except:
             pass
         return
-    if driver.is_started('service_backup_db'):
+    if driver.is_on('service_backup_db'):
         from storage import index_synchronizer
         index_synchronizer.A('index-file-received', (newpacket, supplier_revision))
     if revision() >= supplier_revision:
@@ -506,8 +507,10 @@ class Task():
         self.created = time.time()
         self.backupID = None
         self.result_defer = Deferred()
+        self.result_defer.addCallback(OnTaskExecutedCallback)
+        self.result_defer.addErrback(OnTaskFailedCallback)
         parts = self.set_path_id(pathID)
-        self.set_key_id(keyID or parts['key_id'])
+        self.set_key_id(keyID or my_keys.make_key_id(alias=parts['key_alias'], creator_glob_id=parts['customer']))
         self.set_local_path(localPath)
         if _Debug:
             lg.out(_DebugLevel, 'new Task created: %r' % self)
@@ -834,6 +837,19 @@ def OnBackupBlockReport(backupID, blockNum, result):
     :param num_suppliers: number of suppliers which is used for that backup
     """
     backup_matrix.LocalBlockReport(backupID, blockNum, result)
+
+
+def OnTaskExecutedCallback(result):
+    """
+    """
+    lg.out(_DebugLevel, 'backup_control.OnTaskExecuted %s : %s' % (result[0], result[1]))
+    return result
+
+def OnTaskFailedCallback(result):
+    """
+    """
+    lg.err('pathID: %s, error: %s' % (result[0], result[1]))
+    return result
 
 #------------------------------------------------------------------------------
 

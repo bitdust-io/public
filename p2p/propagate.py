@@ -262,9 +262,9 @@ def SendServers():
         protocol, host, port, filename = nameurl.UrlParse(idurl)
         # if host == settings.IdentityServerName():
         #     host = '67.207.147.183'
-        webport, tcpport = known_servers.by_host().get(host,
-                                                       (settings.IdentityWebPort(), settings.IdentityServerPort()))
-        srvhost = '%s:%d' % (host, int(tcpport))
+        webport, tcpport = known_servers.by_host().get(host, (
+            settings.IdentityWebPort(), settings.IdentityServerPort()))
+        # srvhost = '%s:%d' % (host, int(tcpport))
         dlist.append(tcp_node.send(sendfilename, (host, int(tcpport)), 'Identity', True))
         # dlist.append(gateway.send_file_single('tcp', srvhost, sendfilename, 'Identity'))
     dl = DeferredList(dlist, consumeErrors=True)
@@ -462,7 +462,7 @@ def PingContact(idurl, timeout=30):
     Previously it request his identity from ID server.
     """
     if _Debug:
-        lg.out(_DebugLevel, "propagate.PingContact")
+        lg.out(_DebugLevel, "propagate.PingContact [%s]" % idurl)
     ping_result = Deferred()
 
     def _cancel_ack_timeout(x, tmcall):
@@ -485,7 +485,7 @@ def PingContact(idurl, timeout=30):
         ping_result.errback(TimeoutError('response was not received within %d seconds' % tm))
 
     def _identity_cached(x, idsrc, timeout_call, result):
-        lg.out(_DebugLevel, "propagate.PingContact._identity_cached %s bytes" % len(idsrc))
+        lg.out(_DebugLevel, "propagate.PingContact._identity_cached %s bytes for [%s]" % (len(idsrc), idurl))
         # TODO Verify()
         SendToIDs(
             idlist=[idurl, ],
