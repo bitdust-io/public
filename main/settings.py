@@ -97,13 +97,11 @@ def _init(base_dir=None):
     _initBaseDir(base_dir)
     lg.out(2, 'settings.init data location: ' + BaseDir())
     _checkMetaDataDirectory()
+    _checkConfigDirectory()
     # if not os.path.isdir(ConfigDir()):
     #     uconfig()
     #     bpio._dir_make(ConfigDir())
     #     convert_configs()
-    if not os.path.isdir(ConfigDir()):
-        bpio._dir_make(ConfigDir())
-    config.init(ConfigDir())
     _setUpDefaultSettings()
     _createNotExisingSettings()
     _checkStaticDirectories()
@@ -157,7 +155,9 @@ def convert_key(key):
         elif p[1] == 'local-backups-enabled':
             p[1] = 'keep-local-copies-enabled'
     elif p[0] == 'id-server':
-        p[0] = 'services/id-server'
+        p[0] = 'services/identity-server'
+    elif p[0] == 'identity-server':
+        p[0] = 'services/identity-server'
     elif p[0] == 'network':
         p[0] = 'services/network'
         if p[1] == 'dht-port':
@@ -191,19 +191,48 @@ def convert_key(key):
     key = '/'.join(p)
     return key
 
-#------------------------------------------------------------------------------
-#--- CONSTANTS ----------------------------------------------------------------
-#------------------------------------------------------------------------------
-
 
 """
 Below is a set of global constants.
 """
 
+#------------------------------------------------------------------------------
+#--- CONSTANTS (BOOLEANS) -----------------------------------------------------
+#------------------------------------------------------------------------------
 
 def NewWebGUI():
     # return False # this is web/webcontrol.py
     return True  # this is web/control.py - a django based GUI
+
+
+#------------------------------------------------------------------------------
+#--- CONSTANTS (NUMBERS) ------------------------------------------------------
+#------------------------------------------------------------------------------
+
+
+def MinimumIdentitySources():
+    """
+    You need to host your identity (piblic key, signature and contacts) at least in one place.
+    By default you will use identiy servers hard-coded in BitDust source code.
+    But you can start your own identity server and host your identiy there, set those settings:
+
+        services/identity-propagate/known-servers
+        services/identity-propagate/preferred-servers
+        services/identity-propagate/min-servers
+        services/identity-propagate/max-servers
+
+    before you run identiy register process.
+    """
+    return 1
+
+
+def MaximumIdentitySources():
+    """
+    You can host your identity in many places, up to 10 identity servers allowed.
+    You do not need to mirror your identity too much, this is just to keep users
+    consuming sufficient amount of network resousrces.
+    """
+    return 10
 
 
 def DefaultPrivateKeySize():
@@ -238,15 +267,6 @@ def defaultDebugLevel():
     Default debug level, lower values produce less messages.
     """
     return 10
-
-
-def IntSize():
-    """
-    This constant is used in the RAID code.
-
-    The idea is to be able to optionally switch to 64 bit one day.
-    """
-    return 4
 
 
 def MinimumSendingDelay():
@@ -1329,6 +1349,12 @@ def DefaultJsonRPCPort():
     return 8083
 
 
+def DefaultRESTHTTPPort():
+    """
+    """
+    return 8180
+
+
 def DefaultFTPPort():
     """
     """
@@ -1554,8 +1580,16 @@ def enableIdServer(enable=None):
     """
     """
     if enable is None:
-        return config.conf().getBool('services/id-server/enabled')
-    config.conf().setData('services/id-server/enabled', str(enable))
+        return config.conf().getBool('services/identity-server/enabled')
+    config.conf().setData('services/identity-server/enabled', str(enable))
+
+
+def enableRESTHTTPServer(enable=None):
+    """
+    """
+    if enable is None:
+        return config.conf().getBool('interface/api/rest-http-enabled')
+    config.conf().setData('interface/api/rest-http-enabled', str(enable))
 
 
 def enableJsonRPCServer(enable=None):
@@ -1577,37 +1611,49 @@ def enableFTPServer(enable=None):
 def getIdServerHost():
     """
     """
-    return config.conf().getData("services/id-server/host").strip()
+    return config.conf().getData("services/identity-server/host").strip()
 
 
 def setIdServerHost(hostname_or_ip):
     """
     """
-    return config.conf().setData("services/id-server/host", hostname_or_ip)
+    return config.conf().setData("services/identity-server/host", hostname_or_ip)
 
 
 def getIdServerWebPort():
     """
     """
-    return config.conf().getInt("services/id-server/web-port", IdentityWebPort())
+    return config.conf().getInt("services/identity-server/web-port", IdentityWebPort())
 
 
 def setIdServerWebPort(web_port):
     """
     """
-    return config.conf().setInt("services/id-server/web-port", web_port)
+    return config.conf().setInt("services/identity-server/web-port", web_port)
 
 
 def getIdServerTCPPort():
     """
     """
-    return config.conf().getInt("services/id-server/tcp-port", IdentityServerPort())
+    return config.conf().getInt("services/identity-server/tcp-port", IdentityServerPort())
 
 
 def setIdServerTCPPort(tcp_port):
     """
     """
-    return config.conf().setInt("services/id-server/tcp-port", tcp_port)
+    return config.conf().setInt("services/identity-server/tcp-port", tcp_port)
+
+
+def getRESTHTTPServerPort():
+    """
+    """
+    return config.conf().getInt('interface/api/rest-http-port', DefaultRESTHTTPPort())
+
+
+def setRESTHTTPServerPort(rest_http_port):
+    """
+    """
+    return config.conf().setInt("interface/api/rest-http-port", rest_http_port)
 
 
 def getJsonRPCServerPort():
@@ -2325,21 +2371,42 @@ def _initBaseDir(base_dir=None):
 
 def _checkMetaDataDirectory():
     """
-    Check that the metadata directory exists.
+    Check that the __metadata__ directory exists.
     """
+    if os.path.isfile(MetaDataDir()):
+        raise Exception('file already exist:' + MetaDataDir())
     if not os.path.exists(MetaDataDir()):
-        lg.out(8, 'settings.init want to create metadata folder: ' + MetaDataDir())
+        lg.out(2, 'settings._checkMetaDataDirectory want to create "metadata" folder in : ' + MetaDataDir())
         bpio._dirs_make(MetaDataDir())
+        return
+    lg.out(4, 'settings._checkMetaDataDirectory OK , folder already exist: ' + MetaDataDir())
+
+
+def _checkConfigDirectory():
+    """
+    Check that the __config__ directory exists.
+    """
+    if os.path.isfile(ConfigDir()):
+        raise Exception('file already exist:' + ConfigDir())
+    if not os.path.exists(ConfigDir()):
+        lg.out(2, 'settings._checkConfigDirectory want to create "config" folder in : ' + ConfigDir())
+        bpio._dir_make(ConfigDir())
+    else:
+        lg.out(4, 'settings._checkConfigDirectory OK , folder already exist: ' + ConfigDir())
+    config.init(ConfigDir())
 
 
 def _setUpDefaultSettings():
     """
     Configure default values for all settings.
 
-    Every option must have a default value!
+    Every option must have a default value, howerver there are exceptions possible :-)
     """
     config.conf().setDefaultValue('interface/api/json-rpc-enabled', 'true')
     config.conf().setDefaultValue('interface/api/json-rpc-port', DefaultJsonRPCPort())
+
+    config.conf().setDefaultValue('interface/api/rest-http-enabled', 'true')
+    config.conf().setDefaultValue('interface/api/rest-http-port', DefaultRESTHTTPPort())
 
     config.conf().setDefaultValue('interface/ftp/enabled', 'true')
     config.conf().setDefaultValue('interface/ftp/port', DefaultFTPPort())
@@ -2404,12 +2471,16 @@ def _setUpDefaultSettings():
 
     config.conf().setDefaultValue('services/gateway/enabled', 'true')
 
-    config.conf().setDefaultValue('services/id-server/enabled', 'false')
-    config.conf().setDefaultValue('services/id-server/host', '')
-    config.conf().setDefaultValue('services/id-server/tcp-port', IdentityServerPort())
-    config.conf().setDefaultValue('services/id-server/web-port', IdentityWebPort())
+    config.conf().setDefaultValue('services/identity-server/enabled', 'false')
+    config.conf().setDefaultValue('services/identity-server/host', '')
+    config.conf().setDefaultValue('services/identity-server/tcp-port', IdentityServerPort())
+    config.conf().setDefaultValue('services/identity-server/web-port', IdentityWebPort())
 
     config.conf().setDefaultValue('services/identity-propagate/enabled', 'true')
+    config.conf().setDefaultValue('services/identity-propagate/known-servers', '')
+    config.conf().setDefaultValue('services/identity-propagate/preferred-servers', '')
+    config.conf().setDefaultValue('services/identity-propagate/min-servers', MinimumIdentitySources() + 1)
+    config.conf().setDefaultValue('services/identity-propagate/max-servers', int(MaximumIdentitySources() / 2))
 
     config.conf().setDefaultValue('services/ip-port-responder/enabled', 'true')
 
@@ -2551,8 +2622,28 @@ def _checkCustomDirectories():
 
 #-------------------------------------------------------------------------------
 
+def main():
+    lg.set_debug_level(24)
+    init()
+    try:
+        inp = sys.argv[1].rstrip('/')
+    except:
+        print 'wrong input'
+        return
+    if not config.conf().exist(inp):
+        print 'not exist'
+        return
+    if not config.conf().hasChilds(inp):
+        print inp, config.conf().getData(inp)
+        return
+    for child in config.conf().listEntries(inp):
+        if config.conf().hasChilds(child):
+            print child, config.conf().listEntries(child)
+        else:
+            print child, config.conf().getData(child)
+
+#------------------------------------------------------------------------------
+
 
 if __name__ == '__main__':
-    init()
-    # patch_settings_py()
-    # make_default_values()
+    main()

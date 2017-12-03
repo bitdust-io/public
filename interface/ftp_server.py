@@ -220,7 +220,6 @@ class BitDustFTP(FTP):
 #         os.fsync(consumer.fObj.fileno())
 #         consumer.fObj.close()
 #         consumer.close()
-        # import pdb; pdb.set_trace()
         remote_path = '/'.join(newsegs)
         lg.out(8, 'ftp_server._cbFileRecevied %s %s' % (local_path, remote_path))
         ret = api.file_info(remote_path)
@@ -336,6 +335,7 @@ class BitDustFTP(FTP):
 #             else:
 #                 known_size = 1
             known_size = max(itm['local_size'], 0)
+            key_alias, _, _ = itm['key_id'].partition('$')
             result.append((os.path.basename(itm['path']), [  # name
                 known_size,  # size
                 True if itm['type'] == 'dir' else False,  # folder or file ?
@@ -343,7 +343,7 @@ class BitDustFTP(FTP):
                 0,  # hardlinks
                 time.mktime(time.strptime(itm['latest'], '%Y-%m-%d %H:%M:%S')) if itm['latest'] else None,  # time
                 itm['customer'],  # owner
-                itm['key_id'],    # group
+                key_alias,        # group
             ], ))
         d = Deferred()
         d.addCallback(self._dirListingResponse)
@@ -612,7 +612,7 @@ if __name__ == "__main__":
 #         d = Deferred()
 #         d.addCallback(cbList, glob)
 #         d.addErrback(listErr)
-# #         if not driver.is_started('service_restores'):
+# #         if not driver.is_on('service_restores'):
 # #             d.errback(None)
 #         result = [(itm['id'], []) for itm in api.backups_list()['result']]
 #         d.callback(result)

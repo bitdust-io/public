@@ -270,6 +270,12 @@ class identity:
             return False
         if self.revision == '':
             return False
+        if len(self.sources) > settings.MaximumIdentitySources():
+            lg.warn('too much sources')
+            return False
+        if len(self.sources) < settings.MinimumIdentitySources():
+            lg.warn('too few sources')
+            return False
         try:
             int(self.revision)
         except:
@@ -278,6 +284,9 @@ class identity:
         names = set()
         for source in self.sources:
             proto, host, port, filename = nameurl.UrlParse(source)
+            if filename.count('/'):
+                lg.warn("identity name: %s" % filename)
+                return False
             name, justxml = filename.split('.')
             names.add(name)
             # SECURITY check that name is simple
@@ -295,7 +304,7 @@ class identity:
                     lg.warn("identity name: %s" % filename)
                     return False
         if len(names) > 1:
-            lg.warn('different names: %s' % str(names))
+            lg.warn('names are not consistant: %s' % str(names))
             return False
         return True
 
@@ -565,6 +574,12 @@ class identity:
 
     #------------------------------------------------------------------------------
 
+    def getSources(self):
+        """
+        Return identity sources.
+        """
+        return self.sources
+
     def getIDURL(self, index=0):
         """
         Return a source IDURL - this is a user ID.
@@ -590,6 +605,8 @@ class identity:
         if port:
             host += ':' + str(port)
         return host
+
+    #------------------------------------------------------------------------------
 
     def getContacts(self):
         """
@@ -791,15 +808,6 @@ class identity:
         url = nameurl.UrlMake(protocol, host, newport, filename)
         self.contacts[index] = url.encode("ascii").strip()
 
-    def setCertificate(self, certificate):
-        """
-        Not used yet.
-
-        TODO. Need to ask Vince for more details about id certificates.
-        """
-        self.certificates.append(certificate)
-        self.sign()
-
     #------------------------------------------------------------------------------
 
     def clearContacts(self):
@@ -845,6 +853,16 @@ class identity:
         del self.contacts[i]
         self.contacts.insert(0, contact)
 
+    #------------------------------------------------------------------------------
+
+    def setCertificate(self, certificate):
+        """
+        Not used yet.
+
+        TODO. Need to ask Vince for more details about id certificates.
+        """
+        self.certificates.append(certificate)
+        self.sign()
 
 #-------------------------------------------------------------------------------
 

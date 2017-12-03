@@ -34,7 +34,7 @@ IDURL. So this is a local cache of user ID's.
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 
 #------------------------------------------------------------------------------
 
@@ -65,7 +65,9 @@ def init():
     """
     if _Debug:
         lg.out(4, 'identitycache.init')
-    # identitydb.clear()
+    if True:
+        # TODO: added settings here
+        identitydb.clear()
     identitydb.init()
 
 
@@ -214,8 +216,10 @@ def RemapContactAddress(address):
     idurl = GetIDURLByIPPort(address[0], address[1])
     if idurl is not None and HasLocalIP(idurl):
         newaddress = (GetLocalIP(idurl), address[1])
-#        if _Debug: lg.out(8, 'identitycache.RemapContactAddress for %s [%s] -> [%s]' % (
-#            nameurl.GetName(idurl), str(address), str(newaddress)))
+        if _Debug:
+            from lib import nameurl
+            lg.out(8, 'identitycache.RemapContactAddress for %s [%s] -> [%s]' % (
+                nameurl.GetName(idurl), str(address), str(newaddress)))
         return newaddress
     return address
 
@@ -224,20 +228,37 @@ def OverrideIdentity(idurl, xml_src):
     """
     """
     global _OverriddenIdentities
+    if idurl in _OverriddenIdentities:
+        if _OverriddenIdentities[idurl] == xml_src:
+            lg.warn('replacing overriden identity "%s" SKIPPED, no changes' % idurl)
+            return
+        lg.warn('replacing overriden identity "%s" with new one' % idurl)
+        if _Debug:
+            lg.out(4, '\nOVERRIDDEN OLD:\n' + _OverriddenIdentities[idurl])
+            lg.out(4, '\nOVERRIDDEN NEW:\n' + xml_src)
+    else:
+        orig = identitydb.get(idurl).serialize() if identitydb.has_idurl(idurl) else ''
+        if orig and orig == xml_src:
+            lg.warn('replacing original identity "%s" SKIPPED, overriden copy is the same as original' % idurl)
+            return
+        lg.warn('replacing original identity for "%s"' % idurl)
+        if _Debug:
+            lg.out(4, '\nORIGINAL:\n' + orig)
+            lg.out(4, '\nNEW:\n' + xml_src)
     _OverriddenIdentities[idurl] = xml_src
     if _Debug:
-        lg.out(4, 'identitycache.OverrideIdentity a new identity source saved for %s' % idurl)
-        lg.out(4, '            total number of overrides is %d' % len(_OverriddenIdentities))
+        lg.out(4, '    total number of overrides: %d' % len(_OverriddenIdentities))
 
 
 def StopOverridingIdentity(idurl):
     """
     """
     global _OverriddenIdentities
-    return _OverriddenIdentities.pop(idurl, None)
+    result = _OverriddenIdentities.pop(idurl, None)
     if _Debug:
-        lg.out(4, 'identitycache.OverrideIdentity   removed overridden source for %s' % idurl)
+        lg.out(4, 'identitycache.StopOverridingIdentity   removed overridden source for %s' % idurl)
         lg.out(4, '            total number of overrides is %d' % len(_OverriddenIdentities))
+    return result
 
 
 def IsOverridden(idurl):

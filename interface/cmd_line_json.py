@@ -338,19 +338,26 @@ def cmd_deploy(opts, args, overDict):
     if len(args) > 1 and not os.path.exists(args[1]) and os.path.isdir(os.path.dirname(args[1])):
         venv_path = args[1]
     script_path = os.path.join(settings.BaseDir(), 'bitdust')
-    status = os.system('rm -rf {}'.format(venv_path))
-    if status != 0:
-        print_text('\nClean up of existing virtual environment files failed!\n')
-        return status
+    if os.path.exists(venv_path):
+        print_text('Clean up existing Python virtual environment in "%s"' % venv_path)
+        status = os.system('rm -rf {}'.format(venv_path))
+        if status != 0:
+            print_text('\nClean up of existing virtual environment files failed!\n')
+            return status
+    print_text('Create new Python virtual environment in "%s"' % venv_path)
     status = os.system('virtualenv -p python2.7 {}'.format(venv_path))
     if status != 0:
         print_text('\nFailed to create virtual environment, please check/install virtualenv package\n')
         return status
+    print_text('Install/Upgrade pip in "%s"' % venv_path)
     status = os.system('{}/bin/pip install -U pip'.format(venv_path))
     if status != 0:
         print_text('\nFailed to install latest pip version, please check/install latest pip version manually\n')
         return status
-    status = os.system('{}/bin/pip install -r "{}/requirements.txt"'.format(venv_path, source_dir))
+    requirements_txt = os.path.join(source_dir, 'requirements.txt')
+    venv_bin_pip = os.path.join(venv_path, 'bin', 'pip')
+    print_text('Install BitDust requirements from "%s" using "%s"' % (requirements_txt, venv_path))
+    status = os.system('{} install -r "{}"'.format(venv_bin_pip, requirements_txt))
     if status != 0:
         depends = [
             'git',
@@ -379,7 +386,7 @@ def cmd_deploy(opts, args, overDict):
     print_text('\nBitDust application files created successfully in {}'.format(settings.BaseDir()))
     print_text('To run the programm use this executable script:\n\n    {}\n'.format(script_path))
     print_text('To create system-wide shell command, add /Users/veselin/.bitdust/bitdust to your PATH, or create a symlink:\n')
-    print_text('    sudo ln -s {} /usr/local/bin/bitdust\n\n'.format(script_path))
+    print_text('    sudo ln -s -f {} /usr/local/bin/bitdust\n\n'.format(script_path))
     return 0
 
 #------------------------------------------------------------------------------
@@ -392,7 +399,7 @@ def cmd_reconnect(opts, args, overDict):
 #------------------------------------------------------------------------------
 
 
-def cmd_identity(opts, args, overDict, running):
+def cmd_identity(opts, args, overDict, running, executablePath):
     from userid import my_id
     from main import settings
     settings.init()
@@ -405,7 +412,14 @@ def cmd_identity(opts, args, overDict, running):
             print_text('local identity is not exist')
         return 0
 
-    if len(args) == 1 or args[1].lower() in ['info', '?', 'show', 'print']:
+    if args[0] in ['globid', 'globalid', 'gid', 'glid', ] or (args[0] == 'id' and len(args) <= 1):
+        if my_id.isLocalIdentityReady():
+            print_text(my_id.getGlobalID())
+        else:
+            print_text('local identity is not exist')
+        return 0
+
+    if len(args) == 1 or args[1].lower() in ['info', '?', 'show', 'print', ]:
         if my_id.isLocalIdentityReady():
             print_text(my_id.getLocalIdentity().serialize())
         else:
@@ -413,6 +427,37 @@ def cmd_identity(opts, args, overDict, running):
         return 0
 
     from twisted.internet import reactor
+
+    if args[1] in ['server', 'srv', ]:
+        def _run_stand_alone_id_server():
+            from logs import lg
+            from userid import id_server
+            lg.set_debug_level(settings.getDebugLevel())
+            reactor.addSystemEventTrigger('before', 'shutdown', id_server.A().automat, 'shutdown')
+            reactor.callWhenRunning(
+                id_server.A, 'init', (settings.getIdServerWebPort(), settings.getIdServerTCPPort()))
+            reactor.callLater(0, id_server.A, 'start')
+            reactor.run()
+
+        if len(args) <= 2:
+            if not running:
+                _run_stand_alone_id_server()
+                return 0
+            tpl = jsontemplate.Template(templ.TPL_SERVICE_INFO)
+            return call_jsonrpc_method_template_and_stop('service_info', tpl, 'service_identity_server')
+        if args[2] == 'stop':
+            if not running:
+                print_text('BitDust is not running at the moment\n')
+                return 0
+            tpl = jsontemplate.Template(templ.TPL_RAW)
+            return call_jsonrpc_method_template_and_stop('service_stop', tpl, 'service_identity_server')
+        if args[2] == 'start':
+            if not running:
+                _run_stand_alone_id_server()
+                return 0
+            tpl = jsontemplate.Template(templ.TPL_RAW)
+            return call_jsonrpc_method_template_and_stop('service_start', tpl, 'service_identity_server')
+        return 2
 
     def _register():
         if len(args) <= 2:
@@ -491,6 +536,32 @@ def cmd_identity(opts, args, overDict, running):
             return 0
         return _register()
 
+    if len(args) >= 2 and args[1].lower() in ['bk', 'backup', 'save', ]:
+        from interface import api
+        key_id = 'master'
+        key_json = api.key_get(key_id=key_id, include_private=True)
+        if key_json['status'] != 'OK':
+            print_text('\n'.join(key_json['errors']))
+            return 1
+        TextToSave = key_json['result'][0]['creator'] + "\n" + key_json['result'][0]['private']
+        if args[1] in ['bk', 'backup', 'save', ]:
+            from system import bpio
+            curpath = os.getcwd()
+            os.chdir(executablePath)
+            if len(args) >= 3:
+                filenameto = bpio.portablePath(args[2])
+            else:
+                filenameto = bpio.portablePath(os.path.join(executablePath, key_json['result'][0]['key_id'] + '.key'))
+            os.chdir(curpath)
+            if not bpio.AtomicWriteFile(filenameto, TextToSave):
+                del TextToSave
+                print_text('error writing to %s\n' % filenameto)
+                return 1
+            print_text('IDURL "%s" and "master" key was stored in "%s"' % (
+                key_json['result'][0]['creator'], filenameto))
+            return 0
+        return 2
+
     if args[1].lower() in ['restore', 'recover', 'read', 'load', ]:
         if running:
             print_text('BitDust is running at the moment, need to stop the software first\n')
@@ -540,17 +611,16 @@ def cmd_key(opts, args, overDict, running, executablePath):
                 os.chdir(executablePath)
                 filenameto = bpio.portablePath(args[3])
                 os.chdir(curpath)
-                # filenameto = bpio.portablePath(args[3])
                 if not bpio.AtomicWriteFile(filenameto, TextToSave):
                     del TextToSave
                     print_text('error writing to %s\n' % filenameto)
                     reactor.stop()
                     return 1
-                print_text('private key "%s" was stored in "%s"' % (key_json['result'][0]['id'], filenameto))
+                print_text('private key "%s" was stored in "%s"' % (key_json['result'][0]['key_id'], filenameto))
             else:
                 from lib import misc
                 misc.setClipboardText(TextToSave)
-                print_text('key "%s" was sent to clipboard, you can use Ctrl+V to paste your private key where you want' % key_json['result'][0]['id'])
+                print_text('key "%s" was sent to clipboard, you can use Ctrl+V to paste your private key where you want' % key_json['result'][0]['key_id'])
             del TextToSave
             if key_json['result'][0]['alias'] == 'master':
                 print_text('WARNING! keep your "master" key in safe place, do not publish it!\n')
@@ -649,18 +719,6 @@ def cmd_file(opts, args, overDict, executablePath):
         tpl = jsontemplate.Template(templ.TPL_BACKUPS_RUNNING_LIST)
         return call_jsonrpc_method_template_and_stop('files_uploads', tpl)
 
-#     if len(args) >= 2 and args[1] in ['queue', 'pending', 'qu', 'tasks']:
-#         tpl = jsontemplate.Template(templ.TPL_BACKUPS_TASKS_LIST)
-#         return call_jsonrpc_method_template_and_stop('backups_queue', tpl)
-
-#     if len(args) > 3 and args[1] in ['bind', 'map', ]:
-#         tpl = jsontemplate.Template(templ.TPL_RAW)
-#         key_id = args[4] if len(args) > 4 else None
-#         if os.path.exists(args[2]):
-#             return call_jsonrpc_method_template_and_stop('backup_map_path', tpl, args[2], args[3], key_id)
-#         print_text('path %s not exist\n' % args[2])
-#         return 1
-
     if len(args) > 2 and args[1] in ['create', 'make', 'cr', 'mk', 'add', 'bind', 'map', ]:
         tpl = jsontemplate.Template(templ.TPL_RAW)
         return call_jsonrpc_method_template_and_stop('file_create', tpl,
@@ -681,28 +739,6 @@ def cmd_file(opts, args, overDict, executablePath):
         else:
             local_path = os.path.join(os.getcwd(), os.path.basename(args[2]))
         return call_jsonrpc_method_template_and_stop('file_download_start', tpl, args[2], local_path)
-
-#     if len(args) >= 2 and args[1] in ['add', 'append', 'insert', 'make', 'create', ]:
-#         tpl = jsontemplate.Template(templ.TPL_RAW)
-#         key_id = args[3] if len(args) > 3 else None
-#         if args[1] in ['make', 'create', ]:
-#             if args[0] in ['dir', 'folder', ]:
-#                 return call_jsonrpc_method_template_and_stop('backup_dir_make', tpl, args[2], key_id)
-#             else:
-#                 return call_jsonrpc_method_template_and_stop('backup_file_add', tpl, args[2], key_id)
-#         if os.path.isdir(args[2]):
-#             return call_jsonrpc_method_template_and_stop('backup_dir_add', tpl, args[2], key_id)
-#         elif os.path.isfile(args[2]):
-#             return call_jsonrpc_method_template_and_stop('backup_file_add', tpl, args[2], key_id)
-#         print_text('path %s not exist\n' % args[2])
-#         return 1
-
-#     if len(args) >= 2 and args[1] in ['tree', 'addtree', 'buildtree', 'replicate', ]:
-#         tpl = jsontemplate.Template(templ.TPL_RAW)
-#         if not os.path.isdir(args[2]):
-#             print_text('path %s not exist\n' % args[2])
-#             return 1
-#         return call_jsonrpc_method_template_and_stop('backup_tree_add', tpl, args[2])
 
     if len(args) > 2 and args[1] in ['delete', 'del', 'rm', 'remove', 'erase', ]:
         tpl = jsontemplate.Template(templ.TPL_RAW)
@@ -836,9 +872,9 @@ def option_name_to_path(name, default=''):
 def cmd_set(opts, args, overDict):
     from main import settings
     from interface import api
+    settings.init()
     name = args[1].lower()
     if name in ['list', 'ls', 'all', 'show', 'print', ]:
-        settings.init()
         # sort = True if (len(args) > 2 and args[2] in ['sort', 'sorted', ]) else False
         sort = True
         result = api.config_list(sort=sort)
@@ -850,7 +886,6 @@ def cmd_set(opts, args, overDict):
     path = '' if len(args) < 2 else args[1]
     path = option_name_to_path(name, path)
     if path != '':
-        settings.init()
         if len(args) > 2:
             value = ' '.join(args[2:])
             result = api.config_set(path, unicode(value))
@@ -929,6 +964,7 @@ def cmd_customers(opts, args, overDict):
 
 def cmd_storage(opts, args, overDict):
     if len(args) < 2:
+        from twisted.internet import reactor
 
         def _got_local(result3, result2, result1):
             result = {
@@ -1009,20 +1045,22 @@ def cmd_services(opts, args, overDict):
 
 def cmd_message(opts, args, overDict):
     from twisted.internet import reactor
+    from logs import lg
     #     if len(args) < 2 or args[1] == 'list':
     #         tpl = jsontemplate.Template(templ.TPL_RAW)
     #         return call_jsonrpc_method_template_and_stop('list_messages', tpl)
     if len(args) >= 4 and args[1] in ['send', 'to', ]:
         tpl = jsontemplate.Template(templ.TPL_RAW)
-        return call_jsonrpc_method_template_and_stop('send_message', tpl, args[2], args[3])
+        return call_jsonrpc_method_template_and_stop('message_send', tpl, args[2], args[3])
+
     if len(args) < 2 or args[1] in ['listen', 'read', ]:
         from chat import terminal_chat
 
         def _send_message(to, msg):
-            return call_jsonrpc_method('send_message', to, msg)
+            return call_jsonrpc_method('message_send', to, msg)
 
         def _search_user(inp):
-            return call_jsonrpc_method('find_peer_by_nickname', inp)
+            return call_jsonrpc_method('user_search', inp)
 
         terminal_chat.init(
             do_send_message_func=_send_message,
@@ -1030,35 +1068,41 @@ def cmd_message(opts, args, overDict):
         )
         errors = []
 
+        def _stop(x=None):
+            reactor.callInThread(terminal_chat.stop)
+            reactor.stop()
+            return True
+
         def _error(x):
             if str(x).count('ResponseNeverReceived'):
                 return x
             errors.append(str(x))
-            reactor.callInThread(terminal_chat.stop)
+            _stop()
             return x
 
-        def _next_message(x=None):
+        def _consume(x=None):
             if x:
                 if x['status'] != 'OK':
                     if 'errors' in x:
                         errors.extend(x['errors'])
-                    reactor.callInThread(terminal_chat.stop)
+                    _stop()
                     return x
-                else:
-                    terminal_chat.on_incoming_message(x)
+                for msg in x['result']:
+                    terminal_chat.on_incoming_message(msg)
 
-            d = call_jsonrpc_method('receive_one_message')
-            d.addCallback(_next_message)
+            d = call_jsonrpc_method('message_receive', 'terminal_chat')
+            d.addCallback(_consume)
             d.addErrback(_error)
             return x
 
-        _next_message()
+        _consume()
         reactor.callInThread(terminal_chat.run)
         reactor.run()
         terminal_chat.shutdown()
         if len(errors):
             print '\n'.join(errors)
         return 0
+
     return 2
 
 #------------------------------------------------------------------------------
@@ -1116,12 +1160,7 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
 
     #---start---
     if cmd == '' or cmd == 'start' or cmd == 'go' or cmd == 'run':
-        appList = bpio.find_process([
-            'bitdust.exe',
-            'bpmain.py',
-            'bitdust.py',
-            'regexp:^/usr/bin/python.*bitdust.*$',
-        ])
+        appList = bpio.find_main_process()
         if len(appList) > 0:
             print_text('BitDust already started, found another process: %s' % str(appList))
             return 0
@@ -1129,12 +1168,7 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
 
     #---detach---
     elif cmd == 'detach':
-        appList = bpio.find_process([
-            'bitdust.exe',
-            'bpmain.py',
-            'bitdust.py',
-            'regexp:^/usr/bin/python.*bitdust.*$',
-        ])
+        appList = bpio.find_main_process()
         if len(appList) > 0:
             print_text('main BitDust process already started: %s' % str(appList))
             return 0
@@ -1150,12 +1184,7 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
 
     #---restart---
     elif cmd == 'restart' or cmd == 'reboot':
-        appList = bpio.find_process([
-            'bitdust.exe',
-            'bpmain.py',
-            'bitdust.py',
-            'regexp:^/usr/bin/python.*bitdust.*$',
-        ])
+        appList = bpio.find_main_process()
         if len(appList) == 0:
             return run_now(opts, args)
         ui = False
@@ -1195,12 +1224,7 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
             'bpgui.exe',
             'bpgui.py',
         ])
-        appList = bpio.find_process([
-            'bitdust.exe',
-            'bpmain.py',
-            'bitdust.py',
-            'regexp:^/usr/bin/python.*bitdust.*$',
-        ])
+        appList = bpio.find_main_process()
         if len(appList_bpgui) > 0:
             if len(appList) == 0:
                 for pid in appList_bpgui:
@@ -1224,12 +1248,7 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
 
     #---stop---
     elif cmd == 'stop' or cmd == 'kill' or cmd == 'shutdown':
-        appList = bpio.find_process([
-            'bitdust.exe',
-            'bpmain.py',
-            'bitdust.py',
-            'regexp:^/usr/bin/python.*bitdust.*$',
-        ])
+        appList = bpio.find_main_process()
         if len(appList) > 0:
             print_text('found main BitDust process: %s, sending command "exit" ... ' % str(appList), '')
             try:
@@ -1261,18 +1280,14 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
             print_text(pars.format_option_help())
         return 0
 
-    appList = bpio.find_process([
-        'bitdust.exe',
-        'bpmain.py',
-        'bitdust.py',
-        'regexp:^/usr/bin/python.*bitdust.*$',
-    ])
-    running = len(appList) > 0
+    appList = bpio.find_main_process()
+    running = (len(appList) > 0)
+
     overDict = override_options(opts, args)
 
     #---identity---
-    if cmd in ['identity', 'id', 'idurl', ]:
-        return cmd_identity(opts, args, overDict, running)
+    if cmd in ['identity', 'id', 'idurl', 'globalid', 'globid', 'glid', 'gid', ]:
+        return cmd_identity(opts, args, overDict, running, executablePath)
 
     #---key---
     elif cmd in ['key', 'keys', 'pk', 'private_key', 'priv', ]:

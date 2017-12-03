@@ -3,7 +3,8 @@ git add -u :/
 git status
 read -p "OK?"
 git commit
-git push origin master
+git push dev master
+git push fork master
 git push github master
-git push gitlab.com master
-
+git push bitbucket master
+git push gitlab master
