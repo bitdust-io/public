@@ -2,7 +2,7 @@
 # udp_interface.py
 #
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (udp_interface.py) is part of BitDust Software.
 #
@@ -270,7 +270,6 @@ class GateInterface():
         """
         # at the moment for UDP transport we can not stop particular file transfer
         # we can only close the whole session which is not we really want
-        return False
 #         for sess in udp_session.sessions().values():
 #             for in_file in sess.file_queue.inboxFiles.values():
 #                 if in_file.transfer_id and in_file.transfer_id == transferID:
@@ -279,6 +278,7 @@ class GateInterface():
 #                     sess.automat('shutdown')
 #                     return True
 #         return False
+        return False
 
     def list_sessions(self):
         """

@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # cmd_line_json.py
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (cmd_line_json.py) is part of BitDust Software.
 #
@@ -350,14 +350,14 @@ def cmd_deploy(opts, args, overDict):
         print_text('\nFailed to create virtual environment, please check/install virtualenv package\n')
         return status
     print_text('Install/Upgrade pip in "%s"' % venv_path)
-    status = os.system('{}/bin/pip install -U pip'.format(venv_path))
+    status = os.system('{}/bin/pip install --index-url=https://pypi.python.org/simple/ -U pip'.format(venv_path))
     if status != 0:
         print_text('\nFailed to install latest pip version, please check/install latest pip version manually\n')
         return status
     requirements_txt = os.path.join(source_dir, 'requirements.txt')
     venv_bin_pip = os.path.join(venv_path, 'bin', 'pip')
     print_text('Install BitDust requirements from "%s" using "%s"' % (requirements_txt, venv_path))
-    status = os.system('{} install -r "{}"'.format(venv_bin_pip, requirements_txt))
+    status = os.system('{} install --index-url=https://pypi.python.org/simple/ -r "{}"'.format(venv_bin_pip, requirements_txt))
     if status != 0:
         depends = [
             'git',
@@ -856,6 +856,10 @@ def option_name_to_path(name, default=''):
         path = 'services/udp-datagrams/udp-port'
     elif name in ['proxy']:
         path = 'services/proxy-transport/enabled'
+    elif name in ['http']:
+        path = 'services/http-transport/enabled'
+    elif name in ['http-port']:
+        path = 'services/http-connections/http-port'
     elif name in ['dht-port']:
         path = 'services/entangled-dht/udp-port'
     elif name in ['limit-send']:

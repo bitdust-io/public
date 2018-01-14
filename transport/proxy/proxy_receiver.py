@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # proxy_receiver.py
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (proxy_receiver.py) is part of BitDust Software.
 #
@@ -30,7 +30,7 @@ BitDust proxy_receiver(at_startup) Automat
 
 .. raw:: html
 
-    <i>generated using <a href="http://bitdust.io/visio2python/" target="_blank">visio2python</a> tool</i><br>
+    <i>generated using <a href="https://bitdust.io/visio2python/" target="_blank">visio2python</a> tool</i><br>
     <a href="proxy_receiver.png" target="_blank">
     <img src="proxy_receiver.png" style="max-width:100%;">
     </a>
@@ -83,6 +83,7 @@ from crypt import encrypted
 
 from p2p import commands
 from p2p import lookup
+from p2p import contact_status
 
 from contacts import identitycache
 
@@ -212,7 +213,7 @@ class ProxyReceiver(automat.Automat):
     def A(self, event, arg):
         """
         The core proxy_receiver() code, generated using `visio2python
-        <http://bitdust.io/visio2python/>`_ tool.
+        <https://bitdust.io/visio2python/>`_ tool.
         """
         #---AT_STARTUP---
         if self.state == 'AT_STARTUP':
@@ -466,6 +467,11 @@ class ProxyReceiver(automat.Automat):
             lg.warn('current identity was stored as my-original-identity')
         self.request_service_packet_id = []
         callback.insert_inbox_callback(0, self._on_inbox_packet_received)
+        if contact_status.isKnown(self.router_idurl):
+            contact_status.A(self.router_idurl).addStateChangedCallback(
+                self._on_router_contact_status_connected, newstate='CONNECTED')
+            contact_status.A(self.router_idurl).addStateChangedCallback(
+                self._on_router_contact_status_offline, newstate='OFFLINE')
         if _Debug:
             lg.out(2, 'proxy_receiver.doStartListening !!!!!!! router: %s at %s://%s' % (
                 self.router_idurl, self.router_proto_host[0], self.router_proto_host[1]))
@@ -474,6 +480,9 @@ class ProxyReceiver(automat.Automat):
         """
         Action method.
         """
+        if contact_status.isKnown(self.router_idurl):
+            contact_status.A(self.router_idurl).removeStateChangedCallback(self._on_router_contact_status_connected)
+            contact_status.A(self.router_idurl).removeStateChangedCallback(self._on_router_contact_status_offline)
         WriteMyOriginalIdentitySource('')
         config.conf().setString('services/proxy-transport/current-router', '')
         callback.remove_inbox_callback(self._on_inbox_packet_received)
@@ -481,6 +490,7 @@ class ProxyReceiver(automat.Automat):
         self.router_idurl = None
         self.router_proto_host = None
         self.request_service_packet_id = []
+        my_id.rebuildLocalIdentity()
         if _Debug:
             lg.out(2, 'proxy_receiver.doStopListening')
 
@@ -503,15 +513,21 @@ class ProxyReceiver(automat.Automat):
         """
         Action method.
         """
-        if time.time() - self.latest_packet_received < 10:
+        live_time = time.time() - self.latest_packet_received
+        if live_time < 10.0:
+            if _Debug:
+                lg.out(_DebugLevel, 'proxy_receiver.doCheckPingRouter OK, latest packet received %f sec ago' % live_time)
             return
         if _Debug:
             lg.out(_DebugLevel, 'proxy_receiver.doCheckPingRouter to %s' % self.router_idurl)
         identity_source = config.conf().getData('services/proxy-transport/my-original-identity').strip()
         if identity_source:
             if _Debug:
-                lg.out(_DebugLevel, '    identity loaded from "my-original-identity" config')
+                lg.out(_DebugLevel, '    "my-original-identity" prepared for sending')
+        else:
             identity_source = my_id.getLocalIdentity().serialize()
+            if _Debug:
+                lg.out(_DebugLevel, '    local identity prepared for sending')
         self._do_send_identity_to_router(identity_source, failed_event='router-disconnected')
 
     def doNotifyConnected(self, arg):
@@ -575,7 +591,7 @@ class ProxyReceiver(automat.Automat):
     def _find_random_node(self):
         # DEBUG
         # self.automat('found-one-node', 'http://p2p-id.ru/seed0_cb67.xml')
-        # self.automat('found-one-node', 'http://bitdust.io:8084/seed2_b17a.xml')
+        # self.automat('found-one-node', 'https://bitdust.io:8084/seed2_b17a.xml')
         # self.automat('found-one-node', 'http://datahaven.net/seed2_916e.xml')
         # return
         preferred_routers_raw = config.conf().getData('services/proxy-transport/preferred-routers').strip()
@@ -684,6 +700,13 @@ class ProxyReceiver(automat.Automat):
 #             return False
         self.automat('inbox-packet', (newpacket, info, status, error_message))
         return True
+
+    def _on_router_contact_status_connected(self, oldstate, newstate, event_string, args):
+        pass
+
+    def _on_router_contact_status_offline(self, oldstate, newstate, event_string, args):
+        lg.warn('router disconnected: %s->%s' % (oldstate, newstate))
+        self.automat('router-disconnected')
 
 #------------------------------------------------------------------------------
 

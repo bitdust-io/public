@@ -2,7 +2,7 @@
 # tcp_interface.py
 #
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (tcp_interface.py) is part of BitDust Software.
 #
@@ -28,8 +28,8 @@
 """
 .. module:: tcp_interface.
 
-This is a client side part of the TCP plug-in. The server side part is
-placed in the file tcp_process.py.
+This is a client side part of the TCP plug-in.
+The server side part is placed in the file tcp_node.py.
 """
 
 #------------------------------------------------------------------------------
@@ -44,11 +44,13 @@ import sys
 try:
     from twisted.internet import reactor
 except:
-    sys.exit('Error initializing twisted.internet.reactor in t_tcp.py')
+    sys.exit('Error initializing twisted.internet.reactor in tcp_interface.py')
 
 from twisted.web import xmlrpc
 from twisted.internet.defer import fail
 from twisted.python.failure import Failure
+
+#------------------------------------------------------------------------------
 
 from logs import lg
 

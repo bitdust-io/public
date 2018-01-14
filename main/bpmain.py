@@ -2,7 +2,7 @@
 # bpmain.py
 #
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (bpmain.py) is part of BitDust Software.
 #
@@ -578,6 +578,8 @@ def main(executable_path=None):
         try:
             from twisted.internet.defer import setDebugging
             setDebugging(True)
+            # from twisted.python import log as twisted_log
+            # twisted_log.startLogging(sys.stdout)
         except:
             lg.warn('python-twisted is not installed')
 

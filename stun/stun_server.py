@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # stun_server.py
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (stun_server.py) is part of BitDust Software.
 #
@@ -175,9 +175,14 @@ def main():
     bpio.init()
     settings.init()
     dht_service.init(settings.getDHTPort())
-    dht_service.connect()
+    d = dht_service.connect()
     udp.listen(settings.getUDPPort())
-    A('start', settings.getUDPPort())
+
+    def _go(live_nodes):
+        A('start', settings.getUDPPort())
+
+    d.addCallback(_go)
+
     reactor.run()
 
 #------------------------------------------------------------------------------

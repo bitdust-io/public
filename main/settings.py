@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # settings.py
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (settings.py) is part of BitDust Software.
 #
@@ -580,11 +580,11 @@ def DefaultRepoURL(repo='stable'):
     Return a given repository location for Windows.
     """
     if repo == 'stable':
-        return 'http://bitdust.io/repo/stable/'
+        return 'https://bitdust.io/repo/stable/'
     elif repo == 'devel':
-        return 'http://bitdust.io/repo/devel/'
+        return 'https://bitdust.io/repo/devel/'
     else:
-        return 'http://bitdust.io/repo/test/'
+        return 'https://bitdust.io/repo/test/'
 
 
 def FilesDigestsFilename():
@@ -592,7 +592,7 @@ def FilesDigestsFilename():
     This file keeps MD5 checksum of all binary files for Windows release. Every
     Windows repository have such file, this is link for "stable" repo::
 
-        http://bitdust.io/repo/stable/files
+        https://bitdust.io/repo/stable/files
 
     Local copy of this file is also stored in the file::
 
@@ -610,7 +610,7 @@ def CurrentVersionDigestsFilename():
     This file keeps a MD5 checksum of the file "files", see
     ``FilesDigestsFilename()``. It is also placed in the Windows repository::
 
-        http://bitdust.io/repo/stable/checksum
+        https://bitdust.io/repo/stable/checksum
 
     If some binary files have been changed - the file "files" also changed and
     its checksum also.
@@ -796,6 +796,13 @@ def DefaultMessagesDir():
     return os.path.join(BaseDir(), 'messages')
 
 
+def DefaultMessagesHistoryDir():
+    """
+    A default folder to store sent/received messages.
+    """
+    return os.path.join(BaseDir(), 'messages', 'history')
+
+
 def DefaultReceiptsDir():
     """
     A default folder to store receipts.
@@ -849,6 +856,18 @@ def ContractChainDir():
     """
     """
     return os.path.join(BaseDir(), 'contracts')
+
+
+def ChatChannelsDir():
+    """
+    """
+    return os.path.join(BaseDir(), 'messages', 'channels')
+
+
+def ChatHistoryDir():
+    """
+    """
+    return os.path.join(BaseDir(), 'messages', 'history')
 
 
 def PrivateKeysDir():
@@ -1408,6 +1427,13 @@ def DefaultDHTPort():
     return 14441
 
 
+def DefaultHTTPPort():
+    """
+    A default port number for transport_http.
+    """
+    return 9993
+
+
 def DefaultWebLogPort():
     """
     A port number for HTTP server to print program logs.
@@ -1455,13 +1481,6 @@ def getRestoreDir():
     Alias for restore location, see ``DefaultRestoreDir()``.
     """
     return config.conf().getData('paths/restore').strip()
-
-
-def getMessagesDir():
-    """
-    Alias to get from user config a folder location where messages is stored.
-    """
-    return config.conf().getData('paths/messages').strip()
 
 
 def getReceiptsDir():
@@ -1688,6 +1707,8 @@ def getTransportPort(proto):
         return getTCPPort()
     if proto == 'udp':
         return getUDPPort()
+    if proto == 'http':
+        return getHTTPPort()
     raise
 
 
@@ -1811,6 +1832,49 @@ def enablePROXYreceiving(enable=None):
     if enable is None:
         return config.conf().getBool('services/proxy-transport/receiving-enabled')
     config.conf().setData('services/proxy-transport/receiving-enabled', str(enable))
+
+
+def enableHTTP(enable=None):
+    """
+    Switch on/off transport_http in the settings or get current state.
+    """
+    if enable is None:
+        return config.conf().getBool('services/http-transport/enabled')
+    config.conf().setData('services/http-transport/enabled', str(enable))
+
+
+def enableHTTPsending(enable=None):
+    """
+    Switch on/off sending over transport_http in the settings or get current
+    state.
+    """
+    if enable is None:
+        return config.conf().getBool('services/http-transport/sending-enabled')
+    config.conf().setData('services/http-transport/sending-enabled', str(enable))
+
+
+def enableHTTPreceiving(enable=None):
+    """
+    Switch on/off receiving over transport_http in the settings or get current
+    state.
+    """
+    if enable is None:
+        return config.conf().getBool('services/http-transport/receiving-enabled')
+    config.conf().setData('services/http-transport/receiving-enabled', str(enable))
+
+
+def getHTTPPort():
+    """
+    Get a port number for tranport_http from user config.
+    """
+    return config.conf().getInt("services/http-connections/http-port", DefaultTCPPort())
+
+
+def setHTTPPort(port):
+    """
+    Set a port number for tranport_http in the user config.
+    """
+    config.conf().setData("services/http-connections/http-port", str(port))
 
 
 def getTransportPriority(proto):
@@ -2297,11 +2361,12 @@ def _initBaseDir(base_dir=None):
 
     # if we have a file "appdata" in current folder - take the place from there
     if os.path.isfile(BaseDirPathFileName()):
-        path = os.path.abspath(bpio.ReadBinaryFile(BaseDirPathFileName()).strip())
-        if os.path.isdir(path):
+        path = bpio.ReadBinaryFile(BaseDirPathFileName()).strip()
+        if path:
+            path = os.path.abspath(path)
+            if not os.path.isdir(path):
+                bpio._dirs_make(path)
             _BaseDirPath = path
-            if not os.path.exists(_BaseDirPath):
-                bpio._dirs_make(_BaseDirPath)
             return
 
     # get the default place for thet machine
@@ -2466,10 +2531,20 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/data-motion/enabled', 'true')
 
     config.conf().setDefaultValue('services/entangled-dht/enabled', 'true')
+    config.conf().setDefaultValue('services/entangled-dht/udp-port', DefaultDHTPort())
+    config.conf().setDefaultValue('services/entangled-dht/known-nodes', '')
 
     config.conf().setDefaultValue('services/employer/enabled', 'true')
 
     config.conf().setDefaultValue('services/gateway/enabled', 'true')
+
+    config.conf().setDefaultValue('services/http-connections/enabled', 'false')
+    config.conf().setDefaultValue('services/http-connections/http-port', DefaultHTTPPort())
+
+    config.conf().setDefaultValue('services/http-transport/enabled', 'false')  # not done yet
+    config.conf().setDefaultValue('services/http-transport/receiving-enabled', 'true')
+    config.conf().setDefaultValue('services/http-transport/sending-enabled', 'true')
+    config.conf().setDefaultValue('services/http-transport/priority', 50)
 
     config.conf().setDefaultValue('services/identity-server/enabled', 'false')
     config.conf().setDefaultValue('services/identity-server/host', '')
@@ -2515,7 +2590,7 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/proxy-transport/enabled', 'true')
     config.conf().setDefaultValue('services/proxy-transport/sending-enabled', 'true')
     config.conf().setDefaultValue('services/proxy-transport/receiving-enabled', 'true')
-    config.conf().setDefaultValue('services/proxy-transport/priority', 30)
+    config.conf().setDefaultValue('services/proxy-transport/priority', 100)
     config.conf().setDefaultValue('services/proxy-transport/my-original-identity', '')
     config.conf().setDefaultValue('services/proxy-transport/current-router', '')
     config.conf().setDefaultValue('services/proxy-transport/preferred-routers', '')
@@ -2591,6 +2666,12 @@ def _checkStaticDirectories():
     if not os.path.exists(PrivateKeysDir()):
         lg.out(6, 'settings.init want to create folder: ' + PrivateKeysDir())
         os.makedirs(PrivateKeysDir())
+    if not os.path.exists(ChatChannelsDir()):
+        lg.out(6, 'settings.init want to create folder: ' + ChatChannelsDir())
+        os.makedirs(ChatChannelsDir())
+    if not os.path.exists(ChatHistoryDir()):
+        lg.out(6, 'settings.init want to create folder: ' + ChatHistoryDir())
+        os.makedirs(ChatHistoryDir())
 
 
 def _checkCustomDirectories():
@@ -2607,11 +2688,6 @@ def _checkCustomDirectories():
     if not os.path.exists(getLocalBackupsDir()):
         lg.out(6, 'settings.init want to create folder: ' + getLocalBackupsDir())
         os.makedirs(getLocalBackupsDir())
-    if getMessagesDir() == '':
-        config.conf().setData('paths/messages', DefaultMessagesDir())
-    if not os.path.exists(getMessagesDir()):
-        lg.out(6, 'settings.init want to create folder: ' + getMessagesDir())
-        os.makedirs(getMessagesDir())
     if getReceiptsDir() == '':
         config.conf().setData('paths/receipts', DefaultReceiptsDir())
     if not os.path.exists(getReceiptsDir()):
