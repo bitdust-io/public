@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # service_backups.py
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (service_backups.py) is part of BitDust Software.
 #
@@ -43,9 +43,7 @@ class BackupsService(LocalService):
     config_path = 'services/backups/enabled'
 
     def dependent_on(self):
-        return ['service_list_files',
-                'service_employer',
-                'service_rebuilding',
+        return ['service_keys_registry',
                 ]
 
     def start(self):

@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # dht_service.py
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (dht_service.py) is part of BitDust Software.
 #
@@ -32,8 +32,8 @@ module:: dht_service
 
 #------------------------------------------------------------------------------
 
-_Debug = False
-_DebugLevel = 10
+_Debug = True
+_DebugLevel = 12
 
 #------------------------------------------------------------------------------
 
@@ -65,12 +65,11 @@ from system import bpio
 
 from main import settings
 
-import known_nodes
+from dht import known_nodes
 
 #------------------------------------------------------------------------------
 
 _MyNode = None
-_UDPListener = None
 _ActiveLookup = None
 
 #------------------------------------------------------------------------------
@@ -98,7 +97,6 @@ def init(udp_port, db_file_path=None):
 def shutdown():
     global _MyNode
     if _MyNode is not None:
-        _MyNode.listener.stopListening()
         _MyNode._dataStore._db.close()
         _MyNode._protocol.node = None
         del _MyNode
@@ -117,30 +115,65 @@ def node():
 
 
 def connect():
+    result = Deferred()
+
     if not node().listener:
         node().listenUDP()
+
     if node().refresher and node().refresher.active():
         node().refresher.reset(0)
         if _Debug:
-            lg.out(_DebugLevel, 'dht_service.connect did RESET refresher task')
-    else:
-        node().joinNetwork(known_nodes.nodes())
+            lg.out(_DebugLevel, 'dht_service.connect DHT already active : SKIP but RESET refresher task')
+        result.callback(True)
+        return result
+
+    def _on_join_success(ok):
         if _Debug:
-            lg.out(_DebugLevel, 'dht_service.connect with %d known nodes' % (len(known_nodes.nodes())))
-    return True
+            lg.out(_DebugLevel, 'dht_service.connect DHT JOIN SUCCESS !!!!!!!!!!!!!!!!!!!!!!!')
+        result.callback(True)
+
+    def _on_join_failed(x):
+        if _Debug:
+            lg.out(_DebugLevel, 'dht_service.connect DHT JOIN FAILED : %s' % x)
+        result.callback(False)
+
+    def _on_hosts_resolved(live_nodes):
+        if _Debug:
+            lg.out(_DebugLevel, 'dht_service.connect RESOLVED %d live nodes' % (len(live_nodes)))
+            for onenode in live_nodes:
+                lg.out(_DebugLevel, '    %s:%s' % onenode)
+        node().joinNetwork(live_nodes)
+        node()._joinDeferred.addCallback(_on_join_success)
+        node()._joinDeferred.addErrback(_on_join_failed)
+        return live_nodes
+
+    def _on_hosts_resolve_failed(x):
+        if _Debug:
+            lg.out(_DebugLevel, 'dht_service.connect ERROR : hosts not resolved: %s' % x)
+        result.callback(False)
+        return x
+
+    _known_nodes = known_nodes.nodes()
+    if _Debug:
+        lg.out(_DebugLevel, 'dht_service.connect STARTING with %d known nodes:' % (len(_known_nodes)))
+        for onenode in _known_nodes:
+            lg.out(_DebugLevel, '    %s:%s' % onenode)
+
+    d = resolve_hosts(_known_nodes)
+    d.addCallback(_on_hosts_resolved)
+    d.addErrback(_on_hosts_resolve_failed)
+
+    return result
 
 
 def disconnect():
-    #    global _UDPListener
-    #    if _UDPListener is not None:
-    #        lg.out(6, 'dht_service.disconnect')
-    #        d = _UDPListener.stopListening()
-    #        del _UDPListener
-    #        _UDPListener = None
-    #        return d
-    #    else:
-    #        lg.warn('- UDPListener is None')
-    return None
+    global _MyNode
+    if not node():
+        return False
+    if node().refresher and node().refresher.active():
+        node().refresher.cancel()
+    node().listener.stopListening()
+    return True
 
 
 def reconnect():
@@ -150,8 +183,31 @@ def reconnect():
 
 #------------------------------------------------------------------------------
 
+def on_host_resoled(ip, port, host, result_list, total_hosts, result_defer):
+    if not isinstance(ip, str) or port is None:
+        result_list.append(None)
+        lg.warn('"%s" failed to resolve' % host)
+    else:
+        result_list.append((ip, port, ))
+    if len(result_list) != total_hosts:
+        return None
+    return result_defer.callback(filter(None, result_list))
+
+
+def resolve_hosts(nodes_list):
+    result_defer = Deferred()
+    result_list = []
+    for node_tuple in nodes_list:
+        d = reactor.resolve(node_tuple[0])
+        d.addCallback(on_host_resoled, node_tuple[1], node_tuple[0], result_list, len(nodes_list), result_defer)
+        d.addErrback(on_host_resoled, None, node_tuple[0], result_list, len(nodes_list), result_defer)
+    return result_defer
+
+#------------------------------------------------------------------------------
+
 def random_key():
     return key_to_hash(str(random.getrandbits(255)))
+
 
 def key_to_hash(key):
     h = hashlib.sha1()
@@ -220,16 +276,12 @@ def set_node_data(key, value):
 #------------------------------------------------------------------------------
 
 def on_nodes_found(result, node_id64):
-    global _ActiveLookup
-    # _ActiveLookup = None
     okay(result, 'find_node', node_id64)
     if _Debug:
         lg.out(_DebugLevel, 'dht_service.on_nodes_found   node_id=[%s], %d nodes found' % (node_id64, len(result)))
     return result
 
 def on_lookup_failed(result, node_id64):
-    global _ActiveLookup
-    # _ActiveLookup = None
     error(result, 'find_node', node_id64)
     if _Debug:
         lg.out(_DebugLevel, 'dht_service.on_lookup_failed   node_id=[%s], result=%s' % (node_id64, result))
@@ -259,16 +311,15 @@ class DHTNode(DistributedTupleSpacePeer):
         DistributedTupleSpacePeer.__init__(self, udpPort, dataStore, routingTable, networkProtocol)
         self.data = {}
 
-    if _Debug:
-        @rpcmethod
-        def store(self, key, value, originalPublisherID=None, age=0, **kwargs):
-            if _Debug:
-                lg.out(_DebugLevel + 10, 'dht_service.DHTNode.store key=[%s], value=[%s]' % (
-                    base64.b32encode(key), str(value)[:20]))
-            # TODO: add verification methods for different type of data we store in DHT
-            # TODO: add signature validation to be sure this is the owner of that key:value pair
-            return DistributedTupleSpacePeer.store(self, key, value,
-                                                   originalPublisherID=originalPublisherID, age=age, **kwargs)
+    @rpcmethod
+    def store(self, key, value, originalPublisherID=None, age=0, **kwargs):
+        if _Debug:
+            lg.out(_DebugLevel + 10, 'dht_service.DHTNode.store key=[%s], value=[%s]' % (
+                base64.b32encode(key), str(value)[:20]))
+        # TODO: add verification methods for different type of data we store in DHT
+        # TODO: add signature validation to be sure this is the owner of that key:value pair
+        return DistributedTupleSpacePeer.store(self, key, value,
+                                               originalPublisherID=originalPublisherID, age=age, **kwargs)
 
     @rpcmethod
     def request(self, key):
@@ -340,25 +391,28 @@ def main():
     lg.set_debug_level(18)
     (options, args) = parseCommandLine()
     init(options.udpport, options.dhtdb)
-    connect()
-    if len(args) == 0:
-        pass
-    elif len(args) > 0:
-        def _r(x):
-            print x
-            reactor.stop()
-        cmd = args[0]
-        if cmd == 'get':
-            get_value(args[1]).addBoth(_r)
-        elif cmd == 'set':
-            set_value(args[1], args[2]).addBoth(_r)
-        elif cmd == 'find':
-            find_node(key_to_hash(args[1])).addBoth(_r)
-        elif cmd == 'discover':
-            def _l(x):
+
+    def _go(nodes):
+        if len(args) == 0:
+            pass
+        elif len(args) > 0:
+            def _r(x):
                 print x
-                find_node(random_key()).addBoth(_l)
-            _l('')
+                reactor.stop()
+            cmd = args[0]
+            if cmd == 'get':
+                get_value(args[1]).addBoth(_r)
+            elif cmd == 'set':
+                set_value(args[1], args[2]).addBoth(_r)
+            elif cmd == 'find':
+                find_node(key_to_hash(args[1])).addBoth(_r)
+            elif cmd == 'discover':
+                def _l(x):
+                    print x
+                    find_node(random_key()).addBoth(_l)
+                _l('')
+
+    connect().addBoth(_go)
     reactor.run()
 
 #------------------------------------------------------------------------------

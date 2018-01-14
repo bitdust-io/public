@@ -2,7 +2,7 @@
 # gateway.py
 #
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (gateway.py) is part of BitDust Software.
 #
@@ -215,7 +215,6 @@ def shutdown():
 
 def start():
     """
-    
     """
     if _Debug:
         lg.out(4, 'gateway.start')
@@ -237,7 +236,6 @@ def start():
 
 def cold_start():
     """
-    
     """
     if _Debug:
         lg.out(4, 'gateway.cold_start : sending "start" only to one transport - most preferable')

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # tcp_stream.py
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (tcp_stream.py) is part of BitDust Software.
 #
@@ -28,7 +28,7 @@
 #------------------------------------------------------------------------------
 
 _Debug = True
-_DebugLevel = 18
+_DebugLevel = 8
 
 #------------------------------------------------------------------------------
 
@@ -40,10 +40,14 @@ import struct
 from twisted.internet import reactor
 from twisted.protocols import basic
 
+#------------------------------------------------------------------------------
+
 from logs import lg
 
 from system import tmpfile
+
 from main import settings
+
 from lib import misc
 
 #------------------------------------------------------------------------------
@@ -52,6 +56,7 @@ MIN_PROCESS_STREAMS_DELAY = 0.1
 MAX_PROCESS_STREAMS_DELAY = 1
 # TODO: at the moment for TCP - only one file per connection at once
 # need to switch from basic.FileSender to something more advanced
+# consider using Twisted AMP
 MAX_SIMULTANEOUS_OUTGOING_FILES = 1
 
 #------------------------------------------------------------------------------

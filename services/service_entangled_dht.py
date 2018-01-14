@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # service_entangled_dht.py
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (service_entangled_dht.py) is part of BitDust Software.
 #
@@ -51,15 +51,16 @@ class EntangledDHTService(LocalService):
         from main import settings
         from main.config import conf
         dht_service.init(settings.getDHTPort(), settings.DHTDBFile())
-        dht_service.connect()
+        d = dht_service.connect()
         conf().addCallback('services/entangled-dht/udp-port',
                            self._on_udp_port_modified)
-        return True
+        return d
 
     def stop(self):
         from dht import dht_service
         from main.config import conf
         conf().removeCallback('services/entangled-dht/udp-port')
+        dht_service.disconnect()
         dht_service.shutdown()
         return True
 

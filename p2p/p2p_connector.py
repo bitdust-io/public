@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # p2p_connector.py
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
 #
 # This file (p2p_connector.py) is part of BitDust Software.
 #
@@ -30,8 +30,8 @@
 
 .. raw:: html
 
-    <a href="http://bitdust.io/automats/p2p_connector/p2p_connector.png" target="_blank">
-    <img src="http://bitdust.io/automats/p2p_connector/p2p_connector.png" style="max-width:100%;">
+    <a href="https://bitdust.io/automats/p2p_connector/p2p_connector.png" target="_blank">
+    <img src="https://bitdust.io/automats/p2p_connector/p2p_connector.png" style="max-width:100%;">
     </a>
 
 The ``p2p_connector()`` state machine manages the user's connection with other remote users.
@@ -112,6 +112,15 @@ def inbox(newpacket, info, status, message):
         lg.out(_DebugLevel, 'p2p_connector.inbox %s %s' % (status, newpacket))
     # here need to mark this protocol as working
     if info.proto in ['tcp', ]:
+        if not net_misc.IpIsLocal(str(info.host).split(':')[0]):
+            # but we want to check that this packet is come from the Internet, not our local network
+            # because we do not want to use this proto as first method if it is not working for all
+            if info.proto not in active_protos():
+                if _Debug:
+                    lg.out(2, 'p2p_connector.inbox [transport_%s] seems to work !!!!!!!!!!!!!!!!!!!!!' % info.proto)
+                    lg.out(2, '                    We got packet from %s://%s' % (info.proto, str(info.host)))
+                active_protos().add(info.proto)
+    elif info.proto in ['http', ]:
         if not net_misc.IpIsLocal(str(info.host).split(':')[0]):
             # but we want to check that this packet is come from the Internet, not our local network
             # because we do not want to use this proto as first method if it is not working for all
@@ -412,6 +421,14 @@ class P2PConnector(automat.Automat):
             if _Debug:
                 lg.out(2, 'p2p_connector._check_to_use_best_proto udp is not first but it works active_protos()=%s' % str(active_protos()))
             return False
+        # http seems to work and it is first - cool!
+        if first == 'http' and 'http' in active_protos():
+            return True
+        # but if http method is not the first and it works - we want to TURN IT ON! - return True
+        if first != 'http' and 'http' in active_protos():
+            if _Debug:
+                lg.out(2, 'p2p_connector._check_to_use_best_proto http is not first but it works active_protos()=%s' % str(active_protos()))
+            return False
         # if we are using proxy and it is working - that is fine - it must work always!
         if first == 'proxy' and 'proxy' in active_protos():
             return True
@@ -439,6 +456,9 @@ class P2PConnector(automat.Automat):
         # if proxy method is not the first but it works - switch to proxy
         if first != 'proxy' and 'proxy' in active_protos():
             wantedproto = 'proxy'
+        # if http method is not the first but it works - switch to http
+        if first != 'http' and 'http' in active_protos():
+            wantedproto = 'http'
         # if udp method is not the first but it works - switch to udp
         if first != 'udp' and 'udp' in active_protos():
             wantedproto = 'udp'
