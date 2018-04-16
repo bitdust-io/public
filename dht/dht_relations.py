@@ -32,7 +32,7 @@
 #------------------------------------------------------------------------------
 
 _Debug = True
-_DebugLevel = 10
+_DebugLevel = 20
 
 #------------------------------------------------------------------------------
 
@@ -244,7 +244,7 @@ class RelationsLookup(object):
 
     def do_report_failed(self, err):
         lg.warn(err)
-        self._result_defer.errback(None)
+        self._result_defer.errback(err)
         self.do_close()
         return err
 

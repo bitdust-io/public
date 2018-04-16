@@ -73,7 +73,10 @@ from lib import utime
 
 from contacts import contactsdb
 
-import key
+from crypt import key
+from crypt import my_keys
+
+from userid import my_id
 
 #------------------------------------------------------------------------------
 
@@ -93,7 +96,7 @@ class Packet:
     make all network working.
     """
 
-    def __init__(self, Command, OwnerID, CreatorID, PacketID, Payload, RemoteID,):
+    def __init__(self, Command, OwnerID, CreatorID, PacketID, Payload, RemoteID, KeyID=None, ):
         """
         Init all fields and sign the packet .
         """
@@ -114,10 +117,16 @@ class Packet:
         # want full IDURL for other party so troublemaker could not
         # use his packets to mess up other nodes by sending it to them
         self.RemoteID = RemoteID
+        # which private key to use to generate signature
+        self.KeyID = KeyID
+        if not self.KeyID:
+            self.KeyID = my_id.getGlobalID(key_alias='master')
         # signature on Hash is always by CreatorID
         self.Signature = None
         # must be signed to be valid
         self.Sign()
+        # stores list of related objects packet_in() or packet_out()
+        self.Packets = []
 
     def __repr__(self):
         args = '%s(%s)' % (str(self.Command), str(self.PacketID))
@@ -161,6 +170,9 @@ class Packet:
             stufftosum += self.Payload
             stufftosum += sep
             stufftosum += str(self.RemoteID)
+            if self.KeyID:
+                stufftosum += sep
+                stufftosum += str(self.KeyID)
         except Exception as exc:
             lg.exc()
             raise exc
@@ -176,7 +188,10 @@ class Packet:
         """
         Call ``crypt.key.Sign`` to generate digital signature.
         """
-        return key.Sign(self.GenerateHash())
+        _hash_base = self.GenerateHash()
+        if not self.KeyID or self.KeyID == my_id.getGlobalID(key_alias='master'):
+            return key.Sign(_hash_base)
+        return my_keys.sign(self.KeyID, _hash_base)
 
     def SignatureChecksOut(self):
         """
@@ -251,7 +266,13 @@ class Packet:
 
         This is useful when need to save the packet on disk.
         """
+        if hasattr(self, 'Packets'):
+            currentPackets = getattr(self, 'Packets')
+            delattr(self, 'Packets')
+        else:
+            currentPackets = []
         src = misc.ObjectToString(self)
+        setattr(self, 'Packets', currentPackets)
         # lg.out(10, 'signed.Serialize %d bytes, type is %s' % (len(src), str(type(src))))
         return src
 
@@ -293,6 +314,10 @@ def Unserialize(data):
     if not str(newobject.__class__).count('signed.Packet'):
         lg.warn("not a packet: " + str(newobject.__class__))
         return None
+    if not hasattr(newobject, 'KeyID'):
+        setattr(newobject, 'KeyID', None)
+    if not hasattr(newobject, 'Packets'):
+        setattr(newobject, 'Packets', [])
     return newobject
 
 
@@ -320,6 +345,7 @@ def MakePacketDeferred(Command, OwnerID, CreatorID, PacketID, Payload, RemoteID)
     return threads.deferToThread(MakePacket, Command, OwnerID, CreatorID, PacketID, Payload, RemoteID)
 
 #------------------------------------------------------------------------------
+
 
 if __name__ == '__main__':
     bpio.init()

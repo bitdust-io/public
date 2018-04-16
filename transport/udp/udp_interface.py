@@ -162,13 +162,7 @@ class GateInterface():
             lg.out(4, 'udp_interface.verify_contacts returning True')
         return True
 
-    def send_file(
-            self,
-            remote_idurl,
-            filename,
-            host,
-            description='',
-            single=False):
+    def send_file(self, remote_idurl, filename, host, description=''):
         """
         """
         from transport.udp import udp_session
@@ -179,37 +173,31 @@ class GateInterface():
 #            result_defer.callback(False)
 #            lg.out(4, 'udp_interface.send_file WARNING udp_node state is %s' % udp_node.A().state)
 #            return result_defer
-        s = udp_session.get_by_peer_id(host)
-        if s:
-            if description.startswith(
-                    'Identity') or description.startswith('Ack'):
-                s.file_queue.insert_outbox_file(
-                    filename, description, result_defer, single)
+        active_sessions = udp_session.get_by_peer_id(host)
+        if active_sessions:
+            if description.startswith('Identity') or description.startswith('Ack'):
+                active_sessions[0].file_queue.insert_outbox_file(
+                    filename, description, result_defer, keep_alive=True)
             else:
-                s.file_queue.append_outbox_file(
-                    filename, description, result_defer, single)
+                active_sessions[0].file_queue.append_outbox_file(
+                    filename, description, result_defer, keep_alive=True)
         else:
             udp_session.add_pending_outbox_file(
-                filename, host, description, result_defer, single)
+                filename, host, description, result_defer, keep_alive=True)
             udp_node.A('connect', host)
         return result_defer
 
-    def send_file_single(
-            self,
-            remote_idurl,
-            filename,
-            host,
-            description='',
-            single=True):
+    def send_file_single(self, remote_idurl, filename, host, description=''):
         """
         """
-        return self.send_file(
-            self,
-            remote_idurl,
-            filename,
-            host,
-            description,
-            single)
+        return self.send_file(self, remote_idurl, filename, host, description, keep_alive=False)
+
+    def send_keep_alive(self, host):
+        """
+        """
+        from transport.udp import udp_session
+        for sess in udp_session.sessions_by_peer_id().get(host, []):
+            sess.automat('send-keep-alive')
 
     def connect_to_host(self, host=None, idurl=None):
         """
@@ -235,13 +223,10 @@ class GateInterface():
                 continue
             i = 0
             while i < len(sess.file_queue.outboxQueue):
-                fn, descr, result_defer, single = sess.file_queue.outboxQueue[
-                    i]
+                fn, descr, result_defer, keep_alive = sess.file_queue.outboxQueue[i]
                 if fn == filename:
                     if _Debug:
-                        lg.out(
-                            14, 'udp_interface.cancel_outbox_file removed %s in %s' %
-                            (os.path.basename(fn), sess))
+                        lg.out(14, 'udp_interface.cancel_outbox_file removed %s in %s' % (os.path.basename(fn), sess))
                     sess.file_queue.outboxQueue.pop(i)
                     ok = True
                 else:
@@ -290,17 +275,36 @@ class GateInterface():
         """
         """
         from transport.udp import udp_stream
-        result = udp_stream.streams().values()
+        result = []
+        for stream in udp_stream.streams().values():
+            result.append(stream.consumer)
         if sorted_by_time:
             result.sort(key=lambda stream: stream.started)
         return result
 
-#------------------------------------------------------------------------------
+    def find_session(self, host):
+        """
+        """
+        from transport.udp import udp_session
+        return udp_session.sessions_by_peer_id().get(host, [])
 
+    def find_stream(self, stream_id=None, transfer_id=None):
+        """
+        """
+        from transport.udp import udp_stream
+        for stream in udp_stream.streams().values():
+            if stream_id and stream_id == stream.consumer.stream_id:
+                return stream.consumer
+            if transfer_id and transfer_id == stream.consumer.transfer_id:
+                return stream.consumer
+        return None
+
+#------------------------------------------------------------------------------
 
 def proxy_errback(x):
     if _Debug:
         lg.out(6, 'udp_interface.proxy_errback ERROR %s' % x)
+    return None
 
 #------------------------------------------------------------------------------
 
@@ -309,129 +313,97 @@ def interface_transport_initialized():
     """
     """
     if proxy():
-        return proxy().callRemote('transport_initialized', 'udp')
+        return proxy().callRemote('transport_initialized', 'udp').addErrback(proxy_errback)
     lg.warn('transport_udp is not ready')
-    return fail(Failure(Exception('transport_udp is not ready')))
+    return fail(Exception('transport_udp is not ready')).addErrback(proxy_errback)
 
 
 def interface_receiving_started(host, new_options={}):
     """
     """
     if proxy():
-        return proxy().callRemote('receiving_started', 'udp', host, new_options)
+        return proxy().callRemote('receiving_started', 'udp', host, new_options).addErrback(proxy_errback)
     lg.warn('transport_udp is not ready')
-    return fail(Failure(Exception('transport_udp is not ready')))
+    return fail(Exception('transport_udp is not ready')).addErrback(proxy_errback)
 
 
 def interface_receiving_failed(error_code=None):
     """
     """
     if proxy():
-        return proxy().callRemote('receiving_failed', 'udp', error_code)
+        return proxy().callRemote('receiving_failed', 'udp', error_code).addErrback(proxy_errback)
     lg.warn('transport_udp is not ready')
-    return fail(Failure(Exception('transport_udp is not ready')))
+    return fail(Exception('transport_udp is not ready')).addErrback(proxy_errback)
 
 
 def interface_disconnected(result=None):
     """
     """
     if proxy():
-        return proxy().callRemote('disconnected', 'udp', result)
+        return proxy().callRemote('disconnected', 'udp', result).addErrback(proxy_errback)
     lg.warn('transport_udp is not ready')
-    return fail(Failure(Exception('transport_udp is not ready')))
+    # return fail(Exception('transport_udp is not ready')).addErrback(proxy_errback)
+    return succeed(result)
 
 
-def interface_register_file_sending(
-        host,
-        receiver_idurl,
-        filename,
-        size,
-        description=''):
+def interface_register_file_sending(host, receiver_idurl, filename, size, description=''):
     """
     """
     if proxy():
         return proxy().callRemote(
-            'register_file_sending',
-            'udp',
-            host,
-            receiver_idurl,
-            filename,
-            size,
-            description)
+            'register_file_sending', 'udp', host, receiver_idurl, filename, size, description).addErrback(proxy_errback)
     lg.warn('transport_udp is not ready')
-    return fail(Failure(Exception('transport_udp is not ready')))
+    return fail(Exception('transport_udp is not ready')).addErrback(proxy_errback)
 
 
 def interface_register_file_receiving(host, sender_idurl, filename, size):
     """
     """
     if proxy():
-        return proxy().callRemote('register_file_receiving',
-                                  'udp', host, sender_idurl, filename, size)
+        return proxy().callRemote(
+            'register_file_receiving', 'udp', host, sender_idurl, filename, size).addErrback(proxy_errback)
     lg.warn('transport_udp is not ready')
-    return fail(Failure(Exception('transport_udp is not ready')))
+    return fail(Exception('transport_udp is not ready')).addErrback(proxy_errback)
 
 
-def interface_unregister_file_sending(
-        transfer_id,
-        status,
-        bytes_sent,
-        error_message=None):
+def interface_unregister_file_sending(transfer_id, status, bytes_sent, error_message=None):
     """
     """
     if proxy():
         return proxy().callRemote(
-            'unregister_file_sending',
-            transfer_id,
-            status,
-            bytes_sent,
-            error_message,
-        ).addErrback(proxy_errback)
+            'unregister_file_sending', transfer_id, status,
+            bytes_sent, error_message).addErrback(proxy_errback)
     lg.warn('transport_udp is not ready')
-    return fail(Failure(Exception('transport_udp is not ready')))
+    return fail(Exception('transport_udp is not ready')).addErrback(proxy_errback)
 
 
-def interface_unregister_file_receiving(
-        transfer_id,
-        status,
-        bytes_received,
-        error_message=None):
-    """
-    """
-    if proxy():
-        return proxy().callRemote('unregister_file_receiving', transfer_id, status,
-                                  bytes_received, error_message).addErrback(proxy_errback)
-    lg.warn('transport_udp is not ready')
-    return fail(Failure(Exception('transport_udp is not ready')))
-
-
-def interface_cancelled_file_sending(
-        host,
-        filename,
-        size,
-        description=None,
-        error_message=None):
+def interface_unregister_file_receiving(transfer_id, status, bytes_received, error_message=None):
     """
     """
     if proxy():
         return proxy().callRemote(
-            'cancelled_file_sending',
-            'udp',
-            host,
-            filename,
-            size,
-            description,
-            error_message)
+            'unregister_file_receiving', transfer_id, status,
+            bytes_received, error_message).addErrback(proxy_errback)
     lg.warn('transport_udp is not ready')
-    return fail(Failure(Exception('transport_udp is not ready')))
+    return fail(Exception('transport_udp is not ready')).addErrback(proxy_errback)
 
 
-def interface_cancelled_file_receiving(
-        host, filename, size, error_message=None):
+def interface_cancelled_file_sending(host, filename, size, description=None, error_message=None):
     """
     """
     if proxy():
-        return proxy().callRemote('cancelled_file_receiving',
-                                  'udp', host, filename, size, error_message)
+        return proxy().callRemote(
+            'cancelled_file_sending', 'udp', host, filename,
+            size, description, error_message).addErrback(proxy_errback)
     lg.warn('transport_udp is not ready')
-    return fail(Failure(Exception('transport_udp is not ready')))
+    return fail(Exception('transport_udp is not ready')).addErrback(proxy_errback)
+
+
+def interface_cancelled_file_receiving(host, filename, size, error_message=None):
+    """
+    """
+    if proxy():
+        return proxy().callRemote(
+            'cancelled_file_receiving', 'udp', host, filename, size, error_message).addErrback(proxy_errback)
+    lg.warn('transport_udp is not ready')
+    return fail(Exception('transport_udp is not ready')).addErrback(proxy_errback)

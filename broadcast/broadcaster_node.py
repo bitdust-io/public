@@ -207,8 +207,7 @@ class BroadcasterNode(automat.Automat):
         Action method.
         """
         from broadcast import broadcasters_finder
-        broadcasters_finder.A('start',
-                              (self.automat, 'route', list(self.connected_broadcasters)))
+        broadcasters_finder.A('start', (self.automat, {'action': 'route', }, list(self.connected_broadcasters)))
 
     def doAddBroadcaster(self, arg):
         """
@@ -354,8 +353,6 @@ class BroadcasterNode(automat.Automat):
     #------------------------------------------------------------------------------
 
     def _on_inbox_packet(self, newpacket, info, status, error_message):
-        if status != 'finished':
-            return False
         if newpacket.Command == commands.Broadcast():
             from broadcast import broadcast_service
             msg = broadcast_service.read_message_from_packet(newpacket)

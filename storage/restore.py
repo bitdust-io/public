@@ -42,8 +42,8 @@ and not gotten data packets from a supplier we can flag him as suspect-bad
 and start requesting a parity packet to cover him right away.
 
 When we are missing a data packet we pick a parity packet where we have all the
-other data packets for that parity so we can recover the missing data packet .
-This network cost for this is just as low as if we read the data packet .
+other data packets for that parity so we can recover the missing data packet.
+This network cost for this is just as low as if we read the data packet.
 But most of the time we won't bother reading the parities.  Just uses up bandwidth.
 
 We don't want to fire someone till
@@ -55,16 +55,11 @@ At the "tar" level a user will have choice of full restore (to new empty system 
 or to restore to another location on disk, or to just recover certain files.  However,
 in this module we have to read block by block all of the blocks.
 
-
 How do we restore if we lost everything?
-Our ( public/private-key and eccmap) could be:
-
-    1)  at BitDust  (encrypted with pass phrase)
-    2)  on USB in safe or deposit box   (encrypted with passphrase or clear text)
-    3)  with friends or scrubbers (encrypted with passphrase)
+Our ( public/private-key and eccmap) needs to be stored previously
+on USB, in safe or deposit box (encrypted with passphrase or clear text).
 
 The other thing we need is the backupIDs which we can get from our suppliers with the ListFiles command.
-The ID is something like ``F200801161206`` or ``I200801170401`` indicating full or incremental.
 
 
 EVENTS:
@@ -183,7 +178,7 @@ class restore(automat.Automat):
         self.packetInCallback = None
         self.blockRestoredCallback = None
 
-        automat.Automat.__init__(self, 'restore_%s' % self.BackupID, 'AT_STARTUP', _DebugLevel, _Debug)
+        automat.Automat.__init__(self, 'restore_%s' % self.Version, 'AT_STARTUP', _DebugLevel, _Debug)
         events.send('restore-started', dict(backup_id=self.BackupID))
         # lg.out(6, "restore.__init__ %s, ecc=%s" % (self.BackupID, str(self.EccMap)))
 
@@ -196,6 +191,7 @@ class restore(automat.Automat):
         if self.state == 'AT_STARTUP':
             if event == 'init':
                 self.state = 'RUN'
+                self.doInit(arg)
         #---RUN---
         elif self.state == 'RUN':
             if ( event == 'timer-01sec' or event == 'instant' ) and self.isAborted(arg):
@@ -228,7 +224,7 @@ class restore(automat.Automat):
                 self.state = 'RAID'
                 self.doPausePacketsQueue(arg)
                 self.doReadRaid(arg)
-            elif ( event == 'timer-5sec' and not self.isAnyDataComming(arg) ) or ( event == 'request-failed' and not self.isStillCorrectable(arg) ):
+            elif ( ( event == 'timer-5sec' and not self.isAnyDataComming(arg) ) or event == 'request-failed' ) and not self.isStillCorrectable(arg):
                 self.state = 'FAILED'
                 self.doDeleteAllRequests(arg)
                 self.doRemoveTempFile(arg)
@@ -328,9 +324,17 @@ class restore(automat.Automat):
         """
         Condition method.
         """
+        from customer import data_receiver
+        if data_receiver.A().state == 'RECEIVING':
+            return True
         from transport import packet_in
         related_packets = packet_in.search(sender_idurl=contactsdb.suppliers())
         return len(related_packets) > 0
+
+    def doInit(self, arg):
+        """
+        Action method.
+        """
 
     def doStartNewBlock(self, arg):
         self.LastAction = time.time()
@@ -401,12 +405,12 @@ class restore(automat.Automat):
     def doSavePacket(self, NewPacket):
         glob_path = global_id.ParseGlobalID(NewPacket.PacketID, detect_version=True)
         packetID = global_id.CanonicalID(NewPacket.PacketID)
-        _, _, _, _, SupplierNumber, dataORparity = packetid.SplitFull(packetID)
+        customer_id, _, _, _, SupplierNumber, dataORparity = packetid.SplitFull(packetID)
         if dataORparity == 'Data':
             self.OnHandData[SupplierNumber] = True
         elif NewPacket.DataOrParity() == 'Parity':
             self.OnHandParity[SupplierNumber] = True
-        filename = os.path.join(settings.getLocalBackupsDir(), glob_path['customer'], glob_path['path'])
+        filename = os.path.join(settings.getLocalBackupsDir(), customer_id, glob_path['path'])
         dirpath = os.path.dirname(filename)
         if not os.path.exists(dirpath):
             try:
@@ -499,7 +503,9 @@ class restore(automat.Automat):
         lg.out(6, 'restore.doRemoveTempFile %d files were removed' % count)
 
     def doCloseFile(self, arg):
-        os.close(self.File)
+        """
+        """
+        # os.close(self.File)
 
     def doReportAborted(self, arg):
         lg.out(6, "restore.doReportAborted " + self.BackupID)
@@ -554,6 +560,8 @@ class restore(automat.Automat):
         elif state == 'failed':
             self.RequestFails.append(NewPacket)
             self.automat('request-failed', NewPacket)
+        else:
+            lg.warn('packet %s got not recognized result: %s' % (NewPacket, state, ))
 
     def _do_process_inbox_queue(self):
         if len(self.InboxPacketsQueue) > 0:

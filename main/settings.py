@@ -312,7 +312,7 @@ def MaxPacketsOutstanding():
 
 def SendingSpeedLimit():
     """
-    This is lower limit during file sending in Kilobytes per second.
+    This is lower limit during file sending in bytes per second.
 
     Used to calculate a packet timeout - bigger packets should have longer timeouts.
     If sending below this speed - we count this supplier as failed.
@@ -481,14 +481,14 @@ def DefaultBackupBlockSize():
 
     perform RAID operation on every block - one by one.
     """
-    return 16 * 1024 * 1024  # 16 MB
+    return 2 * 1024 * 1024  # 2 MB
 
 
 def DefaultBackupMaxBlockSize():
     """
     The maximum default block size, user can set this in the settings.
     """
-    return 128 * 1024 * 1024  # 128 MB is fine
+    return 4 * 1024 * 1024  # 4 MB is fine
 
 
 def MinimumBandwidthInLimitKBSec():
@@ -554,13 +554,6 @@ def DefaultEccMapName():
     This is a ecc map name used by default - must comply with ``DefaultDesiredSuppliers()``.
     """
     return 'ecc/4x4'
-
-
-def HMAC_key_word():
-    """
-    I was playing with HMAC hash, this is a "secret password" :-)
-    """
-    return 'Vince+Veselin+Derek=BigMoneyAndSuccess'
 
 
 def DefaultRepo():
@@ -870,10 +863,16 @@ def ChatHistoryDir():
     return os.path.join(BaseDir(), 'messages', 'history')
 
 
-def PrivateKeysDir():
+def KeyStoreDir():
     """
     """
     return os.path.join(BaseDir(), 'keys')
+
+
+def BlockchainDir():
+    """
+    """
+    return os.path.join(BaseDir(), 'blockchain')
 
 #------------------------------------------------------------------------------
 #--- FILES --------------------------------------------------------------------
@@ -1098,7 +1097,7 @@ def BackupIndexFilePath():
     return os.path.join(MetaDataDir(), BackupIndexFileName())
 
 
-def SupplierPath(idurl, customer_idurl, filename=None):
+def SupplierPath(supplier_idurl, customer_idurl, filename=None):
     """
     A location to given supplier's data.
 
@@ -1113,22 +1112,22 @@ def SupplierPath(idurl, customer_idurl, filename=None):
     from lib import nameurl
     customer = global_id.UrlToGlobalID(customer_idurl)
     if filename is not None:
-        return os.path.join(SuppliersDir(), customer, nameurl.UrlFilename(idurl), filename)
-    return os.path.join(SuppliersDir(), customer, nameurl.UrlFilename(idurl))
+        return os.path.join(SuppliersDir(), customer, nameurl.UrlFilename(supplier_idurl), filename)
+    return os.path.join(SuppliersDir(), customer, nameurl.UrlFilename(supplier_idurl))
 
 
-def SupplierListFilesFilename(idurl, customer_idurl):
+def SupplierListFilesFilename(supplier_idurl, customer_idurl):
     """
     Return a "listfiles" file location for given supplier.
     """
-    return os.path.join(SupplierPath(idurl, customer_idurl), 'listfiles')
+    return os.path.join(SupplierPath(supplier_idurl, customer_idurl), 'listfiles')
 
 
-def SupplierServiceFilename(idurl, customer_idurl):
+def SupplierServiceFilename(supplier_idurl, customer_idurl):
     """
     Return a "service" file location for given supplier.
     """
-    return os.path.join(SupplierPath(idurl, customer_idurl), 'service')
+    return os.path.join(SupplierPath(supplier_idurl, customer_idurl), 'service')
 
 
 def LocalTesterLogFilename():
@@ -1456,7 +1455,7 @@ def getCustomersFilesDir():
     """
     Alias to get a user donated location from settings.
     """
-    return config.conf().getData('paths/customers').strip()
+    return config.conf().getString('paths/customers', default=DefaultCustomersDir()).strip()
 
 
 def getCustomerFilesDir(idurl):
@@ -1464,8 +1463,8 @@ def getCustomerFilesDir(idurl):
     Alias to get a given customer's files inside our donated location from
     settings.
     """
-    from lib import nameurl
-    return os.path.join(getCustomersFilesDir(), nameurl.UrlFilename(idurl))
+    from userid import global_id
+    return os.path.join(getCustomersFilesDir(), global_id.UrlToGlobalID(idurl))
 
 
 def getLocalBackupsDir():
@@ -1473,21 +1472,21 @@ def getLocalBackupsDir():
     Alias to get local backups folder from settings, see
     ``DefaultBackupsDBDir()``.
     """
-    return config.conf().getData('paths/backups').strip()
+    return config.conf().getString('paths/backups', default=DefaultBackupsDBDir()).strip()
 
 
 def getRestoreDir():
     """
     Alias for restore location, see ``DefaultRestoreDir()``.
     """
-    return config.conf().getData('paths/restore').strip()
+    return config.conf().getString('paths/restore', default=DefaultRestoreDir()).strip()
 
 
 def getReceiptsDir():
     """
     Alias to get from user config a folder location where receipts is stored.
     """
-    return config.conf().getData('paths/receipts').strip()
+    return config.conf().getString('paths/receipts', default=DefaultReceiptsDir()).strip()
 
 
 def getTempDir():
@@ -2511,6 +2510,16 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/backups/keep-local-copies-enabled', 'false')
     config.conf().setDefaultValue('services/backups/wait-suppliers-enabled', 'false')
 
+    config.conf().setDefaultValue('services/blockchain/enabled', 'false')
+    config.conf().setDefaultValue('services/blockchain/host', '127.0.0.1')
+    config.conf().setDefaultValue('services/blockchain/port', 9100)
+    config.conf().setDefaultValue('services/blockchain/seeds', '')
+    config.conf().setDefaultValue('services/blockchain/explorer/enabled', 'true')
+    config.conf().setDefaultValue('services/blockchain/explorer/port', 9180)
+    config.conf().setDefaultValue('services/blockchain/wallet/enabled', 'true')
+    config.conf().setDefaultValue('services/blockchain/wallet/port', 9280)
+    config.conf().setDefaultValue('services/blockchain/miner/enabled', 'false')
+
     config.conf().setDefaultValue('services/broadcasting/enabled', 'false')
     config.conf().setDefaultValue('services/broadcasting/routing-enabled', 'false')
     config.conf().setDefaultValue('services/broadcasting/max-broadcast-connections', '3')
@@ -2581,6 +2590,8 @@ def _setUpDefaultSettings():
 
     config.conf().setDefaultValue('services/p2p-hookups/enabled', 'true')
 
+    config.conf().setDefaultValue('services/p2p-notifications/enabled', 'true')
+
     config.conf().setDefaultValue('services/private-messages/enabled', 'true')
 
     config.conf().setDefaultValue('services/proxy-server/enabled', 'false')
@@ -2599,6 +2610,8 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/rebuilding/enabled', 'true')
 
     config.conf().setDefaultValue('services/restores/enabled', 'true')
+
+    config.conf().setDefaultValue('services/shared-data/enabled', 'true')
 
     config.conf().setDefaultValue('services/supplier/enabled', 'true')
     config.conf().setDefaultValue('services/supplier/donated-space',
@@ -2663,38 +2676,41 @@ def _checkStaticDirectories():
     if not os.path.exists(RatingsDir()):
         lg.out(6, 'settings.init want to create folder: ' + RatingsDir())
         os.makedirs(RatingsDir())
-    if not os.path.exists(PrivateKeysDir()):
-        lg.out(6, 'settings.init want to create folder: ' + PrivateKeysDir())
-        os.makedirs(PrivateKeysDir())
+    if not os.path.exists(KeyStoreDir()):
+        lg.out(6, 'settings.init want to create folder: ' + KeyStoreDir())
+        os.makedirs(KeyStoreDir())
     if not os.path.exists(ChatChannelsDir()):
         lg.out(6, 'settings.init want to create folder: ' + ChatChannelsDir())
         os.makedirs(ChatChannelsDir())
     if not os.path.exists(ChatHistoryDir()):
         lg.out(6, 'settings.init want to create folder: ' + ChatHistoryDir())
         os.makedirs(ChatHistoryDir())
+    if not os.path.exists(BlockchainDir()):
+        lg.out(6, 'settings.init want to create folder: ' + BlockchainDir())
+        os.makedirs(BlockchainDir())
 
 
 def _checkCustomDirectories():
     """
     Check existance of user configurable folders.
     """
-    if getCustomersFilesDir() == '':
-        config.conf().setData('paths/customers', DefaultCustomersDir())
+    if config.conf().getString('paths/customers', '') == '':
+        config.conf().setString('paths/customers', DefaultCustomersDir())
     if not os.path.exists(getCustomersFilesDir()):
         lg.out(6, 'settings.init want to create folder: ' + getCustomersFilesDir())
         os.makedirs(getCustomersFilesDir())
-    if getLocalBackupsDir() == '':
-        config.conf().setData('paths/backups', DefaultBackupsDBDir())
+    if config.conf().getString('paths/backups', '') == '':
+        config.conf().setString('paths/backups', DefaultBackupsDBDir())
     if not os.path.exists(getLocalBackupsDir()):
         lg.out(6, 'settings.init want to create folder: ' + getLocalBackupsDir())
         os.makedirs(getLocalBackupsDir())
-    if getReceiptsDir() == '':
-        config.conf().setData('paths/receipts', DefaultReceiptsDir())
+    if config.conf().getString('paths/receipts', '') == '':
+        config.conf().setString('paths/receipts', DefaultReceiptsDir())
     if not os.path.exists(getReceiptsDir()):
         lg.out(6, 'settings.init want to create folder: ' + getReceiptsDir())
         os.makedirs(getReceiptsDir())
-    if getRestoreDir() == '':
-        config.conf().setData('paths/restore', DefaultRestoreDir())
+    if config.conf().getString('paths/restore', '') == '':
+        config.conf().setString('paths/restore', DefaultRestoreDir())
 
 #-------------------------------------------------------------------------------
 

@@ -57,7 +57,7 @@ EVENTS:
 #------------------------------------------------------------------------------
 
 _Debug = True
-_DebugLevel = 6
+_DebugLevel = 14
 
 #------------------------------------------------------------------------------
 
@@ -119,7 +119,7 @@ def init():
     Needs to be called before other methods here.
     """
     lg.out(4, 'contact_status.init')
-    callback.insert_inbox_callback(-1, Inbox)
+    callback.insert_inbox_callback(1, Inbox)  # try to not overwrite top callback in the list, but stay on top
     callback.add_outbox_callback(Outbox)
     callback.add_queue_item_status_callback(OutboxStatus)
 
@@ -128,13 +128,27 @@ def shutdown():
     """
     Called from top level code when the software is finishing.
     """
-    lg.out(4, 'contact_status.shutdown')
     global _ShutdownFlag
     global _ContactsStatusDict
+    lg.out(4, 'contact_status.shutdown')
+    callback.remove_inbox_callback(Inbox)
+    callback.remove_outbox_callback(Outbox)
+    callback.remove_queue_item_status_callback(OutboxStatus)
     for A in _ContactsStatusDict.values():
         A.destroy()
     _ContactsStatusDict.clear()
     _ShutdownFlag = True
+
+
+#------------------------------------------------------------------------------
+
+def check_create(idurl):
+    """
+    """
+    if idurl not in _ContactsStatusDict.keys():
+        A(idurl)
+        lg.info('contact %s is not found, made a new instance' % idurl)
+    return True
 
 
 def isKnown(idurl):
@@ -161,10 +175,13 @@ def isOnline(idurl):
         return False
     if idurl in [None, 'None', '']:
         return False
-    if idurl not in _ContactsStatusDict.keys():
-        A(idurl)
-        if _Debug:
-            lg.out(_DebugLevel, 'contact_status.isOnline contact %s is not found, made a new instance' % idurl)
+    if not isKnown(idurl):
+        return False
+#     check_create(idurl)
+#     if idurl not in _ContactsStatusDict.keys():
+#         A(idurl)
+#         if _Debug:
+#             lg.out(_DebugLevel, 'contact_status.isOnline contact %s is not found, made a new instance' % idurl)
     return A(idurl).state == 'CONNECTED'
 
 
@@ -178,10 +195,12 @@ def isOffline(idurl):
         return True
     if idurl in [None, 'None', '']:
         return True
-    if idurl not in _ContactsStatusDict.keys():
-        A(idurl)
-        if _Debug:
-            lg.out(_DebugLevel, 'contact_status.isOffline contact %s is not found, made a new instance' % idurl)
+    if not isKnown(idurl):
+        return True
+#     if idurl not in _ContactsStatusDict.keys():
+#         A(idurl)
+#         if _Debug:
+#             lg.out(_DebugLevel, 'contact_status.isOffline contact %s is not found, made a new instance' % idurl)
     return A(idurl).state == 'OFFLINE'
 
 
@@ -195,12 +214,31 @@ def isCheckingNow(idurl):
         return False
     if idurl in [None, 'None', '']:
         return False
-    if idurl not in _ContactsStatusDict.keys():
-        A(idurl)
-        if _Debug:
-            lg.out(_DebugLevel, 'contact_status.isCheckingNow contact %s is not found, made a new instance' % idurl)
+    if not isKnown(idurl):
+        return False
+#     if idurl not in _ContactsStatusDict.keys():
+#         A(idurl)
+#         if _Debug:
+#             lg.out(_DebugLevel, 'contact_status.isCheckingNow contact %s is not found, made a new instance' % idurl)
     st = A(idurl).state
     return st == 'PING' or st == 'ACK?'
+
+
+def getInstance(idurl):
+    """
+    """
+    global _ContactsStatusDict
+    if _ShutdownFlag:
+        return None
+    if idurl in [None, 'None', '']:
+        return None
+    check_create(idurl)
+    return A(idurl)
+
+
+def stateToLabel(state, default='?'):
+    global _StatusLabels
+    return _StatusLabels.get(state, default)
 
 
 def getStatusLabel(idurl):
@@ -208,17 +246,13 @@ def getStatusLabel(idurl):
     Return some text description about the current state of that user.
     """
     global _ContactsStatusDict
-    global _StatusLabels
     global _ShutdownFlag
     if _ShutdownFlag:
         return '?'
     if idurl in [None, 'None', '']:
         return '?'
-    if idurl not in _ContactsStatusDict.keys():
-        A(idurl)
-        if _Debug:
-            lg.out(_DebugLevel, 'contact_status.getStatusLabel contact %s is not found, made a new instance' % idurl)
-    return _StatusLabels.get(A(idurl).state, '?')
+    check_create(idurl)
+    return stateToLabel(A(idurl).state)
 
 
 def getStatusIcon(idurl):
@@ -232,10 +266,7 @@ def getStatusIcon(idurl):
         return '?'
     if idurl in [None, 'None', '']:
         return '?'
-    if idurl not in _ContactsStatusDict.keys():
-        A(idurl)
-        if _Debug:
-            lg.out(_DebugLevel, 'contact_status.getStatusIcon contact %s is not found, made a new instance' % idurl)
+    check_create(idurl)
     return _StatusIcons.get(A(idurl).state, '?')
 
 
@@ -302,7 +333,8 @@ def A(idurl, event=None, arg=None):
         if _ShutdownFlag:
             return None
         _ContactsStatusDict[idurl] = ContactStatus(
-            idurl, 'status_%s' % nameurl.GetName(idurl), 'OFFLINE', 8)
+            idurl, 'status_%s' % nameurl.GetName(idurl), 'OFFLINE',
+            debug_level=_DebugLevel, log_events=False, log_transition=_Debug)
     if event is not None:
         _ContactsStatusDict[idurl].automat(event, arg)
     return _ContactsStatusDict[idurl]
@@ -319,10 +351,13 @@ class ContactStatus(automat.Automat):
         'timer-20sec': (20.0, ['PING', 'ACK?']),
     }
 
-    def __init__(self, idurl, name, state, debug_level):
+    def __init__(self, idurl, name, state, debug_level=False, log_events=False, log_transition=False):
         self.idurl = idurl
         self.time_connected = None
-        automat.Automat.__init__(self, name, state, debug_level)
+        automat.Automat.__init__(self, name, state,
+                                 debug_level=debug_level,
+                                 log_events=log_events,
+                                 log_transition=log_transition,)
         if _Debug:
             lg.out(_DebugLevel + 2, 'contact_status.ContactStatus %s %s %s' % (name, state, idurl))
 
@@ -422,6 +457,9 @@ def OutboxStatus(pkt_out, status, error=''):
 
     If packet sending was failed - user seems to be OFFLINE.
     """
+    global _ShutdownFlag
+    if _ShutdownFlag:
+        return False
     if pkt_out.remote_idurl == my_id.getLocalID():
         return False
     if pkt_out.outpacket.CreatorID != my_id.getLocalID():
@@ -431,7 +469,12 @@ def OutboxStatus(pkt_out, status, error=''):
     else:
         if _Debug:
             lg.out(_DebugLevel, 'contact_status.OutboxStatus %s: [%s] with %s' % (status, pkt_out, pkt_out.outpacket))
-        A(pkt_out.remote_idurl, 'sent-failed', (pkt_out, status, error))
+        if status == 'cancelled':
+            if _Debug:
+                lg.out(_DebugLevel, '    skipped')
+        else:
+            # lg.warn('sending event "sent-failed" to contact status of : %s' % pkt_out.remote_idurl)
+            A(pkt_out.remote_idurl, 'sent-failed', (pkt_out, status, error))
     return False
 
 
@@ -439,6 +482,9 @@ def Inbox(newpacket, info, status, message):
     """
     This is called when some ``packet`` was received from remote peer - user seems to be ONLINE.
     """
+    global _ShutdownFlag
+    if _ShutdownFlag:
+        return False
     if newpacket.OwnerID == my_id.getLocalID():
         return False
     if newpacket.RemoteID != my_id.getLocalID():
@@ -455,6 +501,9 @@ def Outbox(pkt_out):
     This packet can be our Identity packet - this is a sort of PING operation
     to try to connect with that man.
     """
+    global _ShutdownFlag
+    if _ShutdownFlag:
+        return False
     if pkt_out.outpacket.RemoteID == my_id.getLocalID():
         return False
     if pkt_out.outpacket.CreatorID != my_id.getLocalID():

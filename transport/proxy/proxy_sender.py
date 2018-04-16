@@ -45,12 +45,12 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
 
-from twisted.internet.defer import Deferred, fail
+from twisted.internet.defer import Deferred
 from twisted.internet import reactor
 
 #------------------------------------------------------------------------------
@@ -93,7 +93,7 @@ def A(event=None, arg=None):
         return _ProxySender
     if _ProxySender is None:
         # set automat name and starting state here
-        _ProxySender = ProxySender('proxy_sender', 'AT_STARTUP', _DebugLevel, _Debug)
+        _ProxySender = ProxySender('proxy_sender', 'AT_STARTUP', debug_level=_DebugLevel, log_events=_Debug)
     if event is not None:
         _ProxySender.automat(event, arg)
     return _ProxySender
@@ -229,14 +229,14 @@ class ProxySender(automat.Automat):
         if len(self.pending_packets) > self.max_pending_packets:
             if _Debug:
                 lg.warn('pending packets queue is full, skip sending outgoing packet')
-            return fail((outpacket, wide, callbacks))
+            return None
         pending_result = Deferred()
         self.pending_packets.append((outpacket, wide, callbacks, pending_result))
         if _Debug:
             lg.out(_DebugLevel, 'proxy_sender._add_pending_packet %s' % outpacket)
         return pending_result
 
-    def _on_outbox_packet(self, outpacket, wide, callbacks, target=None, route=None):
+    def _on_outbox_packet(self, outpacket, wide, callbacks, target=None, route=None, response_timeout=None, keep_alive=True):
         """
         """
         if not driver.is_on('service_proxy_transport'):
@@ -282,7 +282,8 @@ class ProxySender(automat.Automat):
             my_id.getLocalID(),
             outpacket.PacketID,
             block_encrypted,
-            router_idurl)
+            router_idurl,
+        )
         result_packet = packet_out.create(
             outpacket,
             wide=wide,
@@ -293,7 +294,10 @@ class ProxySender(automat.Automat):
                 'host': router_host,
                 'remoteid': router_idurl,
                 'description': 'Relay_%s[%s]_%s' % (outpacket.Command, outpacket.PacketID, nameurl.GetName(router_idurl)),
-            })
+            },
+            response_timeout=response_timeout,
+            keep_alive=keep_alive,
+        )
         self.event('outbox-packet-sent', (outpacket, newpacket, result_packet))
         if _Debug:
             lg.out(_DebugLevel, '>>>Relay-OUT %s' % str(outpacket))

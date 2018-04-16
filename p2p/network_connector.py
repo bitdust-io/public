@@ -117,7 +117,7 @@ def A(event=None, arg=None):
         return _NetworkConnector
     if _NetworkConnector is None:
         _NetworkConnector = NetworkConnector(
-            'network_connector', 'AT_STARTUP', _DebugLevel)
+            'network_connector', 'AT_STARTUP', _DebugLevel, publish_events=True)
     if event is not None:
         _NetworkConnector.automat(event, arg)
     return _NetworkConnector
@@ -146,7 +146,7 @@ class NetworkConnector(automat.Automat):
     }
 
     def init(self):
-        self.log_transitions = True
+        self.log_transitions = _Debug
         self.last_upnp_time = 0
         self.last_reconnect_time = 0
         self.last_internet_state = 'disconnected'
@@ -360,15 +360,11 @@ class NetworkConnector(automat.Automat):
             stun_client.A('start')
         if driver.is_on('service_private_messages'):
             from chat import nickname_holder
-            nickname_holder.A('set', None)
-        # if driver.is_on('service_gateway'):
-        #     from transport import gateway
-        #     gateway.start()
+            nickname_holder.A('set')
         self.automat('network-up')
 
     def doSetDown(self, arg):
         """
-        
         """
         if _Debug:
             lg.out(_DebugLevel, 'network_connector.doSetDown')
@@ -378,16 +374,9 @@ class NetworkConnector(automat.Automat):
         if driver.is_on('service_ip_port_responder'):
             from stun import stun_server
             stun_server.A('stop')
-        # if driver.is_on('service_identity_server'):
-        #     if settings.enableIdServer():
-        #         from userid import id_server
-        #         id_server.A('stop')
         if driver.is_on('service_gateway'):
             from transport import gateway
             gateway.stop()
-        # if driver.is_on('service_my_ip_port'):
-        #     from stun import stun_client
-        #     stun_client.A().drop...
         self.automat('network-down')
 
     def doUPNP(self, arg):

@@ -115,7 +115,7 @@ def A(event=None, arg=None):
     global _BackupRebuilder
     if _BackupRebuilder is None:
         _BackupRebuilder = BackupRebuilder(
-            'backup_rebuilder', 'STOPPED', 6, True)
+            'backup_rebuilder', 'STOPPED', _DebugLevel)
     if event is not None:
         _BackupRebuilder.automat(event, arg)
     return _BackupRebuilder
@@ -153,6 +153,7 @@ class BackupRebuilder(automat.Automat):
         self.backupsWasRebuilt = []
         self.missingPackets = 0
         self.missingSuppliers = set()
+        self.log_transitions = _Debug
 
     def state_changed(self, oldstate, newstate, event, arg):
         """
@@ -361,8 +362,7 @@ class BackupRebuilder(automat.Automat):
                     'D': [0] * contactsdb.num_suppliers(),
                     'P': [0] * contactsdb.num_suppliers()}
         # detect missing blocks from remote info
-        self.workingBlocksQueue = backup_matrix.ScanMissingBlocks(
-            self.currentBackupID)
+        self.workingBlocksQueue = backup_matrix.ScanMissingBlocks(self.currentBackupID)
         # find the correct max block number for this backup
         # we can have remote and local files
         # will take biggest block number from both
@@ -460,6 +460,10 @@ class BackupRebuilder(automat.Automat):
                     self.currentBackupID, blockNum)
                 localParity = backup_matrix.GetLocalParityArray(
                     self.currentBackupID, blockNum)
+                if supplierNum >= len(remoteData) or supplierNum >= len(remoteParity):
+                    break
+                if supplierNum >= len(localData) or supplierNum >= len(localParity):
+                    break
                 # if remote Data exist and is available because supplier is on-line,
                 # but we do not have it on hand - do request
                 if localData[supplierNum] == 0:

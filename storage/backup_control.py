@@ -43,6 +43,7 @@ _DebugLevel = 12
 import os
 import sys
 import time
+import json
 import cStringIO
 
 try:
@@ -162,7 +163,7 @@ def shutdown():
 #------------------------------------------------------------------------------
 
 
-def WriteIndex(filepath=None):
+def WriteIndex(filepath=None, encoding='utf-8'):
     """
     Write index data base to the local file .bitdust/metadata/index.
     """
@@ -171,12 +172,24 @@ def WriteIndex(filepath=None):
         return
     if filepath is None:
         filepath = settings.BackupIndexFilePath()
+    json_data = {}
+    # json_data = backup_fs.Serialize(to_json=True, encoding=encoding)
+    for customer_idurl in backup_fs.known_customers():
+        customer_id = global_id.UrlToGlobalID(customer_idurl)
+        json_data[customer_id] = backup_fs.Serialize(
+            iterID=backup_fs.fsID(customer_idurl),
+            to_json=True,
+            encoding=encoding,
+        )
     src = '%d\n' % revision()
-    src += backup_fs.Serialize(to_json=True)
+    src += json.dumps(json_data, indent=2, encoding=encoding)
+    if _Debug:
+        import pprint
+        lg.out(_DebugLevel, pprint.pformat(json_data))
     return bpio.AtomicWriteFile(filepath, src)
 
 
-def ReadIndex(raw_data):
+def ReadIndex(raw_data, encoding='utf-8'):
     """
     Read index data base, ``input`` is a ``cStringIO.StringIO`` object which
     keeps the data.
@@ -188,21 +201,35 @@ def ReadIndex(raw_data):
     if _LoadingFlag:
         return False
     _LoadingFlag = True
-#     try:
-#         new_revision = int(inpt.readline().rstrip('\n'))
-#     except:
-#         _LoadingFlag = False
-#         lg.exc()
-#         return False
     backup_fs.Clear()
     try:
-        count = backup_fs.Unserialize(raw_data, from_json=True)
-    except KeyError:
-        lg.warn('fallback to old (non-json) index format')
-        count = backup_fs.Unserialize(raw_data, from_json=False)
-    except ValueError:
+        json_data = json.loads(raw_data, encoding=encoding)
+    except:
         lg.exc()
-        return False
+        json_data = raw_data
+    if _Debug:
+        import pprint
+        lg.out(_DebugLevel, pprint.pformat(json_data))
+    for customer_id in json_data.keys():
+        if customer_id == 'items':
+            try:
+                count = backup_fs.Unserialize(json_data, from_json=True, decoding=encoding)
+            except:
+                lg.exc()
+                return False
+        else:
+            customer_idurl = global_id.GlobalUserToIDURL(customer_id)
+            try:
+                count = backup_fs.Unserialize(
+                    json_data[customer_id],
+                    iter=backup_fs.fs(customer_idurl),
+                    iterID=backup_fs.fsID(customer_idurl),
+                    from_json=True,
+                    decoding=encoding,
+                )
+            except:
+                lg.exc()
+                return False
     if _Debug:
         lg.out(_DebugLevel, 'backup_control.ReadIndex %d items loaded' % count)
     # local_site.update_backup_fs(backup_fs.ListAllBackupIDsSQL())
@@ -281,7 +308,7 @@ def IncomingSupplierListFiles(newpacket):
     num = contactsdb.supplier_position(supplier_idurl, customer_idurl=customer_idurl)
     if num < -1:
         lg.out(2, 'backup_control.IncomingSupplierListFiles ERROR unknown supplier: %s' % supplier_idurl)
-        return
+        return False
     from supplier import list_files
     from customer import list_files_orator
     src = list_files.UnpackListFiles(newpacket.Payload, settings.ListFilesFormat())
@@ -293,15 +320,22 @@ def IncomingSupplierListFiles(newpacket):
             nameurl.GetName(supplier_idurl), len(paths2remove), len(backups2remove), len(missed_backups)))
     if len(backups2remove) > 0:
         p2p_service.RequestDeleteListBackups(backups2remove)
+        if _Debug:
+            lg.out(_DebugLevel, '    also sent requests to remove %d backups' % len(backups2remove))
     if len(paths2remove) > 0:
         p2p_service.RequestDeleteListPaths(paths2remove)
+        if _Debug:
+            lg.out(_DebugLevel, '    also sent requests to remove %d paths' % len(paths2remove))
     if len(missed_backups) > 0:
         from storage import backup_rebuilder
         backup_rebuilder.AddBackupsToWork(missed_backups)
         backup_rebuilder.A('start')
+        if _Debug:
+            lg.out(_DebugLevel, '    also triggered service_rebuilding with %d missed backups' % len(missed_backups))
     del backups2remove
     del paths2remove
     del missed_backups
+    return True
 
 
 def IncomingSupplierBackupIndex(newpacket):
@@ -339,7 +373,7 @@ def IncomingSupplierBackupIndex(newpacket):
         index_synchronizer.A('index-file-received', (newpacket, supplier_revision))
     if revision() >= supplier_revision:
         inpt.close()
-        lg.out(4, 'backup_control.IncomingSupplierBackupIndex skipped, supplier %s revision=%d, local revision=%d' % (
+        lg.out(4, 'backup_control.IncomingSupplierBackupIndex SKIP, supplier %s revision=%d, local revision=%d' % (
             newpacket.RemoteID, supplier_revision, revision(), ))
         return
     raw_data = inpt.read()
@@ -407,7 +441,7 @@ def DeleteBackup(backupID, removeLocalFilesToo=True, saveDB=True, calculate=True
     io_throttle.DeleteBackupRequests(backupID)
     io_throttle.DeleteBackupSendings(backupID)
     # remove interests in transport_control
-    callback.delete_backup_interest(backupID)
+    # callback.delete_backup_interest(backupID)
     # mark it as being deleted in the db, well... just remove it from the index now
     if not backup_fs.DeleteBackupID(backupID):
         return False
@@ -446,22 +480,24 @@ def DeletePathBackups(pathID, removeLocalFilesToo=True, saveDB=True, calculate=T
     item = backup_fs.GetByID(remotePath, iterID=backup_fs.fsID(customer_idurl))
     if item is None:
         return False
+    lg.out(8, 'backup_control.DeletePathBackups ' + pathID)
     # this is a list of all known backups of this path
     versions = item.list_versions()
     for version in versions:
         backupID = packetid.MakeBackupID(customer, remotePath, version)
+        lg.out(8, '        removing %s' % backupID)
         # abort backup if it just started and is running at the moment
         AbortRunningBackup(backupID)
         # if we requested for files for this backup - we do not need it anymore
         io_throttle.DeleteBackupRequests(backupID)
         io_throttle.DeleteBackupSendings(backupID)
         # remove interests in transport_control
-        callback.delete_backup_interest(backupID)
+        # callback.delete_backup_interest(backupID)
         # remove local files for this backupID
         if removeLocalFilesToo:
             backup_fs.DeleteLocalBackup(settings.getLocalBackupsDir(), backupID)
         # remove remote info for this backup from the memory
-        backup_matrix.EraseBackupLocalInfo(backupID)
+        backup_matrix.EraseBackupRemoteInfo(backupID)
         # also remove local info
         backup_matrix.EraseBackupLocalInfo(backupID)
         # finally remove this backup from the index
@@ -506,6 +542,14 @@ class Task():
         self.number = NewTaskNumber()                   # index number for the task
         self.created = time.time()
         self.backupID = None
+        self.pathID = None
+        self.fullGlobPath = None
+        self.fullCustomerID = None
+        self.customerGlobID = None
+        self.customerIDURL = None
+        self.remotePath = None
+        self.keyID = None
+        self.keyAlias = None
         self.result_defer = Deferred()
         self.result_defer.addCallback(OnTaskExecutedCallback)
         self.result_defer.addErrback(OnTaskFailedCallback)
@@ -514,17 +558,54 @@ class Task():
         self.set_local_path(localPath)
         if _Debug:
             lg.out(_DebugLevel, 'new Task created: %r' % self)
+        events.send('backup-task-created', data=dict(
+            number=self.number,
+            created=self.created,
+            backup_id=self.backupID,
+            key_id=self.keyID,
+            path_id=self.pathID,
+            customer_id=self.customerGlobID,
+            path=self.remotePath,
+            local_path=self.localPath,
+            remote_path=self.fullGlobPath,
+        ))
+
+    def destroy(self, message=None):
+        lg.out(4, 'backup_control.Task-%d.destroy %s -> %s' % (
+            self.number, self.localPath, self.backupID))
+        if self.result_defer and not self.result_defer.called:
+            self.result_defer.cancel()
+            self.result_defer = None
+        events.send('backup-task-finished', data=dict(
+            number=self.number,
+            created=self.created,
+            backup_id=self.backupID,
+            key_id=self.keyID,
+            path_id=self.pathID,
+            customer_id=self.customerGlobID,
+            path=self.remotePath,
+            local_path=self.localPath,
+            remote_path=self.fullGlobPath,
+            message=message,
+        ))
 
     def set_path_id(self, pathID):
         parts = global_id.ParseGlobalID(pathID)
-        self.pathID = pathID                            # source path to backup
+        self.pathID = pathID  # source path to backup
         self.customerGlobID = parts['customer']
         self.customerIDURL = parts['idurl']
-        self.remotePath = parts['path']   # here it must be in 0/1/2 form
+        self.remotePath = parts['path']  # here it must be in 0/1/2 form
+        if parts['key_alias']:
+            self.set_key_id(my_keys.make_key_id(alias=parts['key_alias'], creator_glob_id=self.customerGlobID))
         return parts
 
     def set_key_id(self, key_id):
         self.keyID = key_id
+        self.keyAlias = packetid.KeyAlias(self.keyID)
+        self.fullGlobPath = global_id.MakeGlobalID(
+            customer=self.customerGlobID, key_alias=self.keyAlias, path=self.remotePath)
+        self.fullCustomerID = global_id.MakeGlobalID(
+            customer=self.customerGlobID, key_alias=self.keyAlias)
 
     def set_local_path(self, localPath):
         self.localPath = localPath
@@ -593,9 +674,9 @@ class Task():
                 i += 1
             dataID += str(i)
         self.backupID = packetid.MakeBackupID(
-            self.customerGlobID,
-            self.remotePath,
-            dataID,
+            customer=self.fullCustomerID,
+            path_id=self.remotePath,
+            version=dataID,
         )
         if self.backupID in jobs():
             lg.warn('backup job %s already started' % self.backupID)
@@ -641,13 +722,6 @@ class Task():
             self.number, self.pathID, dataID, itemInfo.size, self.localPath))
         return None
 
-    def destroy(self):
-        lg.out(4, 'backup_control.Task-%d.destroy %s -> %s' % (
-            self.number, self.localPath, self.backupID))
-        if self.result_defer and not self.result_defer.called:
-            self.result_defer.cancel()
-            self.result_defer = None
-
 #------------------------------------------------------------------------------
 
 
@@ -655,7 +729,7 @@ def PutTask(pathID, localPath=None, keyID=None):
     """
     Creates a new backup ``Task`` and append it to the list of tasks.
     """
-    pathID = global_id.CanonicalID(pathID, include_key=True)
+    pathID = global_id.CanonicalID(pathID)
     current_task = GetPendingTask(pathID)
     if current_task:
         current_task.set_path_id(pathID)
@@ -693,9 +767,9 @@ def RunTask():
         events.send('backup-task-failed', data=dict(path_id=T.pathID, message=message, ))
         T.result_defer.errback((T.pathID, message))
     else:
-        events.send('backup-task-executed', data=dict(path_id=T.pathID, backup_id=T.backupID, ))
+    #     events.send('backup-task-executed', data=dict(path_id=T.pathID, backup_id=T.backupID, ))
         T.result_defer.callback((T.backupID, None))
-    T.destroy()
+    T.destroy(message)
     return True
 
 
@@ -789,7 +863,7 @@ def OnJobDone(backupID, result):
                         backup_rebuilder.RemoveBackupToWork(backupID)
                         io_throttle.DeleteBackupRequests(backupID)
                         io_throttle.DeleteBackupSendings(backupID)
-                        callback.delete_backup_interest(backupID)
+                        # callback.delete_backup_interest(backupID)
                         backup_fs.DeleteLocalBackup(settings.getLocalBackupsDir(), backupID)
                         backup_matrix.EraseBackupLocalInfo(backupID)
                         backup_matrix.EraseBackupLocalInfo(backupID)
@@ -919,7 +993,7 @@ def StartRecursive(pathID, keyID=None):
     This is will traverse all paths below this ID in the 'tree' and add
     tasks for them.
     """
-    pathID = global_id.CanonicalID(pathID, include_key=True)
+    pathID = global_id.CanonicalID(pathID)
     from storage import backup_monitor
     startedtasks = []
 

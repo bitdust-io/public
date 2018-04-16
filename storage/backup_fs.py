@@ -61,6 +61,7 @@ import sys
 import cStringIO
 import time
 import json
+import random
 
 #------------------------------------------------------------------------------
 
@@ -426,28 +427,45 @@ class FSItemInfo():
 #------------------------------------------------------------------------------
 
 
-def MakeID(itr, startID=-1):
+def MakeID(itr, randomized=True):
     """
     Create a new unique number for the folder to create a index ID.
 
     Parameter ``itrID`` is a reference for a single item in the ``fs()``.
     """
-    _id = 0
-    if startID >= 0:
-        _id = startID
-    _ids = []
+    current_ids = []
     for k in itr.keys():
-        if k != 0:
+        if k == 0:
+            continue
+        if k == settings.BackupIndexFileName():
+            continue
+        try:
             if isinstance(itr[k], int):
-                _ids.append(itr[k])
+                current_ids.append(int(itr[k]))
+            elif isinstance(itr[k], dict) and 0 in itr[k]:
+                current_ids.append(int(itr[k][0]))
+            else:
                 continue
-            _ids.append(itr[k][0])
-    while _id in _ids:
-        _id += 1
-    return _id
+        except:
+            lg.exc()
+            continue
+    new_id = 0
+    if randomized:
+        digits = 1
+        while True:
+            attempts = 0
+            new_id = int(random.choice('0123456789'))
+            while new_id in current_ids and attempts <= 2:
+                new_id = int(''.join([v() for v in [lambda: random.choice('0123456789'), ] * digits]))
+                attempts += 1
+            if new_id not in current_ids:
+                return new_id
+            digits += 1
+    while new_id in current_ids:
+        new_id += 1
+    return new_id
 
 #------------------------------------------------------------------------------
-
 
 def AddFile(path, read_stats=False, iter=None, iterID=None, key_id=None):
     """
@@ -644,7 +662,7 @@ def AddLocalPath(localpath, read_stats=False, iter=None, iterID=None, key_id=Non
     return None, None, None, 0
 
 
-def PutItem(name, parent_path_id, as_folder=False, iter=None, iterID=None, startID=-1, key_id=None):
+def PutItem(name, parent_path_id, as_folder=False, iter=None, iterID=None, key_id=None):
     """
     Acts like AddFile() but do not follow the directory structure. This just
     "bind" some local path (file or dir) to one item in the catalog - by default as a top level item.
@@ -656,7 +674,7 @@ def PutItem(name, parent_path_id, as_folder=False, iter=None, iterID=None, start
     if not iterID:
         iterID = fsID()
     # make an ID for the filename
-    newItemID = MakeID(iter, startID=startID)
+    newItemID = MakeID(iter)
     resultID = (parent_path_id.strip('/') + '/' + str(newItemID)).strip('/')
     typ = DIR if as_folder else FILE
     ii = FSItemInfo(name=remote_path, path_id=resultID, typ=typ, key_id=key_id)
@@ -1111,35 +1129,42 @@ def ExistsBackupID(backupID, iterID=None):
 
 #------------------------------------------------------------------------------
 
-
 def HasChilds(path, iter=None):
     """
     Return True if that item has some childs in the index.
     """
+    if iter is None:
+        iter = fs()
+    if not path or path == '/':
+        return len(iter) > 0
     iter_and_id = WalkByPath(path, iter=iter)
     if iter_and_id is None:
         return False
-    iter, pathid = iter_and_id
+    iter, _ = iter_and_id
     if not isinstance(iter, dict):
         return False
     if 0 not in iter:
         raise Exception('Error, directory ID missed in the index')
-    return len(iter) > 1
+    return len(iter) > 0
 
 
 def HasChildsID(pathID, iterID=None):
     """
     Same, but access to item by its ID.
     """
+    if iterID is None:
+        iterID = fsID()
+    if not pathID:
+        return len(iterID) > 0
     iter_and_path = WalkByID(pathID, iterID=iterID)
     if iter_and_path is None:
         return False
-    iterID, path = iter_and_path
+    iterID, _ = iter_and_path
     if not isinstance(iterID, dict):
         return False
     if INFO_KEY not in iterID:
         raise Exception('Error, directory info missed in the index')
-    return len(iterID) > 1
+    return len(iterID) > 0
 
 #------------------------------------------------------------------------------
 
@@ -1350,14 +1375,30 @@ def IterateIDs(iterID=None):
 #------------------------------------------------------------------------------
 
 
-def GetBackupStatus(backupID, item_info, item_name, parent_path_existed=None):
+def GetBackupStatusInfo(backupID, item_info, item_name, parent_path_existed=None):
     from storage import backup_control
     from storage import restore_monitor
     from storage import backup_matrix
+    blocks, percent, weakBlock, weakPercent = backup_matrix.GetBackupRemoteStats(backupID)
+    totalNumberOfFiles, maxBlockNum, statsArray = backup_matrix.GetBackupStats(backupID)
+    ret = {
+        'state': 'ready',
+        'delivered': misc.percent2string(percent),
+        'reliable': misc.percent2string(weakPercent),
+        'fragments': totalNumberOfFiles,
+        'weak_block': weakBlock,
+        'max_block': maxBlockNum,
+        'suppliers': [{
+            'stored': misc.percent2string(i[0]),
+            'fragments': i[1],
+        } for i in statsArray],
+    }
     if backup_control.IsBackupInProcess(backupID):
         backupObj = backup_control.GetRunningBackupObject(backupID)
         if backupObj:
-            return 'up', misc.percent2string(backupObj.progress())
+            ret['state'] = 'uploading'
+            ret['progress'] = misc.percent2string(backupObj.progress())
+            return ret
     elif restore_monitor.IsWorking(backupID):
         restoreObj = restore_monitor.GetWorkingRestoreObject(backupID)
         if restoreObj:
@@ -1366,16 +1407,14 @@ def GetBackupStatus(backupID, item_info, item_name, parent_path_existed=None):
             percent = 0.0
             if maxBlockNum > 0:
                 percent = 100.0 * currentBlock / maxBlockNum
-            # blocks, percent, weakBlock, weakPercent = backup_matrix.GetBackupRemoteStats(backupID)
-            # return '%s / %s' % (misc.percent2string(percent), misc.percent2string(weakPercent))
-            return 'down', misc.percent2string(percent)
-    blocks, percent, weakBlock, weakPercent = backup_matrix.GetBackupRemoteStats(backupID)
-    # localPercent, localFiles, totalSize, maxBlockNum, localStats = backup_matrix.GetBackupLocalStats(backupID)
-    # return '%s / %s' % (misc.percent2string(localPercent), misc.percent2string(weakPercent))
-    return 'ready', misc.percent2string(weakPercent)
-
+            ret['state'] = 'downloading'
+            ret['progress'] = misc.percent2string(percent)
+            return ret
+    return ret
 
 def ExtractVersions(pathID, item_info, path_exist=None, customer_id=None):
+    if not customer_id:
+        customer_id = item_info.key_id or my_id.getGlobalID(key_alias='master')
     item_size = 0
     item_time = 0
     # item_status = ''
@@ -1397,25 +1436,31 @@ def ExtractVersions(pathID, item_info, path_exist=None, customer_id=None):
                 b[1:5], b[5:7], b[7:9], b[9:11], b[11:13], b[13:15], b[15:17])
         else:
             version_label = backupID
-        version_state, version_status = GetBackupStatus(backupID, item_info, item_info.name(), path_exist)
-        # item_status += version_status + ' '
-        versions.append({
+        backup_info_dict = GetBackupStatusInfo(backupID, item_info, item_info.name(), path_exist)
+        backup_info_dict.update({
             'backup_id': backupID,
-            'backupid': backupID,  # temporary to not brake UI
             'label': version_label,
             'time': version_time,
             'size': version_size,
-            'status': version_status,
-            'state': version_state,
-            'blocks': version_maxblocknum + 1,
         })
+        versions.append(backup_info_dict)
+        # item_status += version_status + ' '
+#         versions.append({
+#             'backup_id': backupID,
+#             # 'backupid': backupID,  # temporary to not brake UI
+#             'label': version_label,
+#             'time': version_time,
+#             'size': version_size,
+#             'status': version_status,
+#             'state': version_state,
+#             'blocks': version_maxblocknum + 1,
+#         })
     # if not item_status:
         # item_status = '-'
     item_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(item_time)) if item_time else ''
     return (item_size, item_time, versions)
 
 #------------------------------------------------------------------------------
-
 
 def ListRootItems(iter=None, iterID=None):
     """
@@ -1544,13 +1589,13 @@ def ListAllBackupIDs(sorted=False, reverse=False, iterID=None):
     """
     if iterID is None:
         iterID = fsID()
-    customer_idurl = customerIDURLFromRootItemID(iterID)
-    customer_id = global_id.UrlToGlobalID(customer_idurl)
+    # customer_idurl = customerIDURLFromRootItemID(iterID)
+    # customer_id = global_id.UrlToGlobalID(customer_idurl)
     lst = []
 
     def visitor(path_id, _, info):
         for version in info.list_versions(sorted, reverse):
-            lst.append(packetid.MakeBackupID(customer_id, path_id.lstrip('/'), version))
+            lst.append(packetid.MakeBackupID(info.key_id, path_id.lstrip('/'), version))
 
     TraverseByID(visitor, iterID=iterID)
     return lst
@@ -1562,13 +1607,13 @@ def ListAllBackupIDsFull(sorted=False, reverse=False, iterID=None):
     """
     if iterID is None:
         iterID = fsID()
-    customer_idurl = customerIDURLFromRootItemID(iterID)
-    customer_id = global_id.UrlToGlobalID(customer_idurl)
+    # customer_idurl = customerIDURLFromRootItemID(iterID)
+    # customer_id = global_id.UrlToGlobalID(customer_idurl)
     lst = []
 
     def visitor(path_id, path, info):
         for version in info.list_versions(sorted=sorted, reverse=reverse):
-            backupID = packetid.MakeBackupID(customer_id, path_id.lstrip('/'), version)
+            backupID = packetid.MakeBackupID(info.key_id, path_id.lstrip('/'), version)
             lst.append((info.name(), backupID, info.get_version_info(version), ResolvePath(path), info))
 
     TraverseByID(visitor, iterID=iterID)
@@ -1616,7 +1661,7 @@ def ListExpandedFoldersAndBackups(expanded_dirs, selected_items, iterID=None):
     return lst, backups
 
 
-def ListChildsByPath(path, iter=None, iterID=None):
+def ListChildsByPath(path, recursive=False, iter=None, iterID=None):
     """
     List all items at given ``path`` and return data as a list of dict objects.
     Return string with error message if operation failed.
@@ -1625,8 +1670,8 @@ def ListChildsByPath(path, iter=None, iterID=None):
         iter = fs()
     if iterID is None:
         iterID = fsID()
-    customer_idurl = customerIDURLFromRootItem(iter)
-    customer_id = global_id.UrlToGlobalID(customer_idurl)
+    # customer_idurl = customerIDURLFromRootItem(iter)
+    # customer_id = global_id.UrlToGlobalID(customer_idurl)
     if path == '/':
         path = ''
     path = bpio.remotePath(path)
@@ -1644,11 +1689,12 @@ def ListChildsByPath(path, iter=None, iterID=None):
     if isinstance(iterID, FSItemInfo):
         return 'path "%s" is a file' % path
     result = []
+    sub_dirs = []
 
     def visitor(item_type, item_name, item_path_id, item_info, num_childs):
         item_id = (pathID + '/' + item_path_id).strip('/')
-        (item_size, item_time, versions) = ExtractVersions(item_id, item_info, path_exist, customer_id)
-        result.append({
+        (item_size, item_time, versions) = ExtractVersions(item_id, item_info, path_exist)  # , customer_id)
+        i = {
             'type': item_type,
             'name': item_info.name(),
             'path': ResolvePath(path, item_info.name()),
@@ -1658,9 +1704,19 @@ def ListChildsByPath(path, iter=None, iterID=None):
             'childs': num_childs,
             'item': item_info.serialize(to_json=True),
             'versions': versions,
-        })
+        }
+        result.append(i)
+        if item_type == DIR:
+            sub_dirs.append(i)
 
     TraverseChildsByID(visitor, iterID)
+
+    if recursive:
+        for sub_dir in sub_dirs:
+            sub_lookup = ListChildsByPath(sub_dir['path'])
+            if not isinstance(sub_lookup, list):
+                return sub_lookup
+            result.extend(sub_lookup)
     return result
 
 
@@ -1675,8 +1731,8 @@ def ListByPathAdvanced(path, iter=None, iterID=None):
         iter = fs()
     if iterID is None:
         iterID = fsID()
-    customer_idurl = customerIDURLFromRootItem(iter)
-    customer_id = global_id.UrlToGlobalID(customer_idurl)
+    # customer_idurl = customerIDURLFromRootItem(iter)
+    # customer_id = global_id.UrlToGlobalID(customer_idurl)
     if path == '/':
         path = ''
     path = bpio.remotePath(path)
@@ -1696,12 +1752,12 @@ def ListByPathAdvanced(path, iter=None, iterID=None):
     def visitor(item_type, item_name, item_path_id, item_info, num_childs):
         if item_type == DIR:
             item_id = (pathID + '/' + item_path_id).strip('/')
-            (item_size, item_time, versions) = ExtractVersions(item_id, item_info, path_exist, customer_id)
+            (item_size, item_time, versions) = ExtractVersions(item_id, item_info, path_exist)  # , customer_id)
             result.append(('dir', item_info.name(), item_id,
                            item_size, item_time, path, num_childs, item_info, versions))
         elif item_type == FILE:
             item_id = (pathID + '/' + item_path_id).strip('/')
-            (item_size, item_time, versions) = ExtractVersions(item_id, item_info, path_exist, customer_id)
+            (item_size, item_time, versions) = ExtractVersions(item_id, item_info, path_exist)  # , customer_id)
             result.append(('file', item_info.name(), item_id,
                            item_size, item_time, path, False, item_info, versions))
 
@@ -1715,8 +1771,8 @@ def ListAllBackupIDsAdvanced(sorted=False, reverse=False, iterID=None):
     """
     if not iterID:
         iterID = fsID()
-    customer_idurl = customerIDURLFromRootItemID(iterID)
-    customer_id = global_id.UrlToGlobalID(customer_idurl)
+    # customer_idurl = customerIDURLFromRootItemID(iterID)
+    # customer_id = global_id.UrlToGlobalID(customer_idurl)
 
     result = []
 
@@ -1724,7 +1780,7 @@ def ListAllBackupIDsAdvanced(sorted=False, reverse=False, iterID=None):
         if (len(info.versions) == 0):
             return
         dirpath = os.path.dirname(path)
-        (item_size, item_time, versions) = ExtractVersions(path_id, info, dirpath, customer_id)
+        (item_size, item_time, versions) = ExtractVersions(path_id, info, dirpath)  # , customer_id)
         if info.type == DIR:
             result.append(('dir', info.name(), path_id,
                            item_size, item_time, dirpath, num_childs, info.exist(), versions,))
@@ -1821,7 +1877,8 @@ def Scan(basedir=None, customer_idurl=None):
     if not customer_idurl:
         customer_idurl = my_id.getLocalID()
     if basedir is None:
-        basedir = os.path.join(settings.getLocalBackupsDir(), global_id.UrlToGlobalID(customer_idurl))
+        basedir = settings.getLocalBackupsDir()
+        # os.path.join(settings.getLocalBackupsDir(), global_id.UrlToGlobalID(customer_idurl))
     iterID = fsID(customer_idurl)
     summ = [0, 0, ]
 
@@ -1829,7 +1886,11 @@ def Scan(basedir=None, customer_idurl=None):
         info.read_stats(path)
         if info.exist():
             summ[0] += info.size
-        versions_path = bpio.portablePath(os.path.join(basedir, path_id))
+        key_alias = 'master'
+        if info.key_id:
+            key_alias = packetid.KeyAlias(info.key_id)
+        customer_id = global_id.MakeGlobalID(idurl=customer_idurl, key_alias=key_alias)
+        versions_path = bpio.portablePath(os.path.join(basedir, customer_id, path_id))
         summ[1] += info.read_versions(versions_path)
 
     TraverseByID(visitor, iterID=iterID)
@@ -1843,17 +1904,22 @@ def ScanID(pathID, basedir=None, customer_idurl=None):
     if not customer_idurl:
         customer_idurl = my_id.getLocalID()
     if basedir is None:
-        basedir = os.path.join(settings.getLocalBackupsDir(), global_id.UrlToGlobalID(customer_idurl))
+        basedir = settings.getLocalBackupsDir()
+        # basedir = os.path.join(settings.getLocalBackupsDir(), global_id.UrlToGlobalID(customer_idurl))
     iter_and_path = WalkByID(pathID, iterID=fs(customer_idurl))
     if not iter_and_path:
         return
-    iter, path = iter_and_path
+    itr, path = iter_and_path
     if isinstance(iter, dict):
         if INFO_KEY not in iter:
             return
-        iter = iter[INFO_KEY]
-    iter.read_stats(path)
-    iter.read_versions(bpio.portablePath(os.path.join(basedir, pathID)))
+        itr = iter[INFO_KEY]
+    key_alias = 'master'
+    if itr and itr.key_id:
+        key_alias = packetid.KeyAlias(itr.key_id)
+    customer_id = global_id.MakeGlobalID(idurl=customer_idurl, key_alias=key_alias)
+    itr.read_stats(path)
+    itr.read_versions(bpio.portablePath(os.path.join(basedir, customer_id)))
 
 
 def Calculate(iterID=None):
@@ -1946,17 +2012,20 @@ def Clear(customer_idurl=None):
     fsID(customer_idurl=customer_idurl).clear()
 
 
-def Serialize(iterID=None, to_json=False, encoding='utf-8'):
+def Serialize(iterID=None, to_json=False, encoding='utf-8', filter_cb=None):
     """
     Use this to write index to the local file.
     """
     cnt = [0]
     if to_json:
-        result = {'items': []}
+        result = {'items': [], }
     else:
         result = cStringIO.StringIO()
 
     def cb(path_id, path, info):
+        if filter_cb is not None:
+            if not filter_cb(path_id, path, info):
+                return
         if to_json:
             result['items'].append(info.serialize(encoding=encoding, to_json=True))
         else:
@@ -1965,7 +2034,8 @@ def Serialize(iterID=None, to_json=False, encoding='utf-8'):
 
     TraverseByID(cb, iterID=iterID)
     if to_json:
-        src = json.dumps(result, indent=2, encoding=encoding)
+        # src = json.dumps(result, indent=2, encoding=encoding)
+        src = result
     else:
         src = result.getvalue()
         result.close()
@@ -1979,7 +2049,8 @@ def Unserialize(raw_data, iter=None, iterID=None, from_json=False, decoding='utf
     """
     count = 0
     if from_json:
-        json_data = json.loads(raw_data, encoding=decoding)
+        # json_data = json.loads(raw_data, encoding=decoding)
+        json_data = raw_data
         for json_item in json_data['items']:
             item = FSItemInfo()
             item.unserialize(json_item, decoding=decoding, from_json=True)
@@ -2037,23 +2108,28 @@ def _test():
     inpt = cStringIO.StringIO(src)
     inpt.readline()
     # count = Unserialize(inpt)
-    count = Unserialize(inpt.read(), from_json=True)
+    json_data = json.loads(inpt.read())
+    customer_id = 'veselin@veselin-p2p.ru'
+    customer_idurl = global_id.GlobalUserToIDURL(customer_id)
+    count = Unserialize(json_data[customer_id], from_json=True, iter=fs(customer_idurl))
     inpt.close()
     # print count
     Scan()
     Calculate()
+    
+    
     # pprint.pprint(fs())
     # print
     # pprint.pprint(fsID())
     # print
 
 #     print AddDir('dir1/dir2')
-    ii = GetIteratorsByPath('dir1')
-    print ii
-    print PutItem('fff', as_folder=False, iter=ii[0], iterID=ii[1])
-
-    print IsDir('dir1')
-    print IsFile('dir2/fff')
+#     ii = GetIteratorsByPath('dir1')
+#     print ii
+#     print PutItem('fff', as_folder=False, iter=ii[0], iterID=ii[1])
+# 
+#     print IsDir('dir1')
+#     print IsFile('dir2/fff')
 
     print '------------'
     pprint.pprint(fs())
@@ -2061,6 +2137,12 @@ def _test():
     pprint.pprint(fsID())
     print
 
+    print HasChilds('', iter=fs(customer_idurl))
+
+#     for i in range(10000):
+#         r = AddFile('file' + str(i))
+#         print r[0], len(fs())
+#         # pprint.pprint(fs())
 
     # PutItem('dir4', as_folder=True)
 
