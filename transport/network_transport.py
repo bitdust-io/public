@@ -208,6 +208,8 @@ class NetworkTransport(automat.Automat):
         """
         Action method.
         """
+        if _Debug:
+            lg.out(8, 'network_transport.doInit : %s' % str(arg))
         gateway.attach(self)
         try:
             listener, state_changed_callback = arg

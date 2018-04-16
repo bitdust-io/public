@@ -283,7 +283,7 @@ class AccountantNode(automat.Automat):
         Action method.
         """
         from coins import accountants_finder
-        accountants_finder.A('start', (self.automat, 'join'))
+        accountants_finder.A('start', (self.automat, {'action': 'join', }))
 
     def doAddAccountant(self, arg):
         """
@@ -444,8 +444,6 @@ class AccountantNode(automat.Automat):
         return True
 
     def _on_inbox_packet(self, newpacket, info, status, error_message):
-        if status != 'finished':
-            return False
         if _Debug:
             lg.out(_DebugLevel, 'accountant_node._on_inbox_packet %r' % newpacket)
         if newpacket.Command == commands.RetrieveCoin():

@@ -78,6 +78,7 @@ def init():
     load_correspondents(settings.CorrespondentIDsFilename())
     if _CorrespondentsChangedCallback is not None:
         _CorrespondentsChangedCallback([], correspondents())
+    AddContactsChangedCallback(on_contacts_changed)
 
 
 def shutdown():
@@ -86,6 +87,7 @@ def shutdown():
     global _SuppliersChangedCallback
     global _CustomersChangedCallback
     lg.out(4, "contactsdb.shutdown")
+    RemoveContactsChangedCallback(on_contacts_changed)
     if _SuppliersChangedCallback is not None:
         _SuppliersChangedCallback = None
     if _CustomersChangedCallback is not None:
@@ -118,6 +120,17 @@ def customers():
     global _CustomersList
     return _CustomersList
 
+
+def all_suppliers():
+    """
+    """
+    global _SuppliersList
+    result = []
+    for suppliers_list in _SuppliersList.values():
+        for supplier_idurl in suppliers_list:
+            if supplier_idurl not in result:
+                result.append(supplier_idurl)
+    return result
 
 def contacts(include_all=False):
     """
@@ -200,12 +213,20 @@ def add_supplier(idurl, position=-1, customer_idurl=None):
 
 def clear_suppliers(customer_idurl=None):
     """
-    Remove all suppliers.
+    Remove all suppliers for given customer, if customer_idurl is None will erase all my suppliers.
     """
     global _SuppliersList
     if not customer_idurl:
         customer_idurl = my_id.getLocalID()
     _SuppliersList.pop(customer_idurl)
+
+
+def clear_all_suppliers():
+    """
+    Remove all suppliers.
+    """
+    global _SuppliersList
+    _SuppliersList.clear()
 
 
 def clear_customers():
@@ -367,6 +388,16 @@ def num_suppliers(customer_idurl=None):
     Return current number of suppliers.
     """
     return len(suppliers(customer_idurl=customer_idurl))
+
+
+def total_suppliers():
+    """
+    """
+    global _SuppliersList
+    result = set()
+    for suppliers_list in _SuppliersList.values():
+        result.update(set(suppliers_list))
+    return len(result)
 
 
 def supplier(index, customer_idurl=None):
@@ -559,7 +590,6 @@ def get_correspondent_identity(idurl):
 
 def get_correspondent_nickname(correspondent_idurl):
     """
-    
     """
     for idurl, nickname in correspondents():
         if idurl == correspondent_idurl:
@@ -575,6 +605,11 @@ def find_correspondent_by_nickname(nickname):
 
 #------------------------------------------------------------------------------
 
+def on_contacts_changed(old_contacts_list, new_contacts_list):
+    from main import events
+    events.send('contacts-changed', data=dict(old_contacts=old_contacts_list, new_contacts=new_contacts_list))
+
+#------------------------------------------------------------------------------
 
 def SetSuppliersChangedCallback(cb):
     """
@@ -603,6 +638,8 @@ def SetCorrespondentsChangedCallback(cb):
 def AddContactsChangedCallback(cb):
     """
     Set callback to fire when any contact were changed.
+
+    on_contacts_changed(old_contacts_list, new_contacts_list)
     """
     global _ContactsChangedCallbacks
     _ContactsChangedCallbacks.append(cb)

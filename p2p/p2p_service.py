@@ -45,24 +45,16 @@ TODO: need to move logic from this monolitic file into a services
 #------------------------------------------------------------------------------
 
 _Debug = True
-_DebugLevel = 4
+_DebugLevel = 2
 
 #------------------------------------------------------------------------------
 
 import os
-import sys
 import json
-
-try:
-    from twisted.internet import reactor
-except:
-    sys.exit('Error initializing twisted.internet.reactor in p2p_service.py')
 
 #------------------------------------------------------------------------------
 
 from logs import lg
-
-from system import bpio
 
 from userid import my_id
 from userid import identity
@@ -82,9 +74,6 @@ from crypt import signed
 from main import settings
 
 from transport import gateway
-from transport import callback
-
-from services import driver
 
 #------------------------------------------------------------------------------
 
@@ -92,13 +81,11 @@ from services import driver
 def init():
     if _Debug:
         lg.out(_DebugLevel, 'p2p_service.init')
-    callback.append_inbox_callback(inbox)
 
 
 def shutdown():
     if _Debug:
         lg.out(_DebugLevel, 'p2p_service.shutdown')
-    callback.remove_inbox_callback(inbox)
 
 #------------------------------------------------------------------------------
 
@@ -109,7 +96,6 @@ def inbox(newpacket, info, status, error_message):
     if newpacket.CreatorID != my_id.getLocalID() and newpacket.RemoteID != my_id.getLocalID():
         # packet is NOT for us, skip
         return False
-
     commandhandled = False
     if newpacket.Command == commands.Ack():
         # a response from remote node, typically handled in other places
@@ -121,42 +107,46 @@ def inbox(newpacket, info, status, error_message):
         commandhandled = False
     elif newpacket.Command == commands.Retrieve():
         # retrieve some packet customer stored with us
+        # handled by service_supplier()
         Retrieve(newpacket)
-        commandhandled = True
+        commandhandled = False
     elif newpacket.Command == commands.RequestService():
         # other node send us a request to get some service
+        # handled by service_p2p_hookups()
         RequestService(newpacket, info)
-        commandhandled = True
+        commandhandled = False
     elif newpacket.Command == commands.CancelService():
         # other node wants to stop the service we gave him
+        # handled by service_p2p_hookups()
         CancelService(newpacket, info)
-        commandhandled = True
+        commandhandled = False
     elif newpacket.Command == commands.Data():
-        # new packet to store for customer
-        commandhandled = Data(newpacket)
+        # new packet to store for customer, or data coming back from supplier
+        # handled by service_backups() and service_supplier()
+        Data(newpacket)
+        commandhandled = False
     elif newpacket.Command == commands.ListFiles():
         # customer wants list of their files
-        ListFiles(newpacket)
-        commandhandled = True
+        # handled by service_supplier()
+        ListFiles(newpacket, info)
+        commandhandled = False
     elif newpacket.Command == commands.Files():
         # supplier sent us list of files
+        # handled by service_backups()
         Files(newpacket, info)
-        commandhandled = True
+        commandhandled = False
     elif newpacket.Command == commands.DeleteFile():
-        # will Delete a customer file for them
+        # handled by service_supplier()
         DeleteFile(newpacket)
-        commandhandled = True
+        commandhandled = False
     elif newpacket.Command == commands.DeleteBackup():
-        # will Delete all files starting in a backup
+        # handled by service_supplier()
         DeleteBackup(newpacket)
-        commandhandled = True
-    elif newpacket.Command == commands.Message():
-        # will be handled in message.py
         commandhandled = False
     elif newpacket.Command == commands.Correspondent():
-        # contact asking for our current identity
+        # TODO: contact asking for our current identity, not implemented yet
         Correspondent(newpacket)
-        commandhandled = True
+        commandhandled = False
     elif newpacket.Command == commands.Broadcast():
         # handled by service_broadcasting()
         Broadcast(newpacket, info)
@@ -168,6 +158,18 @@ def inbox(newpacket, info, status, error_message):
     elif newpacket.Command == commands.RetrieveCoin():
         # handled by service_accountant()
         RetrieveCoin(newpacket, info)
+        commandhandled = False
+    elif newpacket.Command == commands.Key():
+        # handled by service_keys_registry()
+        Key(newpacket, info)
+        commandhandled = False
+    elif newpacket.Command == commands.Event():
+        # handled by service_p2p_hookups()
+        Event(newpacket, info)
+        commandhandled = False
+    elif newpacket.Command == commands.Message():
+        # handled by service_private_messages()
+        Message(newpacket, info)
         commandhandled = False
 
     return commandhandled
@@ -181,55 +183,11 @@ def outbox(outpacket):
 #------------------------------------------------------------------------------
 
 
-def constructFilename(customerIDURL, packetID):
-    customerGlobID, packetID = packetid.SplitPacketID(packetID)
-    if customerGlobID:
-        customerIDURL_packet = global_id.GlobalUserToIDURL(customerGlobID)
-        if customerIDURL_packet != customerIDURL:
-            lg.warn('construct filename for another customer: %s != %s' % (
-                customerIDURL_packet, customerIDURL))
-    customerDirName = nameurl.UrlFilename(customerIDURL)
-    customersDir = settings.getCustomersFilesDir()
-    if not os.path.exists(customersDir):
-        bpio._dir_make(customersDir)
-    ownerDir = os.path.join(customersDir, customerDirName)
-    if not os.path.exists(ownerDir):
-        bpio._dir_make(ownerDir)
-    filename = os.path.join(ownerDir, packetID)
-    return filename
-
-
-def makeFilename(customerIDURL, packetID):
-    """
-    Must be a customer, and then we make full path filename for where this
-    packet is stored locally.
-    """
-    customerGlobID, packetID = packetid.SplitPacketID(packetID)
-    if not packetid.Valid(packetID):  # SECURITY
-        if packetID not in [settings.BackupInfoFileName(),
-                            settings.BackupInfoFileNameOld(),
-                            settings.BackupInfoEncryptedFileName(),
-                            settings.BackupIndexFileName()]:
-            # lg.out(1, "p2p_service.makeFilename ERROR failed packetID format: " + packetID )
-            return ''
-    if not contactsdb.is_customer(customerIDURL):  # SECURITY
-        lg.warn("%s is not a customer" % (customerIDURL))
-        return ''
-    if customerGlobID:
-        customerIDURL_packet = global_id.GlobalUserToIDURL(customerGlobID)
-        if customerIDURL_packet != customerIDURL:
-            lg.warn('making filename for another customer: %s != %s' % (
-                customerIDURL_packet, customerIDURL))
-    return constructFilename(customerIDURL, packetID)
-
-#------------------------------------------------------------------------------
-
-
 def Ack(newpacket, info):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.Ack %s from [%s] at %s://%s : %s" % (
+        lg.out(_DebugLevel, "p2p_service.Ack %s from [%s] at %s://%s with %d bytes payload" % (
             newpacket.PacketID, nameurl.GetName(newpacket.CreatorID),
-            info.proto, info.host, newpacket.Payload))
+            info.proto, info.host, len(newpacket.Payload)))
 
 
 def SendAck(packettoack, response='', wide=False, callbacks={}, packetid=None):
@@ -241,7 +199,8 @@ def SendAck(packettoack, response='', wide=False, callbacks={}, packetid=None):
         response,
         packettoack.OwnerID)
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendAck %s to %s    response: %s ..." % (result.PacketID, result.RemoteID, str(response)[:15]))
+        lg.out(_DebugLevel, "p2p_service.SendAck %s to %s  with %d bytes" % (
+            result.PacketID, result.RemoteID, len(response)))
     gateway.outbox(result, wide=wide, callbacks=callbacks)
     return result
 
@@ -255,7 +214,8 @@ def SendAckNoRequest(remoteID, packetid, response='', wide=False, callbacks={}):
         response,
         remoteID)
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendAckNoRequest %s to %s    response: %s ..." % (result.PacketID, result.RemoteID, str(response)[:15]))
+        lg.out(_DebugLevel, "p2p_service.SendAckNoRequest packetID=%s to %s  with %d bytes" % (
+            result.PacketID, result.RemoteID, len(response)))
     gateway.outbox(result, wide=wide, callbacks=callbacks)
 
 #------------------------------------------------------------------------------
@@ -266,7 +226,7 @@ def Fail(newpacket):
         lg.out(_DebugLevel, "p2p_service.Fail from [%s]: %s" % (newpacket.CreatorID, newpacket.Payload))
 
 
-def SendFail(request, response='', remote_idurl=None):
+def SendFail(request, response='', remote_idurl=None, wide=False):
     if remote_idurl is None:
         remote_idurl = request.OwnerID
     result = signed.Packet(
@@ -278,9 +238,9 @@ def SendFail(request, response='', remote_idurl=None):
         remote_idurl,
     )
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendFail %s to %s    response: %s ..." % (
-            result.PacketID, result.RemoteID, str(response)[:40]))
-    gateway.outbox(result)
+        lg.out(_DebugLevel, "p2p_service.SendFail packetID=%s to %s  with %d bytes" % (
+            result.PacketID, result.RemoteID, len(response)))
+    gateway.outbox(result, wide=wide)
     return result
 
 
@@ -294,7 +254,7 @@ def SendFailNoRequest(remoteID, packetID, response):
         remoteID,
     )
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendFailNoRequest %s to %s" % (result.PacketID, result.RemoteID))
+        lg.out(_DebugLevel, "p2p_service.SendFailNoRequest packetID=%s to %s" % (result.PacketID, result.RemoteID))
     gateway.outbox(result)
     return result
 
@@ -307,6 +267,7 @@ def Identity(newpacket):
     Checks that identity is signed correctly.
     Sending requests to cache all sources (other identity servers) holding that identity.
     """
+    # TODO:  move to service_gateway
     newxml = newpacket.Payload
     newidentity = identity.identity(xmlsrc=newxml)
     # SECURITY
@@ -325,12 +286,13 @@ def Identity(newpacket):
     if newpacket.OwnerID == idurl:
         # TODO: this needs to be moved to a service
         # wide=True : a small trick to respond to all contacts if we receive pings
-        SendAck(newpacket, wide=True)
         if _Debug:
-            lg.out(_DebugLevel, "p2p_service.Identity from [%s], sent wide Acks" % nameurl.GetName(idurl))
+            lg.out(_DebugLevel, "p2p_service.Identity idurl=%s  ... also sent WIDE Acks" % nameurl.GetName(idurl))
     else:
         if _Debug:
-            lg.out(_DebugLevel, "p2p_service.Identity from [%s]" % nameurl.GetName(idurl))
+            lg.out(_DebugLevel, "p2p_service.Identity idurl=%s, but packet ownerID=%s  ... also sent WIDE Acks" % (
+                nameurl.GetName(idurl), newpacket.OwnerID, ))
+    SendAck(newpacket, wide=True)
     # TODO: after receiving the full identity sources we can call ALL OF them if some are not cached yet.
     # this way we can be sure that even if first source (server holding your public key) is not availabble
     # other sources still can give you required user info: public key, contacts, etc..
@@ -343,16 +305,20 @@ def Identity(newpacket):
     return True
 
 
-def SendIdentity(remote_idurl, wide=False, callbacks={}):
+def SendIdentity(remote_idurl, wide=False, timeout=10, callbacks={}):
     """
     """
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendIdentity to %s" % nameurl.GetName(remote_idurl))
+        lg.out(_DebugLevel, "p2p_service.SendIdentity to %s wide=%s" % (nameurl.GetName(remote_idurl), wide, ))
     result = signed.Packet(
-        commands.Identity(), my_id.getLocalID(),
-        my_id.getLocalID(), 'identity',
-        my_id.getLocalIdentity().serialize(), remote_idurl)
-    gateway.outbox(result, wide=wide, callbacks=callbacks)
+        Command=commands.Identity(),
+        OwnerID=my_id.getLocalID(),
+        CreatorID=my_id.getLocalID(),
+        PacketID='identity',
+        Payload=my_id.getLocalIdentity().serialize(),
+        RemoteID=remote_idurl,
+    )
+    gateway.outbox(result, wide=wide, callbacks=callbacks, response_timeout=timeout)
     return result
 
 #------------------------------------------------------------------------------
@@ -361,91 +327,139 @@ def SendIdentity(remote_idurl, wide=False, callbacks={}):
 def RequestService(request, info):
     """
     """
-    if len(request.Payload) > 1024 * 10:
-        return SendFail(request, 'too long payload')
-    # TODO: move code into driver module, use callback module here instead of direct call
-    words = request.Payload.split(' ')
-    if len(words) < 1:
-        lg.warn("got wrong payload in %s" % request)
-        return SendFail(request, 'wrong payload')
-    service_name = words[0]
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.RequestService %s : %s" % (request.OwnerID, service_name))
-    if not driver.is_exist(service_name):
-        lg.warn("got wrong payload in %s" % service_name)
-        return SendFail(request, 'service %s not exist' % service_name)
-    if not driver.is_on(service_name):
-        return SendFail(request, 'service %s is off' % service_name)
-    return driver.request(service_name, request, info)
+        lg.out(_DebugLevel, 'p2p_service.RequestService %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID))
 
 
-def SendRequestService(remote_idurl, service_info, wide=False, callbacks={}):
+def SendRequestService(remote_idurl, service_name, json_payload={}, wide=False, callbacks={}, timeout=10):
+    service_info = {
+        'name': service_name,
+        'payload': json_payload,
+    }
+    service_info_raw = json.dumps(service_info)
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendRequestService to %s [%s]" % (
-            nameurl.GetName(remote_idurl), service_info.replace('\n', ' ')[:40]))
+        lg.out(_DebugLevel, 'p2p_service.SendRequestService "%s" to %s with %d bytes payload' % (
+            service_name, remote_idurl, len(service_info_raw)))
     result = signed.Packet(
         commands.RequestService(),
         my_id.getLocalID(),
         my_id.getLocalID(),
         packetid.UniqueID(),
-        service_info,
-        remote_idurl)
-    gateway.outbox(result, wide=wide, callbacks=callbacks)
+        service_info_raw,
+        remote_idurl, )
+    gateway.outbox(result, wide=wide, callbacks=callbacks, response_timeout=timeout)
     return result
 
 
 def CancelService(request, info):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.CancelService")
-    # TODO: move code into driver module, use callback module here instead of direct call
-    words = request.Payload.split(' ')
-    if len(words) < 1:
-        lg.warn("got wrong payload in %s" % request)
-        return SendFail(request, 'wrong payload')
-    service_name = words[0]
-    # TODO: add validation
-    if not driver.is_exist(service_name):
-        lg.warn("got wrong payload in %s" % request)
-        return SendFail(request, 'service %s not exist' % service_name)
-    if not driver.is_on(service_name):
-        return SendFail(request, 'service %s is off' % service_name)
-    return driver.cancel(service_name, request, info)
+        lg.out(_DebugLevel, 'p2p_service.CancelService %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID))
 
 
-def SendCancelService(remote_idurl, service_info, callbacks={}):
+def SendCancelService(remote_idurl, service_name, json_payload={}, wide=False, callbacks={}):
+    service_info = {
+        'name': service_name,
+        'payload': json_payload,
+    }
+    service_info_raw = json.dumps(service_info)
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendCancelService [%s]" % service_info.replace('\n', ' ')[:40])
-    result = signed.Packet(commands.CancelService(), my_id.getLocalID(), my_id.getLocalID(),
-                           packetid.UniqueID(), service_info, remote_idurl)
-    gateway.outbox(result, callbacks=callbacks)
+        lg.out(_DebugLevel, 'p2p_service.SendCancelService "%s" to %s with %d bytes payload' % (
+            service_name, remote_idurl, len(service_info_raw)))
+    result = signed.Packet(
+        commands.CancelService(),
+        my_id.getLocalID(),
+        my_id.getLocalID(),
+        packetid.UniqueID(),
+        service_info_raw,
+        remote_idurl, )
+    gateway.outbox(result, wide=wide, callbacks=callbacks)
     return result
 
 #------------------------------------------------------------------------------
 
-def ListFiles(request):
+def ListFiles(request, info):
     """
     We will want to use this to see what needs to be resent, and expect normal
     case is very few missing.
-
     This is to build the ``Files()`` we are holding for a customer.
-    """
-    if not driver.is_on('service_supplier'):
-        return SendFail(request, 'supplier service is off')
-    # TODO: use callback module here instead of direct call
-    from supplier import list_files
-    return list_files.send(request.OwnerID, request.PacketID, request.Payload)
-
-
-def Files(newpacket, info):
-    """
-    A directory list came in from some supplier.
+    You run service_list_files locally and send ListFiles() to your suppliers
+    They repply fith Files() if service_supplier is started on their side
     """
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.Files from [%s] at %s://%s" % (
-            nameurl.GetName(newpacket.OwnerID), info.proto, info.host))
-    # TODO: use callback module here instead of direct call
-    from storage import backup_control
-    backup_control.IncomingSupplierListFiles(newpacket)
+        lg.out(_DebugLevel, 'p2p_service.ListFiles %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID))
+
+
+def SendListFiles(supplierNumORidurl, customer_idurl=None, wide=False, callbacks={}):
+    """
+    This is used as a request method from your supplier : if you send him a ListFiles() packet
+    he will reply you with a list of stored files in a Files() packet.
+    """
+    MyID = my_id.getLocalID()
+    if not customer_idurl:
+        customer_idurl = MyID
+    if not str(supplierNumORidurl).isdigit():
+        RemoteID = supplierNumORidurl
+    else:
+        RemoteID = contactsdb.supplier(supplierNumORidurl, customer_idurl=customer_idurl)
+    if not RemoteID:
+        lg.warn("RemoteID is empty supplierNumORidurl=%s" % str(supplierNumORidurl))
+        return None
+    if _Debug:
+        lg.out(_DebugLevel, "p2p_service.SendListFiles to %s" % nameurl.GetName(RemoteID))
+    PacketID = "%s:%s" % (global_id.UrlToGlobalID(customer_idurl), packetid.UniqueID())
+    Payload = settings.ListFilesFormat()
+    result = signed.Packet(
+        Command=commands.ListFiles(),
+        OwnerID=MyID,
+        CreatorID=MyID,
+        PacketID=PacketID,
+        Payload=Payload,
+        RemoteID=RemoteID,
+    )
+    gateway.outbox(result, wide=wide, callbacks=callbacks)
+    return result
+
+#------------------------------------------------------------------------------
+
+def Files(request, info):
+    """
+    A directory list came in from some supplier or another customer.
+    """
+    if _Debug:
+        lg.out(_DebugLevel, 'p2p_service.Files %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID))
+
+
+def SendFiles(idurl, raw_list_files_info, packet_id=None, callbacks={}, timeout=10, ):
+    """
+    Sending information about known files stored locally for given customer (if you are supplier).
+    You can also send a list of your files to another user if you wish to grand access.
+    This will not send any personal data : only file names, ids, versions, etc.
+    So pass list of files in encrypted form in the `payload` or leave it empty.
+    """
+    MyID = my_id.getLocalID()
+    if not packet_id:
+        packet_id = "%s:%s" % (global_id.UrlToGlobalID(idurl), packetid.UniqueID())
+    if _Debug:
+        lg.out(_DebugLevel, 'p2p_service.SendFiles %d bytes in packetID=%s' % (len(raw_list_files_info), packet_id))
+        lg.out(_DebugLevel, '  to remoteID=%s' % idurl)
+    newpacket = signed.Packet(
+        Command=commands.Files(),
+        OwnerID=MyID,
+        CreatorID=MyID,
+        PacketID=packet_id,
+        Payload=raw_list_files_info,
+        RemoteID=idurl,
+    )
+    result = gateway.outbox(newpacket, callbacks=callbacks, response_timeout=timeout)
+    return result
 
 #------------------------------------------------------------------------------
 
@@ -456,84 +470,9 @@ def Data(request):
     the customer file on our local HDD.
     """
     if _Debug:
-        lg.out(_DebugLevel, 'p2p_service.Data %d bytes in [%s] by %s | %s' % (
-            len(request.Payload), request.PacketID, request.OwnerID, request.CreatorID))
-    # 1. this is our Data!
-    if request.OwnerID == my_id.getLocalID():
-        if _Debug:
-            lg.out(_DebugLevel, "p2p_service.Data %r for us from %s" % (
-                request, nameurl.GetName(request.RemoteID)))
-        if driver.is_on('service_backups'):
-            # TODO: move this into callback
-            settings.BackupIndexFileName()
-            indexPacketID = global_id.MakeGlobalID(idurl=my_id.getLocalID(), path=settings.BackupIndexFileName())
-            if request.PacketID == indexPacketID:
-                from storage import backup_control
-                backup_control.IncomingSupplierBackupIndex(request)
-                return True
-        return False
-    # 2. this Data is not belong to us
-    if not driver.is_on('service_supplier'):
-        return SendFail(request, 'supplier service is off')
-    if not contactsdb.is_customer(request.OwnerID):  # SECURITY
-        lg.warn("%s not a customer, packetID=%s" % (request.OwnerID, request.PacketID))
-        SendFail(request, 'not a customer')
-        return
-    glob_path = global_id.ParseGlobalID(request.PacketID)
-    if not glob_path['path']:
-        # backward compatible check
-        glob_path = global_id.ParseGlobalID(my_id.getGlobalID() + ':' + request.PacketID)
-    if not glob_path['path']:
-        lg.warn("got incorrect PacketID")
-        SendFail(request, 'incorrect PacketID')
-        return
-    # TODO: process files from another customer : glob_path['idurl']
-    filename = makeFilename(request.OwnerID, glob_path['path'])
-    if not filename:
-        lg.warn("got empty filename, bad customer or wrong packetID? ")
-        SendFail(request, 'empty filename')
-        return
-    dirname = os.path.dirname(filename)
-    if not os.path.exists(dirname):
-        try:
-            bpio._dirs_make(dirname)
-        except:
-            lg.warn("ERROR can not create sub dir " + dirname)
-            SendFail(request, 'write error')
-            return
-    data = request.Serialize()
-    donated_bytes = settings.getDonatedBytes()
-    if not os.path.isfile(settings.CustomersSpaceFile()):
-        bpio._write_dict(settings.CustomersSpaceFile(), {'free': donated_bytes})
-        if _Debug:
-            lg.out(_DebugLevel, 'p2p_service.Data created a new space file')
-    space_dict = bpio._read_dict(settings.CustomersSpaceFile())
-    if request.OwnerID not in space_dict.keys():
-        lg.warn("no info about donated space for %s" % request.OwnerID)
-        SendFail(request, 'no info about donated space')
-        return
-    used_space_dict = bpio._read_dict(settings.CustomersUsedSpaceFile(), {})
-    if request.OwnerID in used_space_dict.keys():
-        try:
-            bytes_used_by_customer = int(used_space_dict[request.OwnerID])
-            bytes_donated_to_customer = int(space_dict[request.OwnerID])
-            if bytes_donated_to_customer - bytes_used_by_customer < len(data):
-                lg.warn("no free space for %s" % request.OwnerID)
-                SendFail(request, 'no free space')
-                return
-        except:
-            lg.exc()
-    if not bpio.WriteFile(filename, data):
-        lg.warn("ERROR can not write to " + str(filename))
-        SendFail(request, 'write error')
-        return
-    SendAck(request, str(len(request.Payload)))
-    from supplier import local_tester
-    reactor.callLater(0, local_tester.TestSpaceTime)
-    del data
-    if _Debug:
-        lg.out(_DebugLevel, "p2p_service.Data saved from [%s | %s] to %s" % (
-            request.OwnerID, request.CreatorID, filename,))
+        lg.out(_DebugLevel, 'p2p_service.Data %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID))
 
 
 def SendData(raw_data, ownerID, creatorID, remoteID, packetID, callbacks={}):
@@ -550,8 +489,9 @@ def SendData(raw_data, ownerID, creatorID, remoteID, packetID, callbacks={}):
     )
     result = gateway.outbox(newpacket, callbacks=callbacks)
     if _Debug:
-        lg.out(_DebugLevel, 'p2p_service.SendData %d bytes in [%s] to %s, by %s | %s' % (
-            len(raw_data), packetID, remoteID, ownerID, creatorID))
+        lg.out(_DebugLevel, 'p2p_service.SendData %d bytes in packetID=%s' % (
+            len(raw_data), packetID))
+        lg.out(_DebugLevel, '  to remoteID=%s  ownerID=%s  creatorID=%s' % (remoteID, ownerID, creatorID))
     return result
 
 
@@ -562,69 +502,10 @@ def Retrieve(request):
     We send with ``outboxNoAck()`` method because he will ask again if
     he does not get it
     """
-    # TODO: move to storage folder
-    # TODO: rename to RetrieveData()
     if _Debug:
-        lg.out(_DebugLevel, 'p2p_service.Retrieve [%s] by %s | %s' % (request.PacketID, request.OwnerID, request.CreatorID))
-    if not driver.is_on('service_supplier'):
-        return SendFail(request, 'supplier service is off')
-    if not contactsdb.is_customer(request.OwnerID):
-        lg.warn("had unknown customer " + request.OwnerID)
-        SendFail(request, 'not a customer')
-        return
-    glob_path = global_id.ParseGlobalID(request.PacketID)
-    if not glob_path['path']:
-        # backward compatible check
-        glob_path = global_id.ParseGlobalID(my_id.getGlobalID() + ':' + request.PacketID)
-    if not glob_path['path']:
-        lg.warn("got incorrect PacketID")
-        SendFail(request, 'incorrect PacketID')
-        return
-    if glob_path['idurl']:
-        if request.CreatorID == glob_path['idurl']:
-            if _Debug:
-                lg.out(_DebugLevel, '        same customer CreatorID')
-        else:
-            lg.warn('one of customers requesting a Data from another customer!')
-    else:
-        lg.warn('no customer global id found in PacketID: %s' % request.PacketID)
-    # TODO: process requests from another customer : glob_path['idurl']
-    filename = makeFilename(request.OwnerID, glob_path['path'])
-    if filename == '':
-        if True:
-            # TODO: settings.getCustomersDataSharingEnabled() and
-            # driver.services()['service_supplier'].has_permissions(request.CreatorID, )
-            filename = makeFilename(glob_path['idurl'], glob_path['path'])
-    if filename == '':
-        lg.warn("had empty filename")
-        SendFail(request, 'empty filename')
-        return
-    if not os.path.exists(filename):
-        lg.warn("did not find requested file locally " + filename)
-        SendFail(request, 'did not find requested file locally')
-        return
-    if not os.access(filename, os.R_OK):
-        lg.warn("no read access to requested packet " + filename)
-        SendFail(request, 'no read access to requested packet')
-        return
-    data = bpio.ReadBinaryFile(filename)
-    if not data:
-        lg.warn("empty data on disk " + filename)
-        SendFail(request, 'empty data on disk')
-        return
-    outpacket = signed.Unserialize(data)
-    del data
-    if outpacket is None:
-        lg.warn("Unserialize fails, not Valid packet " + filename)
-        SendFail(request, 'unserialize fails')
-        return
-    if not outpacket.Valid():
-        lg.warn("unserialized packet is not Valid " + filename)
-        SendFail(request, 'unserialized packet is not Valid')
-        return
-    if _Debug:
-        lg.out(_DebugLevel, "p2p_service.Retrieve sending %r back to %s" % (outpacket, nameurl.GetName(outpacket.CreatorID)))
-    gateway.outbox(outpacket, target=outpacket.CreatorID)
+        lg.out(_DebugLevel, 'p2p_service.Retrieve %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID))
 
 
 def SendRetreive(ownerID, creatorID, packetID, remoteID, payload='', callbacks={}):
@@ -640,7 +521,8 @@ def SendRetreive(ownerID, creatorID, packetID, remoteID, payload='', callbacks={
     )
     result = gateway.outbox(newpacket, callbacks=callbacks)
     if _Debug:
-        lg.out(_DebugLevel, 'p2p_service.SendRetreive [%s] to %s, by %s | %s' % (packetID, remoteID, ownerID, creatorID))
+        lg.out(_DebugLevel, 'p2p_service.SendRetreive packetID=%s' % packetID)
+        lg.out(_DebugLevel, '  remoteID=%s  ownerID=%s  creatorID=%s' % (remoteID, ownerID, creatorID))
     return result
 
 #------------------------------------------------------------------------------
@@ -651,57 +533,14 @@ def DeleteFile(request):
     Delete one ore multiple files (that belongs to another user) or folders on my machine.
     """
     if _Debug:
-        lg.out(_DebugLevel, 'p2p_service.DeleteFile [%s] by %s | %s' % (
-            request.PacketID, request.OwnerID, request.CreatorID))
-    if not driver.is_on('service_supplier'):
-        return SendFail(request, 'supplier service is off')
-    if request.Payload == '':
-        ids = [request.PacketID]
-    else:
-        ids = request.Payload.split('\n')
-    filescount = 0
-    dirscount = 0
-    for pcktID in ids:
-        glob_path = global_id.ParseGlobalID(pcktID)
-        if not glob_path['path']:
-            # backward compatible check
-            glob_path = global_id.ParseGlobalID(my_id.getGlobalID() + ':' + request.PacketID)
-        if not glob_path['path']:
-            lg.warn("got incorrect PacketID")
-            SendFail(request, 'incorrect PacketID')
-            return
-        # TODO: add validation of customerGlobID
-        # TODO: process requests from another customer
-        filename = makeFilename(request.OwnerID, glob_path['path'])
-        if filename == "":
-            filename = constructFilename(request.OwnerID, glob_path['path'])
-            if not os.path.exists(filename):
-                lg.warn("had unknown customer: %s or pathID is not correct or not exist: %s" % (
-                    nameurl.GetName(request.OwnerID), glob_path['path']))
-                return SendFail(request, 'not a customer, or file not found')
-        if os.path.isfile(filename):
-            try:
-                os.remove(filename)
-                filescount += 1
-            except:
-                lg.exc()
-        elif os.path.isdir(filename):
-            try:
-                bpio._dir_remove(filename)
-                dirscount += 1
-            except:
-                lg.exc()
-        else:
-            lg.warn("path not found %s" % filename)
-    if _Debug:
-        lg.out(_DebugLevel, "p2p_service.DeleteFile from [%s] with %d IDs, %d files and %d folders were removed" % (
-            nameurl.GetName(request.OwnerID), len(ids), filescount, dirscount))
-    SendAck(request)
+        lg.out(_DebugLevel, 'p2p_service.DeleteFile %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID))
 
 
 def SendDeleteFile(SupplierID, pathID):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendDeleteFile SupplierID=%s PathID=%s " % (SupplierID, pathID))
+        lg.out(_DebugLevel, "p2p_service.SendDeleteFile SupplierID=%s PathID=%s" % (SupplierID, pathID))
     MyID = my_id.getLocalID()
     PacketID = pathID
     RemoteID = SupplierID
@@ -712,8 +551,7 @@ def SendDeleteFile(SupplierID, pathID):
 
 def SendDeleteListPaths(SupplierID, ListPathIDs):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendDeleteListPaths SupplierID=%s PathIDs number: %d" % (
-            SupplierID, len(ListPathIDs)))
+        lg.out(_DebugLevel, "p2p_service.SendDeleteListPaths SupplierID=%s PathIDs: %s" % (SupplierID, ListPathIDs))
     MyID = my_id.getLocalID()
     PacketID = packetid.UniqueID()
     RemoteID = SupplierID
@@ -729,49 +567,15 @@ def DeleteBackup(request):
     """
     Delete one or multiple backups on my machine.
     """
-    if not driver.is_on('service_supplier'):
-        return SendFail(request, 'supplier service is off')
-    if request.Payload == '':
-        ids = [request.PacketID]
-    else:
-        ids = request.Payload.split('\n')
-    count = 0
-    for bkpID in ids:
-        glob_path = global_id.ParseGlobalID(bkpID)
-        if not glob_path['path']:
-            lg.warn("got incorrect backupID")
-            SendFail(request, 'incorrect backupID')
-            return
-        # TODO: add validation of customerGlobID
-        # TODO: process requests from another customer
-        filename = makeFilename(request.OwnerID, glob_path['path'])
-        if filename == "":
-            filename = constructFilename(request.OwnerID, glob_path['path'])
-            if not os.path.exists(filename):
-                lg.warn("had unknown customer: %s or backupID: %s" (bkpID, request.OwnerID))
-                return SendFail(request, 'not a customer, or file not found')
-        if os.path.isdir(filename):
-            try:
-                bpio._dir_remove(filename)
-                count += 1
-            except:
-                lg.exc()
-        elif os.path.isfile(filename):
-            try:
-                os.remove(filename)
-                count += 1
-            except:
-                lg.exc()
-        else:
-            lg.warn("path not found %s" % filename)
-    SendAck(request)
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.DeleteBackup from [%s] with %d IDs, %d were removed" % (nameurl.GetName(request.OwnerID), len(ids), count))
+        lg.out(_DebugLevel, 'p2p_service.DeleteBackup %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID))
 
 
 def SendDeleteBackup(SupplierID, BackupID):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendDeleteBackup SupplierID=%s  BackupID=%s " % (SupplierID, BackupID))
+        lg.out(_DebugLevel, "p2p_service.SendDeleteBackup SupplierID=%s  BackupID=%s" % (SupplierID, BackupID))
     MyID = my_id.getLocalID()
     PacketID = packetid.RemotePath(BackupID)
     RemoteID = SupplierID
@@ -782,7 +586,7 @@ def SendDeleteBackup(SupplierID, BackupID):
 
 def SendDeleteListBackups(SupplierID, ListBackupIDs):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendDeleteListBackups SupplierID=%s BackupIDs number: %d" % (SupplierID, len(ListBackupIDs)))
+        lg.out(_DebugLevel, "p2p_service.SendDeleteListBackups SupplierID=%s BackupIDs: %s" % (SupplierID, ListBackupIDs))
     MyID = my_id.getLocalID()
     PacketID = packetid.UniqueID()
     RemoteID = SupplierID
@@ -796,36 +600,10 @@ def SendDeleteListBackups(SupplierID, ListBackupIDs):
 
 def Correspondent(request):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.Correspondent")
+        lg.out(_DebugLevel, 'p2p_service.Correspondent %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID))
     # TODO: need to connect users here
-
-#------------------------------------------------------------------------------
-
-def RequestListFilesAll(customer_idurl=None):
-    r = []
-    for supplier_idurl in contactsdb.suppliers(customer_idurl=customer_idurl):
-        r.append(SendRequestListFiles(supplier_idurl, customer_idurl=customer_idurl))
-    return r
-
-
-def SendRequestListFiles(supplierNumORidurl, customer_idurl=None):
-    MyID = my_id.getLocalID()
-    if not customer_idurl:
-        customer_idurl = MyID
-    if not str(supplierNumORidurl).isdigit():
-        RemoteID = supplierNumORidurl
-    else:
-        RemoteID = contactsdb.supplier(supplierNumORidurl, customer_idurl=customer_idurl)
-    if not RemoteID:
-        lg.warn("RemoteID is empty supplierNumORidurl=%s" % str(supplierNumORidurl))
-        return None
-    if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendRequestListFiles [%s]" % nameurl.GetName(RemoteID))
-    PacketID = "%s:%s" % (global_id.UrlToGlobalID(customer_idurl), packetid.UniqueID())
-    Payload = settings.ListFilesFormat()
-    result = signed.Packet(commands.ListFiles(), MyID, MyID, PacketID, Payload, RemoteID)
-    gateway.outbox(result)
-    return result
 
 #------------------------------------------------------------------------------
 
@@ -838,14 +616,6 @@ def RequestDeleteBackup(BackupID):
     for supplier_idurl in contactsdb.suppliers(customer_idurl=packetid.CustomerIDURL(BackupID)):
         if not supplier_idurl:
             continue
-#         prevItems = [] # transport_control.SendQueueSearch(BackupID)
-#         found = False
-#         for workitem in prevItems:
-#             if workitem.remoteid == supplier:
-#                 found = True
-#                 break
-#         if found:
-#             continue
         SendDeleteBackup(supplier_idurl, BackupID)
 
 
@@ -888,7 +658,9 @@ def CheckWholeBackup(BackupID):
 
 def Broadcast(request, info):
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.Broadcast   %r from %s" % (request, info.sender_idurl))
+        lg.out(_DebugLevel, 'p2p_service.Broadcast %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s  sender_idurl=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID, info.sender_idurl))
 
 
 def SendBroadcastMessage(outpacket):
@@ -942,8 +714,16 @@ def SendRetrieveCoin(remote_idurl, query, wide=False, callbacks={}):
 
 #------------------------------------------------------------------------------
 
-def SendKey(remote_idurl, encrypted_key_data, packet_id=None, wide=False, callbacks={}):
-    # full_key_data = json.dumps(key_data) if isinstance(key_data, dict) else key_data
+def Key(request, info):
+    """
+    """
+    if _Debug:
+        lg.out(_DebugLevel, 'p2p_service.Key %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s  sender_idurl=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID, info.sender_idurl))
+
+
+def SendKey(remote_idurl, encrypted_key_data, packet_id=None, wide=False, callbacks={}, timeout=10, ):
     if _Debug:
         lg.out(_DebugLevel, "p2p_service.SendKey to %s with %d bytes encrypted key data" % (
             remote_idurl, len(encrypted_key_data)))
@@ -957,5 +737,90 @@ def SendKey(remote_idurl, encrypted_key_data, packet_id=None, wide=False, callba
         Payload=encrypted_key_data,
         RemoteID=remote_idurl,
     )
-    gateway.outbox(outpacket, wide=wide, callbacks=callbacks)
+    gateway.outbox(outpacket, wide=wide, callbacks=callbacks, response_timeout=timeout)
     return outpacket
+
+
+def AuditKey(request, info):
+    """
+    """
+    if _Debug:
+        lg.out(_DebugLevel, 'p2p_service.AuditKey %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s  sender_idurl=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID, info.sender_idurl))
+
+
+def SendAuditKey(remote_idurl, encrypted_payload, packet_id=None, timeout=10, wide=False, callbacks={}):
+    if _Debug:
+        lg.out(_DebugLevel, "p2p_service.SendAuditKey to %s with %d bytes in json payload data" % (
+            remote_idurl, len(encrypted_payload)))
+    if packet_id is None:
+        packet_id = packetid.UniqueID()
+    outpacket = signed.Packet(
+        Command=commands.AuditKey(),
+        OwnerID=my_id.getLocalID(),
+        CreatorID=my_id.getLocalID(),
+        PacketID=packet_id,
+        Payload=encrypted_payload,
+        RemoteID=remote_idurl,
+    )
+    gateway.outbox(outpacket, wide=wide, callbacks=callbacks, response_timeout=timeout)
+    return outpacket
+
+#------------------------------------------------------------------------------
+
+def Event(request, info):
+    """
+    """
+    if _Debug:
+        try:
+            e_json = json.loads(request.Payload)
+            e_json['event_id']
+            e_json['payload']
+        except:
+            lg.exc()
+            return
+        lg.out(_DebugLevel, "p2p_service.Event %s from %s with %d bytes in json" % (
+            e_json['event_id'], info.sender_idurl, len(request.Payload), ))
+
+
+def SendEvent(remote_idurl, event_id, payload=None,
+              producer_id=None, message_id=None, created=None,
+              packet_id=None, wide=False, callbacks={}, response_timeout=5):
+    if packet_id is None:
+        packet_id = packetid.UniqueID()
+    e_json = {
+        'event_id': event_id,
+        'payload': payload,
+    }
+    if producer_id and message_id:
+        e_json['producer_id'] = producer_id
+        e_json['message_id'] = message_id
+    if created:
+        e_json['created'] = created
+    e_json_src = json.dumps(e_json)
+    if _Debug:
+        lg.out(_DebugLevel, "p2p_service.SendEvent to %s with %d bytes message json data" % (
+            remote_idurl, len(e_json_src)))
+    outpacket = signed.Packet(
+        Command=commands.Event(),
+        OwnerID=my_id.getLocalID(),
+        CreatorID=my_id.getLocalID(),
+        PacketID=packet_id,
+        Payload=e_json_src,
+        RemoteID=remote_idurl,
+    )
+    gateway.outbox(outpacket, wide=wide, callbacks=callbacks, response_timeout=response_timeout)
+    return outpacket
+
+#------------------------------------------------------------------------------
+
+def Message(request, info):
+    """
+    """
+    if _Debug:
+        lg.out(_DebugLevel, 'p2p_service.Message %d bytes in [%s]' % (len(request.Payload), request.PacketID))
+        lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
+            request.RemoteID, request.OwnerID, request.CreatorID))
+
+#------------------------------------------------------------------------------

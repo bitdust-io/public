@@ -48,12 +48,13 @@ EVENTS:
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 8
+_DebugLevel = 12
 
 #------------------------------------------------------------------------------
 
 import os
 import math
+import json
 
 #------------------------------------------------------------------------------
 
@@ -68,11 +69,16 @@ from main import settings
 from lib import nameurl
 from lib import diskspace
 
-from p2p import commands
+from userid import global_id
 
+from crypt import my_keys
+
+from p2p import commands
 from p2p import p2p_service
 
 from userid import my_id
+
+from customer import customer_state
 
 #------------------------------------------------------------------------------
 
@@ -80,26 +86,50 @@ _SuppliersConnectors = {}
 
 #------------------------------------------------------------------------------
 
-
-def connectors():
+def connectors(customer_idurl=None):
     """
     """
     global _SuppliersConnectors
-    return _SuppliersConnectors
+    if customer_idurl is None:
+        customer_idurl = my_id.getLocalID()
+    if customer_idurl not in _SuppliersConnectors:
+        _SuppliersConnectors[customer_idurl] = {}
+    return _SuppliersConnectors[customer_idurl]
 
 
-def create(supplier_idurl):
+def create(supplier_idurl, customer_idurl=None, needed_bytes=None):
     """
     """
-    assert supplier_idurl not in connectors()
-    connectors()[supplier_idurl] = SupplierConnector(supplier_idurl)
-    return connectors()[supplier_idurl]
+    if customer_idurl is None:
+        customer_idurl = my_id.getLocalID()
+    assert supplier_idurl not in connectors(customer_idurl)
+    connectors(customer_idurl)[supplier_idurl] = SupplierConnector(
+        supplier_idurl=supplier_idurl,
+        customer_idurl=customer_idurl,
+        needed_bytes=needed_bytes,
+    )
+    return connectors(customer_idurl)[supplier_idurl]
 
 
-def by_idurl(idurl):
+def is_supplier(supplier_idurl, customer_idurl=None):
     """
     """
-    return connectors().get(idurl, None)
+    global _SuppliersConnectors
+    if customer_idurl is None:
+        customer_idurl = my_id.getLocalID()
+    if customer_idurl not in _SuppliersConnectors:
+        return False
+    if supplier_idurl not in _SuppliersConnectors[customer_idurl]:
+        return False
+    return True
+
+
+def by_idurl(supplier_idurl, customer_idurl=None):
+    """
+    """
+    if customer_idurl is None:
+        customer_idurl = my_id.getLocalID()
+    return connectors(customer_idurl).get(supplier_idurl, None)
 
 #------------------------------------------------------------------------------
 
@@ -111,19 +141,34 @@ class SupplierConnector(automat.Automat):
     """
 
     timers = {
-        'timer-10sec': (10.0, ['REFUSE']),
+        'timer-10sec': (10.0, ['REFUSE', 'QUEUE?']),
         'timer-20sec': (20.0, ['REQUEST']),
     }
 
-    def __init__(self, idurl):
+    def __init__(self, supplier_idurl, customer_idurl, needed_bytes):
         """
         """
-        self.idurl = idurl
-        name = 'supplier_%s' % nameurl.GetName(self.idurl)
+        self.supplier_idurl = supplier_idurl
+        self.customer_idurl = customer_idurl
+        self.needed_bytes = needed_bytes
+        if self.needed_bytes is None:
+            total_bytes_needed = diskspace.GetBytesFromString(settings.getNeededString(), 0)
+            num_suppliers = settings.getSuppliersNumberDesired()
+            if num_suppliers > 0:
+                self.needed_bytes = int(math.ceil(2.0 * total_bytes_needed / float(num_suppliers)))
+            else:
+                self.needed_bytes = int(math.ceil(2.0 * settings.MinimumNeededBytes() / float(settings.DefaultDesiredSuppliers())))
+        name = 'supplier_%s_%s' % (
+            nameurl.GetName(self.supplier_idurl),
+            diskspace.MakeStringFromBytes(self.needed_bytes).replace(' ', ''),
+        )
         self.request_packet_id = None
         self.callbacks = {}
         try:
-            st = bpio.ReadTextFile(settings.SupplierServiceFilename(self.idurl)).strip()
+            st = bpio.ReadTextFile(settings.SupplierServiceFilename(
+                idurl=self.supplier_idurl,
+                customer_idurl=self.customer_idurl,
+            )).strip()
         except:
             st = 'DISCONNECTED'
         if st == 'CONNECTED':
@@ -133,7 +178,7 @@ class SupplierConnector(automat.Automat):
         else:
             automat.Automat.__init__(self, name, 'DISCONNECTED', _DebugLevel, _Debug)
         for cb in self.callbacks.values():
-            cb(self.idurl, self.state, self.state)
+            cb(self.supplier_idurl, self.state, self.state)
 
     def init(self):
         """
@@ -147,7 +192,7 @@ class SupplierConnector(automat.Automat):
         changed.
         """
         if newstate in ['CONNECTED', 'DISCONNECTED', 'NO_SERVICE']:
-            supplierPath = settings.SupplierPath(self.idurl, customer_idurl=my_id.getLocalID())
+            supplierPath = settings.SupplierPath(self.supplier_idurl, customer_idurl=self.customer_idurl)
             if not os.path.isdir(supplierPath):
                 try:
                     os.makedirs(supplierPath)
@@ -155,7 +200,7 @@ class SupplierConnector(automat.Automat):
                     lg.exc()
                     return
             bpio.WriteFile(
-                settings.SupplierServiceFilename(self.idurl, customer_idurl=my_id.getLocalID(), ),
+                settings.SupplierServiceFilename(self.supplier_idurl, customer_idurl=self.customer_idurl),
                 newstate,
             )
 
@@ -171,8 +216,8 @@ class SupplierConnector(automat.Automat):
         if self.state == 'NO_SERVICE':
             if event == 'connect':
                 self.state = 'REQUEST'
+                self.GoDisconnect=False
                 self.doRequestService(arg)
-                self.GoDisconnect = False
             elif event == 'ack' and self.isServiceAccepted(arg):
                 self.state = 'CONNECTED'
                 self.doReportConnect(arg)
@@ -191,8 +236,8 @@ class SupplierConnector(automat.Automat):
                 self.doCancelService(arg)
             elif event == 'fail' or event == 'connect':
                 self.state = 'REQUEST'
+                self.GoDisconnect=False
                 self.doRequestService(arg)
-                self.GoDisconnect = False
         #---CLOSED---
         elif self.state == 'CLOSED':
             pass
@@ -209,15 +254,15 @@ class SupplierConnector(automat.Automat):
                 self.doCancelService(arg)
             elif event == 'connect':
                 self.state = 'REQUEST'
+                self.GoDisconnect=False
                 self.doRequestService(arg)
-                self.GoDisconnect = False
             elif event == 'fail':
                 self.state = 'NO_SERVICE'
                 self.doReportNoService(arg)
         #---REQUEST---
         elif self.state == 'REQUEST':
             if event == 'disconnect':
-                self.GoDisconnect = True
+                self.GoDisconnect=True
             elif event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
@@ -228,22 +273,37 @@ class SupplierConnector(automat.Automat):
                 self.state = 'DISCONNECTED'
                 self.doCleanRequest(arg)
                 self.doReportDisconnect(arg)
-            elif event == 'fail' or (event == 'ack' and not self.isServiceAccepted(arg) and not self.GoDisconnect):
+            elif event == 'fail' or ( event == 'ack' and not self.isServiceAccepted(arg) and not self.GoDisconnect ):
                 self.state = 'NO_SERVICE'
                 self.doReportNoService(arg)
             elif event == 'ack' and not self.GoDisconnect and self.isServiceAccepted(arg):
-                self.state = 'CONNECTED'
-                self.doReportConnect(arg)
+                self.state = 'QUEUE?'
+                self.doRequestQueueService(arg)
         #---REFUSE---
         elif self.state == 'REFUSE':
             if event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doCleanRequest(arg)
                 self.doDestroyMe(arg)
-            elif event == 'timer-10sec' or event == 'fail' or (event == 'ack' and self.isServiceCancelled(arg)):
+            elif event == 'timer-10sec' or event == 'fail' or ( event == 'ack' and self.isServiceCancelled(arg) ):
                 self.state = 'NO_SERVICE'
                 self.doCleanRequest(arg)
                 self.doReportNoService(arg)
+        #---QUEUE?---
+        elif self.state == 'QUEUE?':
+            if event == 'disconnect':
+                self.GoDisconnect=True
+            elif self.GoDisconnect and ( event == 'ack' or event == 'fail' or event == 'timer-10sec' ):
+                self.state = 'REFUSE'
+                self.doCancelServiceQueue(arg)
+                self.doCancelService(arg)
+            elif event == 'close':
+                self.state = 'CLOSED'
+                self.doDestroyMe(arg)
+            elif not self.GoDisconnect and ( event == 'ack' or event == 'fail' or event == 'timer-10sec' ):
+                self.state = 'CONNECTED'
+                self.doReportConnect(arg)
+        return None
 
     def isServiceAccepted(self, arg):
         """
@@ -252,7 +312,7 @@ class SupplierConnector(automat.Automat):
         newpacket = arg
         if newpacket.Payload.startswith('accepted'):
             if _Debug:
-                lg.out(6, 'supplier_connector.isServiceAccepted !!!! supplier %s connected' % self.idurl)
+                lg.out(6, 'supplier_connector.isServiceAccepted !!!! supplier %s connected' % self.supplier_idurl)
             return True
         return False
 
@@ -264,7 +324,7 @@ class SupplierConnector(automat.Automat):
         if newpacket.Command == commands.Ack():
             if newpacket.Payload.startswith('accepted'):
                 if _Debug:
-                    lg.out(6, 'supplier_connector.isServiceCancelled !!!! supplier %s disconnected' % self.idurl)
+                    lg.out(6, 'supplier_connector.isServiceCancelled !!!! supplier %s disconnected' % self.supplier_idurl)
                 return True
         return False
 
@@ -272,17 +332,25 @@ class SupplierConnector(automat.Automat):
         """
         Action method.
         """
-        bytes_needed = diskspace.GetBytesFromString(settings.getNeededString(), 0)
-        num_suppliers = settings.getSuppliersNumberDesired()
-        if num_suppliers > 0:
-            bytes_per_supplier = int(math.ceil(2.0 * bytes_needed / float(num_suppliers)))
-        else:
-            bytes_per_supplier = int(math.ceil(2.0 * settings.MinimumNeededBytes() / float(settings.DefaultDesiredSuppliers())))
-        service_info = 'service_supplier %d' % bytes_per_supplier
-        request = p2p_service.SendRequestService(self.idurl, service_info, callbacks={
-            commands.Ack(): self._supplier_acked,
-            commands.Fail(): self._supplier_failed,
-        })
+        service_info = {
+            'needed_bytes': self.needed_bytes,
+        }
+        try:
+            service_info['customer_public_key'] = my_keys.get_key_info(
+                key_id=customer_state.customer_key_id(),
+                include_private=False,
+            )
+        except:
+            pass
+        request = p2p_service.SendRequestService(
+            remote_idurl=self.supplier_idurl,
+            service_name='service_supplier',
+            json_payload=service_info,
+            callbacks={
+                commands.Ack(): self._supplier_acked,
+                commands.Fail(): self._supplier_failed,
+            },
+        )
         self.request_packet_id = request.PacketID
 
     def doCancelService(self, arg):
@@ -290,24 +358,86 @@ class SupplierConnector(automat.Automat):
         Action method.
         """
         request = p2p_service.SendCancelService(
-            self.idurl, 'service_supplier',
+            remote_idurl=self.supplier_idurl,
+            service_name='service_supplier',
             callbacks={
                 commands.Ack(): self._supplier_acked,
-                commands.Fail(): self._supplier_failed})
+                commands.Fail(): self._supplier_failed,
+            },
+        )
         self.request_packet_id = request.PacketID
 
-    def doDestroyMe(self, arg):
+    def doRequestQueueService(self, arg):
         """
         Action method.
         """
-        connectors().pop(self.idurl)
-        self.destroy()
+        service_info = {'items': [{
+            'scope': 'consumer',
+            'action': 'start',
+            'consumer_id': my_id.getGlobalID(),
+        }, {
+            'scope': 'consumer',
+            'action': 'add_callback',
+            'consumer_id': my_id.getGlobalID(),
+            'method': my_id.getLocalID(),
+        }, {
+            'scope': 'consumer',
+            'action': 'subscribe',
+            'consumer_id': my_id.getGlobalID(),
+            'queue_id': global_id.MakeGlobalQueueID(
+                queue_alias='supplier-file-modified',
+                owner_id=my_id.getGlobalID(),
+                supplier_id=global_id.MakeGlobalID(idurl=self.supplier_idurl),
+            ),
+        }, ], }
+        p2p_service.SendRequestService(
+            remote_idurl=self.supplier_idurl,
+            service_name='service_p2p_notifications',
+            json_payload=service_info,
+            callbacks={
+                commands.Ack(): self._supplier_acked,
+                commands.Fail(): self._supplier_failed,
+            },
+        )
+
+    def doCancelServiceQueue(self, arg):
+        """
+        Action method.
+        """
+        service_info = json.dumps({'items': [{
+            'scope': 'consumer',
+            'action': 'unsubscribe',
+            'consumer_id': my_id.getGlobalID(),
+            'queue_id': global_id.MakeGlobalQueueID(
+                queue_alias='supplier-file-modified',
+                owner_id=my_id.getGlobalID(),
+                supplier_id=global_id.MakeGlobalID(idurl=self.supplier_idurl),
+            ),
+        }, {
+            'scope': 'consumer',
+            'action': 'remove_callback',
+            'consumer_id': my_id.getGlobalID(),
+            'method': my_id.getLocalID(),
+        }, {
+            'scope': 'consumer',
+            'action': 'stop',
+            'consumer_id': my_id.getGlobalID(),
+        }, ], })
+        p2p_service.SendCancelService(
+            remote_idurl=self.supplier_idurl,
+            service_name='service_p2p_notifications',
+            json_payload=service_info,
+            callbacks={
+                commands.Ack(): self._supplier_acked,
+                commands.Fail(): self._supplier_failed,
+            },
+        )
 
     def doCleanRequest(self, arg):
         """
         Action method.
         """
-        # callback.remove_interest(misc.getLocalID(), self.request_packet_id)
+        self.request_packet_id = None
 
     def doReportConnect(self, arg):
         """
@@ -316,7 +446,7 @@ class SupplierConnector(automat.Automat):
         if _Debug:
             lg.out(14, 'supplier_connector.doReportConnect')
         for cb in self.callbacks.values():
-            cb(self.idurl, 'CONNECTED')
+            cb(self.supplier_idurl, 'CONNECTED')
 
     def doReportNoService(self, arg):
         """
@@ -325,7 +455,7 @@ class SupplierConnector(automat.Automat):
         if _Debug:
             lg.out(14, 'supplier_connector.doReportNoService')
         for cb in self.callbacks.values():
-            cb(self.idurl, 'NO_SERVICE')
+            cb(self.supplier_idurl, 'NO_SERVICE')
 
     def doReportDisconnect(self, arg):
         """
@@ -334,7 +464,18 @@ class SupplierConnector(automat.Automat):
         if _Debug:
             lg.out(_DebugLevel, 'supplier_connector.doReportDisconnect')
         for cb in self.callbacks.values():
-            cb(self.idurl, 'DISCONNECTED')
+            cb(self.supplier_idurl, 'DISCONNECTED')
+
+    def doDestroyMe(self, arg):
+        """
+        Action method.
+        """
+        
+        connectors(self.customer_idurl).pop(self.supplier_idurl)
+        self.request_packet_id = None
+        self.supplier_idurl = None
+        self.customer_idurl = None
+        self.destroy()
 
     def _supplier_acked(self, response, info):
         if _Debug:
@@ -344,4 +485,7 @@ class SupplierConnector(automat.Automat):
     def _supplier_failed(self, response, info):
         if _Debug:
             lg.out(16, 'supplier_connector._supplier_failed %r %r' % (response, info))
-        self.automat(response.Command.lower(), response)
+        if response:
+            self.automat(response.Command.lower(), response)
+        else:
+            self.automat('fail', None)

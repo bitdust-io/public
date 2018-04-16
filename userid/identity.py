@@ -140,6 +140,8 @@ except:
     sys.path.insert(0, os.path.abspath(os.path.join(dirpath, '..')))
     from logs import lg
 
+#------------------------------------------------------------------------------
+
 from main import settings
 
 from system import bpio
@@ -147,6 +149,8 @@ from system import bpio
 from lib import nameurl
 
 from crypt import key
+
+from userid import global_id
 
 #------------------------------------------------------------------------------
 
@@ -426,6 +430,21 @@ class identity:
         self.clear_data()
         self.from_xmlobj(xmlobject)
 
+    def unserialize_json(self, json_data):
+        """
+        This loads data from Python dictionary.
+        """
+        self.sources = json_data['sources']
+        self.contacts = json_data['contacts']
+        self.certificates = json_data['certificates']
+        self.scrubbers = json_data['scrubbers']
+        self.date = json_data['date']
+        self.postage = json_data['postage']
+        self.version = json_data['version']
+        self.revision = json_data['revision']
+        self.publickey = json_data['publickey']
+        self.signature = json_data['signature']
+
     def serialize(self):
         """
         A method to generate XML content for that identity object.
@@ -439,6 +458,28 @@ class identity:
         Almost the same but return a DOM object.
         """
         return self.toxml()[1]
+
+    def serialize_json(self):
+        """
+        A method to generate JSON dictionary for that identity object.
+
+        Used to represent identity in API methods.
+        """
+        return {
+            'name': self.getIDName(),
+            'idurl': self.getIDURL(),
+            'global_id': global_id.MakeGlobalID(idurl=self.getIDURL()),
+            'sources': self.getSources(),
+            'contacts': self.getContacts(),
+            'certificates': self.certificates,
+            'scrubbers': self.scrubbers,
+            'postage': self.postage,
+            'date': self.date,
+            'version': self.version,
+            'revision': self.revision,
+            'publickey': self.publickey,
+            'signature': self.signature,
+        }
 
     def toxml(self):
         """
@@ -541,7 +582,7 @@ class identity:
                 elif xsection.tagName == 'postage':
                     for xpostage in xsection.childNodes:
                         if (xpostage.nodeType == Node.TEXT_NODE):
-                            self.date = xpostage.wholeText.strip().encode()
+                            self.postage = xpostage.wholeText.strip().encode()
                             break
                 elif xsection.tagName == 'date':
                     for xkey in xsection.childNodes:

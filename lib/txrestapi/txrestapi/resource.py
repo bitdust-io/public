@@ -11,7 +11,12 @@ from twisted.internet.defer import Deferred
 
 
 def _to_json(output_object):
-    return json.dumps(output_object, indent=2, separators=(',', ':')) + '\n'
+    return json.dumps(
+        output_object,
+        indent=2,
+        separators=(',', ': '),
+        sort_keys=True,
+    ) + '\n'
 
 
 class _JsonResource(Resource):
@@ -23,8 +28,16 @@ class _JsonResource(Resource):
         self._result = result
         self._executed = executed
 
+    def _setHeaders(self, request):
+        request.responseHeaders.addRawHeader(b'content-type', b'application/json')
+        request.responseHeaders.addRawHeader(b'Access-Control-Allow-Origin', b'*')
+        request.responseHeaders.addRawHeader(b'Access-Control-Allow-Methods', b'GET, POST, PUT, DELETE')
+        request.responseHeaders.addRawHeader(b'Access-Control-Allow-Headers', b'x-prototype-version,x-requested-with')
+        request.responseHeaders.addRawHeader(b'Access-Control-Max-Age', 2520)
+        return request
+
     def render(self, request):
-        request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+        self._setHeaders(request)
         self._result['execution'] = '%3.6f' % (time.time() - self._executed)
         return _to_json(self._result)
 
@@ -32,13 +45,13 @@ class _JsonResource(Resource):
 class _DelayedJsonResource(_JsonResource):
 
     def _cb(self, result, request):
-        request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+        self._setHeaders(request)
         result['execution'] = '%3.6f' % (time.time() - self._executed)
         request.write(_to_json(result))
         request.finish()
 
     def _eb(self, err, request):
-        request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+        self._setHeaders(request)
         execution = '%3.6f' % (time.time() - self._executed)
         request.write(_to_json(dict(status='ERROR', execution=execution, errors=[str(err), ])))
         request.finish()

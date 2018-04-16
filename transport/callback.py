@@ -29,7 +29,7 @@ module:: callback
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 18
+_DebugLevel = 12
 
 #------------------------------------------------------------------------------
 
@@ -152,14 +152,14 @@ def append_inbox_callback(cb):
 
     callback(newpacket, info, status, error_message).
     """
-    if _Debug:
-        lg.out(_DebugLevel, 'callback.append_inbox_callback new callback, current callbacks:')
+#     if _Debug:
+#         lg.out(_DebugLevel, 'callback.append_inbox_callback new callback, current callbacks:')
     global _InboxPacketCallbacksList
     if cb not in _InboxPacketCallbacksList:
         _InboxPacketCallbacksList.append(cb)
-    if _Debug:
-        import pprint
-        lg.out(_DebugLevel, '        %s' % pprint.pformat(_InboxPacketCallbacksList))
+#     if _Debug:
+#         import pprint
+#         lg.out(_DebugLevel, '        %s' % pprint.pformat(_InboxPacketCallbacksList))
 
 
 def insert_inbox_callback(index, cb):
@@ -173,27 +173,27 @@ def insert_inbox_callback(index, cb):
 
         callback(newpacket, info, status, error_message).
     """
-    if _Debug:
-        lg.out(_DebugLevel, 'callback.insert_inbox_callback new callback at position %d, current callbacks:' % index)
+#     if _Debug:
+#         lg.out(_DebugLevel, 'callback.insert_inbox_callback new callback at position %d, current callbacks:' % index)
     global _InboxPacketCallbacksList
     if cb not in _InboxPacketCallbacksList:
         _InboxPacketCallbacksList.insert(index, cb)
-    if _Debug:
-        import pprint
-        lg.out(_DebugLevel, '        %s' % pprint.pformat(_InboxPacketCallbacksList))
+#     if _Debug:
+#         import pprint
+#         lg.out(_DebugLevel, '        %s' % pprint.pformat(_InboxPacketCallbacksList))
 
 
 def remove_inbox_callback(cb):
     """
     """
-    if _Debug:
-        lg.out(_DebugLevel, 'callback.remove_inbox_callback removing a callback, current callbacks:')
+#     if _Debug:
+#         lg.out(_DebugLevel, 'callback.remove_inbox_callback removing a callback, current callbacks:')
     global _InboxPacketCallbacksList
     if cb in _InboxPacketCallbacksList:
         _InboxPacketCallbacksList.remove(cb)
-    if _Debug:
-        import pprint
-        lg.out(_DebugLevel, '        %s' % pprint.pformat(_InboxPacketCallbacksList))
+#     if _Debug:
+#         import pprint
+#         lg.out(_DebugLevel, '        %s' % pprint.pformat(_InboxPacketCallbacksList))
 
 
 def append_outbox_filter_callback(cb):
@@ -262,8 +262,17 @@ def add_queue_item_status_callback(cb):
         _QueueItemStatusCallbacksList.append(cb)
 
 
+def remove_queue_item_status_callback(cb):
+    """
+    """
+    global _QueueItemStatusCallbacksList
+    if cb in _QueueItemStatusCallbacksList:
+        _QueueItemStatusCallbacksList.remove(cb)
+
+
 def add_begin_file_sending_callback(cb):
     """
+    cb(result_defer, remote_idurl, proto, host, filename, description, pkt_out)
     """
     global _BeginFileSendingCallbacksList
     if cb not in _BeginFileSendingCallbacksList:
@@ -272,7 +281,7 @@ def add_begin_file_sending_callback(cb):
 
 def add_finish_file_sending_callback(cb):
     """
-    pkt_out, item, status, size, error_message.
+    cb(pkt_out, item, status, size, error_message)
     """
     global _FinishFileSendingCallbacksList
     if cb not in _FinishFileSendingCallbacksList:
@@ -281,7 +290,6 @@ def add_finish_file_sending_callback(cb):
 
 def remove_finish_file_sending_callback(cb):
     """
-    
     """
     global _FinishFileSendingCallbacksList
     if cb in _FinishFileSendingCallbacksList:
@@ -290,19 +298,35 @@ def remove_finish_file_sending_callback(cb):
 
 def add_begin_file_receiving_callback(cb):
     """
-    
+    cb(pkt_in)
     """
     global _BeginFileReceivingCallbacksList
     if cb not in _BeginFileReceivingCallbacksList:
         _BeginFileReceivingCallbacksList.append(cb)
 
 
-def add_finish_file_receiving_callback(cb):
+def remove_begin_file_receiving_callback(cb):
     """
+    """
+    global _BeginFileReceivingCallbacksList
+    if cb in _BeginFileReceivingCallbacksList:
+        _BeginFileReceivingCallbacksList.remove(cb)
+
+
+def add_finish_file_receiving_callback(cb, index=0):
+    """
+    cb(pkt_in, data)
     """
     global _FinishFileReceivingCallbacksList
     if cb not in _FinishFileReceivingCallbacksList:
-        _FinishFileReceivingCallbacksList.append(cb)
+        _FinishFileReceivingCallbacksList.insert(index, cb)
+
+def remove_finish_file_receiving_callback(cb):
+    """
+    """
+    global _FinishFileReceivingCallbacksList
+    if cb in _FinishFileReceivingCallbacksList:
+        _FinishFileReceivingCallbacksList.remove(cb)
 
 #------------------------------------------------------------------------------
 
@@ -313,7 +337,7 @@ def run_inbox_callbacks(newpacket, info, status, error_message):
     global _InboxPacketCallbacksList
     if _Debug:
         lg.out(_DebugLevel, 'callback.run_inbox_callbacks for %s from %s' % (newpacket, info))
-        lg.out(_DebugLevel, '    %s' % _InboxPacketCallbacksList)
+        # lg.out(_DebugLevel, '    %s' % _InboxPacketCallbacksList)
     handled = False
     for cb in _InboxPacketCallbacksList:
         try:
@@ -321,10 +345,14 @@ def run_inbox_callbacks(newpacket, info, status, error_message):
                 handled = True
         except:
             lg.exc()
-        if handled:
+            continue
+        if not handled:
             if _Debug:
-                lg.out(_DebugLevel, '    handled by %s' % cb)
-            break
+                lg.out(_DebugLevel, '    passed by %s' % lg.fqn(cb))
+            continue
+        if _Debug:
+            lg.out(_DebugLevel, '    handled by %s' % lg.fqn(cb))
+        break
     return handled
 
 
@@ -334,7 +362,7 @@ def run_outbox_callbacks(pkt_out):
     global _OutboxPacketCallbacksList
     if _Debug:
         lg.out(_DebugLevel, 'callback.run_outbox_callbacks for %s' % pkt_out)
-        lg.out(_DebugLevel, '    %s' % _OutboxPacketCallbacksList)
+        # lg.out(_DebugLevel, '    %s' % _OutboxPacketCallbacksList)
     handled = False
     for cb in _OutboxPacketCallbacksList:
         try:
@@ -342,20 +370,23 @@ def run_outbox_callbacks(pkt_out):
                 handled = True
         except:
             lg.exc()
-        if handled:
+        if not handled:
             if _Debug:
-                lg.out(_DebugLevel, '    handled by %s' % cb)
-            break
+                lg.out(_DebugLevel, '    passed by %s' % lg.fqn(cb))
+            continue
+        if _Debug:
+            lg.out(_DebugLevel, '    handled by %s' % lg.fqn(cb))
+        break
     return handled
 
 
-def run_outbox_filter_callbacks(outpacket, wide, callbacks, target=None, route=None):
+def run_outbox_filter_callbacks(outpacket, wide, callbacks, **kwargs):
     """
     """
     global _OutboxPacketFilterCallbacksList
     for cb in _OutboxPacketFilterCallbacksList:
         try:
-            result = cb(outpacket, wide, callbacks, target, route)
+            result = cb(outpacket, wide, callbacks, **kwargs)
         except:
             result = None
             lg.exc()
@@ -388,15 +419,29 @@ def run_queue_item_status_callbacks(pkt_out, status, error_message):
     return handled
 
 
-def run_begin_file_sending_callbacks(outboxfile):
+def run_begin_file_sending_callbacks(result_defer, remote_idurl, proto, host, filename, description, pkt_out):
     """
-    
     """
+    global _BeginFileSendingCallbacksList
+    if _Debug:
+        lg.out(_DebugLevel, 'callback.run_begin_file_sending_callbacks %s to %s:%s at %s' % (
+            description, proto, host, remote_idurl))
+    handled = False
+    for cb in _BeginFileSendingCallbacksList:
+        try:
+            if cb(result_defer, remote_idurl, proto, host, filename, description, pkt_out):
+                handled = True
+        except:
+            lg.exc()
+        if handled:
+            if _Debug:
+                lg.out(_DebugLevel, '    handled by %s' % cb)
+            break
+    return handled
 
 
 def run_finish_file_sending_callbacks(pkt_out, item, status, size, error_message):
     """
-    
     """
     global _FinishFileSendingCallbacksList
     handled = False
@@ -411,13 +456,41 @@ def run_finish_file_sending_callbacks(pkt_out, item, status, size, error_message
     return handled
 
 
-def run_begin_file_receiving_callbacks():
+def run_begin_file_receiving_callbacks(pkt_in):
     """
-    
     """
+    global _BeginFileReceivingCallbacksList
+    if _Debug:
+        lg.out(_DebugLevel, 'callback.run_begin_file_receiving_callbacks for %s' % pkt_in)
+    handled = False
+    for cb in _BeginFileReceivingCallbacksList:
+        try:
+            if cb(pkt_in):
+                handled = True
+        except:
+            lg.exc()
+        if handled:
+            if _Debug:
+                lg.out(_DebugLevel, '    handled by %s' % cb)
+            break
+    return handled
 
 
-def run_finish_file_receiving_callbacks():
+def run_finish_file_receiving_callbacks(info, data):
     """
-    
     """
+    global _FinishFileReceivingCallbacksList
+    if _Debug:
+        lg.out(_DebugLevel, 'callback.run_finish_file_receiving_callbacks %d bytes : %s' % (len(data), info, ))
+    handled = False
+    for cb in _FinishFileReceivingCallbacksList:
+        try:
+            if cb(info, data):
+                handled = True
+        except:
+            lg.exc()
+        if handled:
+            if _Debug:
+                lg.out(_DebugLevel, '    handled by %s' % cb)
+            break
+    return handled

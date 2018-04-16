@@ -46,6 +46,11 @@ In future we can use that to do "overlay" communications to hide users.
 
 #------------------------------------------------------------------------------
 
+_Debug = True
+_DebugLevel = 14
+
+#------------------------------------------------------------------------------
+
 import os
 import sys
 import time
@@ -66,6 +71,7 @@ from system import bpio
 from lib import misc
 from lib import nameurl
 from lib import packetid
+from lib import utime
 
 from main import settings
 
@@ -136,7 +142,8 @@ def PacketReport(sendORrequest, supplier_idurl, packetID, result):
     """
     Called from other methods here to notify about packets events.
     """
-    lg.out(8, 'io_throttle.PacketReport %s : %s' % (packetID, supplier_idurl))
+    if _Debug:
+        lg.out(_DebugLevel, 'io_throttle.PacketReport %s : %s' % (packetID, supplier_idurl))
     global _PacketReportCallbackFunc
     if _PacketReportCallbackFunc is not None:
         _PacketReportCallbackFunc(sendORrequest, supplier_idurl, packetID, result)
@@ -153,10 +160,11 @@ def QueueSendFile(fileName, packetID, remoteID, ownerID, callOnAck=None, callOnF
 
 def QueueRequestFile(callOnReceived, creatorID, packetID, ownerID, remoteID):
     """
-    Place a request to download a single file from given remote peer.
+    Place a request to download a single data packet from given remote supplier
+    Remote user will verify our identity and decide to send the Data or not.
+    Two scenarios possible when executing a `callOnReceived` callback:
 
-    Remote user will verify our identity and decide to send the Data or
-    not.
+        callOnReceived(newpacket, result)  or  callOnReceived(packetID, result)
     """
     return throttle().QueueRequestFile(callOnReceived, creatorID, packetID, ownerID, remoteID)
 
@@ -270,6 +278,7 @@ class FileToRequest:
         self.fileReceivedTime = None
         self.requestTimeout = max(30, 2 * int(settings.getBackupBlockSize() / settings.SendingSpeedLimit()))
         self.result = ''
+        self.created = utime.get_sec1970()
         PacketReport('request', self.remoteID, self.packetID, 'init')
 
     def __del__(self):
@@ -300,8 +309,9 @@ class FileToSend:
         self.callOnFail = callOnFail
         self.sendTime = None
         self.ackTime = None
-        self.sendTimeout = 2 * (max(int(self.fileSize / settings.SendingSpeedLimit()), 5) + 5)  # maximum 5 seconds to get an Ack
+        self.sendTimeout = 10 * 2 * (max(int(self.fileSize / settings.SendingSpeedLimit()), 5) + 5)  # maximum 5 seconds to get an Ack
         self.result = ''
+        self.created = utime.get_sec1970()
         PacketReport('send', self.remoteID, self.packetID, 'init')
 
     def __del__(self):
@@ -350,12 +360,25 @@ class SupplierQueue:
         self.failedCount = 0
 
         self.sendFailedPacketIDs = []
+        self.requestFailedPacketIDs = []
 
         self._runSend = False
         self.sendTask = None
         self.sendTaskDelay = 0.1
         self.requestTask = None
         self.requestTaskDelay = 0.1
+
+    def ListSendItems(self):
+        return self.fileSendQueue
+
+    def GetSendItem(self, packetID):
+        return self.fileSendDict.get(packetID)
+
+    def ListRequestItems(self):
+        return self.fileRequestQueue
+
+    def GetRequestItem(self, packetID):
+        return self.fileRequestDict.get(packetID)
 
     def RemoveSupplierWork(self):
         """
@@ -379,10 +402,13 @@ class SupplierQueue:
 
     def SupplierSendFile(self, fileName, packetID, ownerID, callOnAck=None, callOnFail=None):
         if self.shutdown:
-            lg.out(10, "io_throttle.SupplierSendFile finishing to %s, shutdown is True" % self.remoteName)
+            if _Debug:
+                lg.out(_DebugLevel, "io_throttle.SupplierSendFile finishing to %s, shutdown is True" % self.remoteName)
             return False
         if contact_status.isOffline(self.remoteID):
-            lg.out(10, "io_throttle.SupplierSendFile %s is offline, so packet %s is failed" % (self.remoteName, packetID))
+            if _Debug:
+                lg.out(_DebugLevel, "io_throttle.SupplierSendFile %s is offline, so packet %s is failed" % (
+                    self.remoteName, packetID))
             if callOnFail is not None:
                 reactor.callLater(0, callOnFail, self.remoteID, packetID, 'offline')
             return False
@@ -399,7 +425,9 @@ class SupplierQueue:
             ownerID,
             callOnAck,
             callOnFail,)
-        lg.out(10, "io_throttle.SupplierSendFile %s to %s, queue=%d" % (packetID, self.remoteName, len(self.fileSendQueue)))
+        if _Debug:
+            lg.out(_DebugLevel, "io_throttle.SupplierSendFile %s to %s, %d queued items" % (
+                packetID, self.remoteName, len(self.fileSendQueue)))
         # reactor.callLater(0, self.DoSend)
         self.DoSend()
         return True
@@ -472,18 +500,19 @@ class SupplierQueue:
             # need to handle resends on own
             # transport_control.outboxNoAck(newpacket)
             gateway.outbox(newpacket, callbacks={
-                commands.Ack(): self.FileSendAck,
-                commands.Fail(): self.FileSendAck})
+                commands.Ack(): self.OnFileSendAckReceived,
+                commands.Fail(): self.OnFileSendAckReceived,
+            })
 
             # str(bpio.ReadBinaryFile(fileToSend.fileName))
-            # {commands.Ack(): self.FileSendAck,
-            # commands.Fail(): self.FileSendAck}
+            # {commands.Ack(): self.OnFileSendAckReceived,
+            # commands.Fail(): self.OnFileSendAckReceived}
 
             # transport_control.RegisterInterest(
-            #     self.FileSendAck,
+            #     self.OnFileSendAckReceived,
             #     fileToSend.remoteID,
             #     fileToSend.packetID)
-            # callback.register_interest(self.FileSendAck, fileToSend.remoteID, fileToSend.packetID)
+            # callback.register_interest(self.OnFileSendAckReceived, fileToSend.remoteID, fileToSend.packetID)
             # lg.out(12, 'io_throttle.RunSend %s to %s, dt=%s' % (
             #     str(newpacket), nameurl.GetName(fileToSend.remoteID), str(time.time()-dt)))
             # mark file as been sent
@@ -491,12 +520,15 @@ class SupplierQueue:
             packetsSent += 1
         # process failed packets
         for packetID, why in packetsFialed.items():
-            self.FileSendFailed(self.fileSendDict[packetID].remoteID, packetID, why)
+            self.OnFileSendFailReceived(self.fileSendDict[packetID].remoteID, packetID, why)
             packetsToRemove.add(packetID)
         # remove finished packets
         for packetID in packetsToRemove:
             self.fileSendQueue.remove(packetID)
             del self.fileSendDict[packetID]
+            if _Debug:
+                lg.out(_DebugLevel, "io_throttle.RunSend removed %s from %s sending queue, %d more items" % (
+                    packetID, self.remoteName, len(self.fileSendQueue)))
         # if sending queue is empty - remove all records about packets failed to send
         if len(self.fileSendQueue) == 0:
             del self.sendFailedPacketIDs[:]
@@ -530,69 +562,10 @@ class SupplierQueue:
             self.sendTask = None
             reactor.callLater(0, self.SendingTask)
 
-    def FileSendAck(self, newpacket, info):
-        if self.shutdown:
-            lg.out(10, "io_throttle.FileSendAck finishing to %s, shutdown is True" % self.remoteName)
-            return
-        self.ackedCount += 1
-        packetID = global_id.CanonicalID(newpacket.PacketID)
-        if packetID not in self.fileSendQueue:
-            lg.warn("packet %s not in sending queue for %s" % (newpacket.PacketID, self.remoteName))
-            return
-        if packetID not in self.fileSendDict.keys():
-            lg.warn("packet %s not in sending dict for %s" % (newpacket.PacketID, self.remoteName))
-            return
-        self.fileSendDict[packetID].ackTime = time.time()
-        if newpacket.Command == commands.Ack():
-            self.fileSendDict[packetID].result = 'acked'
-            if self.fileSendDict[packetID].callOnAck:
-                reactor.callLater(0, self.fileSendDict[packetID].callOnAck, newpacket, newpacket.OwnerID, packetID)
-        elif newpacket.Command == commands.Fail():
-            self.fileSendDict[packetID].result = 'failed'
-            if self.fileSendDict[packetID].callOnFail:
-                reactor.callLater(0, self.fileSendDict[packetID].callOnFail, newpacket.CreatorID, packetID, 'failed')
-        import supplier_connector
-        sc = supplier_connector.by_idurl(newpacket.OwnerID)
-        if sc:
-            if newpacket.Command == commands.Ack():
-                sc.automat('ack', newpacket)
-            elif newpacket.Command == commands.Fail():
-                sc.automat('fail', newpacket)
-            elif newpacket.Command == commands.Data():
-                sc.automat('data', newpacket)
-            else:
-                raise Exception('incorrect packet type received')
-        self.DoSend()
-        # self.RunSend()
-        lg.out(14, "io_throttle.FileSendAck %s from %s, queue=%d" % (
-            str(newpacket), self.remoteName, len(self.fileSendQueue)))
-
-    def FileSendFailed(self, RemoteID, PacketID, why):
-        if self.shutdown:
-            lg.out(10, "io_throttle.FileSendFailed finishing to %s, shutdown is True" % self.remoteName)
-            return
-        self.failedCount += 1
-        if PacketID not in self.fileSendDict.keys():
-            lg.warn("packet %s not in send dict" % PacketID)
-            return
-        self.fileSendDict[PacketID].result = why
-        fileToSend = self.fileSendDict[PacketID]
-        assert fileToSend.remoteID == RemoteID
-        # transport_control.RemoveSupplierRequestFromSendQueue(fileToSend.packetID, fileToSend.remoteID, commands.Data())
-        # queue.remove_supplier_request(fileToSend.packetID, fileToSend.remoteID, commands.Data())
-        # transport_control.RemoveInterest(fileToSend.remoteID, fileToSend.packetID)
-        # callback.remove_interest(fileToSend.remoteID, fileToSend.packetID)
-        if why == 'timeout':
-            contact_status.PacketSendingTimeout(RemoteID, PacketID)
-        if fileToSend.callOnFail:
-            reactor.callLater(0, fileToSend.callOnFail, RemoteID, PacketID, why)
-        self.DoSend()
-        # self.RunSend()
-        lg.out(10, "io_throttle.FileSendFailed %s to [%s] because %s" % (PacketID, nameurl.GetName(fileToSend.remoteID), why))
-
     def SupplierRequestFile(self, callOnReceived, creatorID, packetID, ownerID):
         if self.shutdown:
-            lg.out(10, "io_throttle.SupplierRequestFile finishing to %s, shutdown is True" % self.remoteName)
+            if _Debug:
+                lg.out(_DebugLevel, "io_throttle.SupplierRequestFile finishing to %s, shutdown is True" % self.remoteName)
             if callOnReceived:
                 reactor.callLater(0, callOnReceived, packetID, 'shutdown')
             return False
@@ -604,34 +577,44 @@ class SupplierQueue:
         self.fileRequestQueue.append(packetID)
         self.fileRequestDict[packetID] = FileToRequest(
             callOnReceived, creatorID, packetID, ownerID, self.remoteID)
-        lg.out(10, "io_throttle.SupplierRequestFile for %s from %s, queue length is %d" % (packetID, self.remoteName, len(self.fileRequestQueue)))
+        if _Debug:
+            lg.out(_DebugLevel, "io_throttle.SupplierRequestFile %s from %s, %d queued items" % (
+                packetID, self.remoteName, len(self.fileRequestQueue)))
         # reactor.callLater(0, self.DoRequest)
         self.DoRequest()
         return True
 
     def RunRequest(self):
         #out(6, 'io_throttle.RunRequest')
-        packetsToRemove = set()
+        packetsToRemove = {}
         for i in range(0, min(self.fileRequestMaxLength, len(self.fileRequestQueue))):
             packetID = self.fileRequestQueue[i]
-            currentTime = time.time()
-            if self.fileRequestDict[packetID].requestTime is not None:
-                # the packet were requested
-                if self.fileRequestDict[packetID].fileReceivedTime is None:
-                    # but no answer yet ...
-                    if currentTime - self.fileRequestDict[packetID].requestTime > self.fileRequestDict[packetID].requestTimeout:
-                        # and time is out!!!
-                        self.fileRequestDict[packetID].report = 'timeout'
-                        packetsToRemove.add(packetID)
-                else:
-                    # the packet were received (why it is not removed from the queue yet ???)
-                    self.fileRequestDict[packetID].result = 'received'
-                    packetsToRemove.add(packetID)
+            # we got notify that this packet was failed to send
+            if packetID in self.requestFailedPacketIDs:
+                self.requestFailedPacketIDs.remove(packetID)
+                packetsToRemove[packetID] = 'failed'
+                continue
+            # request timeouts are disabled for now
+#             currentTime = time.time()
+#             if self.fileRequestDict[packetID].requestTime is not None:
+#                 # the packet was requested
+#                 if self.fileRequestDict[packetID].fileReceivedTime is None:
+#                     # but no answer yet ...
+#                     if currentTime - self.fileRequestDict[packetID].requestTime > self.fileRequestDict[packetID].requestTimeout:
+#                         # and time is out!!!
+#                         self.fileRequestDict[packetID].report = 'timeout'
+#                         packetsToRemove[packetID] = 'timeout'
+#                 else:
+#                     # the packet were received (why it is not removed from the queue yet ???)
+#                     self.fileRequestDict[packetID].result = 'received'
+#                     packetsToRemove[packetID] = 'received'
+            # the packet was not requested yet
             if self.fileRequestDict[packetID].requestTime is None:
                 customer, pathID = packetid.SplitPacketID(packetID)
                 if not os.path.exists(os.path.join(settings.getLocalBackupsDir(), customer, pathID)):
                     fileRequest = self.fileRequestDict[packetID]
-                    lg.out(10, "io_throttle.RunRequest for packetID " + fileRequest.packetID)
+                    if _Debug:
+                        lg.out(_DebugLevel, "io_throttle.RunRequest for packetID " + fileRequest.packetID)
                     # transport_control.RegisterInterest(self.DataReceived,fileRequest.creatorID,fileRequest.packetID)
                     # callback.register_interest(self.DataReceived, fileRequest.creatorID, fileRequest.packetID)
                     p2p_service.SendRetreive(
@@ -640,9 +623,11 @@ class SupplierQueue:
                         fileRequest.packetID,
                         fileRequest.remoteID,
                         callbacks={
-                            commands.Data(): self.DataReceived,
-                            commands.Fail(): self.DataReceived,
-                        }
+                            commands.Data(): self.OnDataReceived,
+                            commands.Fail(): self.OnDataReceived,
+                            # None: lambda pkt_out: self.OnDataReceived(fileRequest.packetID, 'timeout'),  # timeout
+                        },
+                        # response_timeout=10,
                     )
 #                     newpacket = signed.Packet(
 #                         commands.Retrieve(),
@@ -658,13 +643,19 @@ class SupplierQueue:
                 else:
                     # we have the data file, no need to request it
                     self.fileRequestDict[packetID].result = 'exist'
-                    packetsToRemove.add(packetID)
+                    packetsToRemove[packetID] = 'exist'
+        # if request queue is empty - remove all records about packets failed to request
+        if len(self.fileRequestQueue) == 0:
+            del self.requestFailedPacketIDs[:]
         # remember requests results
         result = len(packetsToRemove)
         # remove finished requests
-        if len(packetsToRemove) > 0:
-            for packetID in packetsToRemove:
-                self.fileRequestQueue.remove(packetID)
+        for packetID, why in packetsToRemove.items():
+            # self.fileRequestQueue.remove(packetID)
+            if _Debug:
+                lg.out(_DebugLevel, "io_throttle.RunRequest removed %s from %s receiving queue, %d more items" % (
+                    packetID, self.remoteName, len(self.fileRequestQueue)))
+            self.OnDataRequestFailed(packetID, why)
         del packetsToRemove
         return result
 
@@ -695,34 +686,6 @@ class SupplierQueue:
                 self.requestTask = None
                 self.RequestTask()
 
-    def DataReceived(self, newpacket, info):
-        # we requested some data from a supplier, just received it
-        if self.shutdown:
-            # if we're closing down this queue (supplier replaced, don't any anything new)
-            return
-        packetID = global_id.CanonicalID(newpacket.PacketID)
-        if packetID in self.fileRequestQueue:
-            self.fileRequestQueue.remove(packetID)
-        if newpacket.Command == commands.Data():
-            if packetID in self.fileRequestDict:
-                self.fileRequestDict[packetID].fileReceivedTime = time.time()
-                self.fileRequestDict[packetID].result = 'received'
-                for callBack in self.fileRequestDict[packetID].callOnReceived:
-                    callBack(newpacket, 'received')
-        elif newpacket.Command == commands.Fail():
-            if packetID in self.fileRequestDict:
-                self.fileRequestDict[packetID].fileReceivedTime = time.time()
-                self.fileRequestDict[packetID].result = 'failed'
-                for callBack in self.fileRequestDict[packetID].callOnReceived:
-                    callBack(newpacket, 'failed')
-        else:
-            raise Exception('incorrect response command')
-        if packetID in self.fileRequestDict:
-            del self.fileRequestDict[packetID]
-        lg.out(10, "io_throttle.DataReceived %s from %s, queue=%d" % (
-            newpacket, self.remoteName, len(self.fileRequestQueue)))
-        self.DoRequest()
-
     def DeleteBackupSendings(self, backupName):
         if self.shutdown:
             # if we're closing down this queue
@@ -731,13 +694,15 @@ class SupplierQueue:
         packetsToRemove = set()
         for packetID in self.fileSendQueue:
             if packetID.count(backupName):
-                self.FileSendFailed(self.fileSendDict[packetID].remoteID, packetID, 'delete request')
+                self.OnFileSendFailReceived(self.fileSendDict[packetID].remoteID, packetID, 'delete request')
                 packetsToRemove.add(packetID)
-                lg.out(12, 'io_throttle.DeleteBackupSendings %s from send queue' % packetID)
         for packetID in packetsToRemove:
             if packetID in self.fileSendDict:
                 self.fileSendQueue.remove(packetID)
                 del self.fileSendDict[packetID]
+                if _Debug:
+                    lg.out(_DebugLevel, "io_throttle.DeleteBackupSendings removed %s from %s sending queue, %d more items" % (
+                        packetID, self.remoteName, len(self.fileSendQueue)))
         if len(self.fileSendQueue) > 0:
             reactor.callLater(0, self.DoSend)
             # self.DoSend()
@@ -751,10 +716,14 @@ class SupplierQueue:
         for packetID in self.fileRequestQueue:
             if packetID.count(backupName):
                 packetsToRemove.add(packetID)
-                lg.out(12, 'io_throttle.DeleteBackupRequests %s from request queue' % packetID)
+                if _Debug:
+                    lg.out(_DebugLevel, 'io_throttle.DeleteBackupRequests %s from request queue' % packetID)
         for packetID in packetsToRemove:
             self.fileRequestQueue.remove(packetID)
             del self.fileRequestDict[packetID]
+            if _Debug:
+                lg.out(_DebugLevel, "io_throttle.DeleteBackupRequests removed %s from %s receiving queue, %d more items" % (
+                    packetID, self.remoteName, len(self.fileRequestQueue)))
         packetsToCancel = packet_out.search_by_backup_id(backupName)
         for pkt_out in packetsToCancel:
             if pkt_out.outpacket.Command == commands.Retrieve():
@@ -766,10 +735,16 @@ class SupplierQueue:
 
     def OutboxStatus(self, pkt_out, status, error):
         packetID = global_id.CanonicalID(pkt_out.outpacket.PacketID)
-        if status != 'finished' and packetID in self.fileSendQueue:
-            self.sendFailedPacketIDs.append(packetID)
-            # reactor.callLater(0, self.DoSend)
-            self.DoSend()
+        if status != 'finished':
+            if packetID in self.fileSendQueue:
+                lg.warn('packet %s status is %s in sending queue for %s' % (packetID, status, self.remoteName))
+                self.sendFailedPacketIDs.append(packetID)
+                # reactor.callLater(0, self.DoSend)
+                self.DoSend()
+            if packetID in self.fileRequestQueue:
+                lg.warn('packet %s status is %s in request queue for %s' % (packetID, status, self.remoteName))
+                self.requestFailedPacketIDs.append(packetID)
+                self.DoRequest()
 
     def HasSendingFiles(self):
         return len(self.fileSendQueue) > 0
@@ -789,6 +764,148 @@ class SupplierQueue:
     def GetRequestQueueLength(self):
         return len(self.fileRequestQueue)
 
+    def OnFileSendAckReceived(self, newpacket, info):
+        if self.shutdown:
+            if _Debug:
+                lg.out(_DebugLevel, "io_throttle.OnFileSendAckReceived finishing to %s, shutdown is True" % self.remoteName)
+            return
+        if not newpacket and not info:
+            lg.warn('packet timed out during responding')
+            return
+        self.ackedCount += 1
+        packetID = global_id.CanonicalID(newpacket.PacketID)
+        if packetID not in self.fileSendQueue:
+            lg.warn("packet %s not in sending queue for %s" % (newpacket.PacketID, self.remoteName))
+            return
+        if packetID not in self.fileSendDict.keys():
+            lg.warn("packet %s not in sending dict for %s" % (newpacket.PacketID, self.remoteName))
+            return
+        self.fileSendDict[packetID].ackTime = time.time()
+        if newpacket.Command == commands.Ack():
+            self.fileSendDict[packetID].result = 'acked'
+            if self.fileSendDict[packetID].callOnAck:
+                reactor.callLater(0, self.fileSendDict[packetID].callOnAck, newpacket, newpacket.OwnerID, packetID)
+        elif newpacket.Command == commands.Fail():
+            self.fileSendDict[packetID].result = 'failed'
+            if self.fileSendDict[packetID].callOnFail:
+                reactor.callLater(0, self.fileSendDict[packetID].callOnFail, newpacket.CreatorID, packetID, 'failed')
+        from customer import supplier_connector
+        sc = supplier_connector.by_idurl(newpacket.OwnerID)
+        if sc:
+            if newpacket.Command == commands.Ack():
+                sc.automat('ack', newpacket)
+            elif newpacket.Command == commands.Fail():
+                sc.automat('fail', newpacket)
+            elif newpacket.Command == commands.Data():
+                sc.automat('data', newpacket)
+            else:
+                raise Exception('incorrect packet type received')
+        self.DoSend()
+        # self.RunSend()
+        if _Debug:
+            lg.out(_DebugLevel, "io_throttle.OnFileSendAckReceived %s from %s, queue=%d" % (
+                str(newpacket), self.remoteName, len(self.fileSendQueue)))
+
+    def OnFileSendFailReceived(self, RemoteID, PacketID, why):
+        if self.shutdown:
+            if _Debug:
+                lg.out(_DebugLevel, "io_throttle.OnFileSendFailReceived finishing to %s, shutdown is True" % self.remoteName)
+            return
+        self.failedCount += 1
+        if PacketID not in self.fileSendDict.keys():
+            lg.warn("packet %s not in send dict" % PacketID)
+            return
+        self.fileSendDict[PacketID].result = why
+        fileToSend = self.fileSendDict[PacketID]
+        assert fileToSend.remoteID == RemoteID
+        # transport_control.RemoveSupplierRequestFromSendQueue(fileToSend.packetID, fileToSend.remoteID, commands.Data())
+        # queue.remove_supplier_request(fileToSend.packetID, fileToSend.remoteID, commands.Data())
+        # transport_control.RemoveInterest(fileToSend.remoteID, fileToSend.packetID)
+        # callback.remove_interest(fileToSend.remoteID, fileToSend.packetID)
+        if why == 'timeout':
+            contact_status.PacketSendingTimeout(RemoteID, PacketID)
+        if fileToSend.callOnFail:
+            reactor.callLater(0, fileToSend.callOnFail, RemoteID, PacketID, why)
+        self.DoSend()
+        # self.RunSend()
+        if _Debug:
+            lg.out(_DebugLevel, "io_throttle.OnFileSendFailReceived %s to [%s] because %s" % (
+                PacketID, nameurl.GetName(fileToSend.remoteID), why))
+
+    def OnDataReceived(self, newpacket, result):
+#         if result == 'timeout':
+#             packetID = global_id.CanonicalID(newpacket)
+#             if packetID in self.fileRequestDict:
+#                 self.fileRequestDict[packetID].fileReceivedTime = time.time()
+#                 self.fileRequestDict[packetID].result = 'timeout'
+#                 for callBack in self.fileRequestDict[packetID].callOnReceived:
+#                     callBack(None, 'timeout')
+#             return
+        # we requested some data from a supplier, just received it
+        packetID = global_id.CanonicalID(newpacket.PacketID)
+        if self.shutdown:
+            # if we're closing down this queue (supplier replaced, don't any anything new)
+            if packetID in self.fileRequestDict:
+                for callBack in self.fileRequestDict[packetID].callOnReceived:
+                    callBack(newpacket, 'shutdown')
+            if packetID in self.fileRequestDict:
+                del self.fileRequestDict[packetID]
+            lg.warn('supplier queue is shutting down')
+            return
+        if packetID in self.fileRequestQueue:
+            self.fileRequestQueue.remove(packetID)
+            if _Debug:
+                lg.out(_DebugLevel, "io_throttle.OnDataReceived removed %s from %s receiving queue, %d more items" % (
+                    packetID, self.remoteName, len(self.fileRequestQueue)))
+        if newpacket.Command == commands.Data():
+            if packetID in self.fileRequestDict:
+                self.fileRequestDict[packetID].fileReceivedTime = time.time()
+                self.fileRequestDict[packetID].result = 'received'
+                for callBack in self.fileRequestDict[packetID].callOnReceived:
+                    callBack(newpacket, 'received')
+        elif newpacket.Command == commands.Fail():
+            if packetID in self.fileRequestDict:
+                self.fileRequestDict[packetID].fileReceivedTime = time.time()
+                self.fileRequestDict[packetID].result = 'failed'
+                for callBack in self.fileRequestDict[packetID].callOnReceived:
+                    callBack(newpacket, 'failed')
+        else:
+            lg.err('incorrect response command')
+        if packetID in self.fileRequestDict:
+            del self.fileRequestDict[packetID]
+        if _Debug:
+            lg.out(_DebugLevel, "io_throttle.OnDataReceived %s from %s, queue=%d" % (
+                newpacket, self.remoteName, len(self.fileRequestQueue)))
+        self.DoRequest()
+
+    def OnDataRequestFailed(self, packetID, why=None):
+        # we requested some data from a supplier, but this failed for some reason
+        if self.shutdown:
+            # if we're closing down this queue (supplier replaced, don't any anything new)
+            if packetID in self.fileRequestDict:
+                for callBack in self.fileRequestDict[packetID].callOnReceived:
+                    callBack(packetID, 'shutdown')
+            if packetID in self.fileRequestDict:
+                del self.fileRequestDict[packetID]
+            lg.warn('supplier queue is shutting down')
+            return
+        if packetID in self.fileRequestQueue:
+            self.fileRequestQueue.remove(packetID)
+            if _Debug:
+                lg.out(_DebugLevel, "io_throttle.OnDataRequestFailed removed %s from %s receiving queue because %s, %d more items" % (
+                    packetID, self.remoteName, why, len(self.fileRequestQueue)))
+        else:
+            lg.warn('packet %s not found in request queue for %s' % (packetID, self.remoteName))
+        if packetID in self.fileRequestDict:
+            self.fileRequestDict[packetID].fileReceivedTime = time.time()
+            self.fileRequestDict[packetID].result = why or 'failed'
+            for callBack in self.fileRequestDict[packetID].callOnReceived:
+                callBack(packetID, why or 'failed')
+            del self.fileRequestDict[packetID]
+        else:
+            lg.warn('packet %s not found request info for %s' % (packetID, self.remoteName))
+        self.DoRequest()
+
 #------------------------------------------------------------------------------
 
 # all of the backup rebuilds will run their data requests through this
@@ -801,6 +918,12 @@ class IOThrottle:
         self.creatorID = my_id.getLocalID()
         self.supplierQueues = {}
         self.paintFunc = None
+
+    def GetSupplierQueue(self, supplierIDURL):
+        return self.supplierQueues.get(supplierIDURL)
+
+    def ListSupplierQueues(self):
+        return self.supplierQueues.keys()
 
     def SetSupplierQueueCallbackFunc(self, func):
         self.paintFunc = func
@@ -825,13 +948,13 @@ class IOThrottle:
     def QueueSendFile(self, fileName, packetID, remoteID, ownerID, callOnAck=None, callOnFail=None):
         #out(10, "io_throttle.QueueSendFile %s to %s" % (packetID, nameurl.GetName(remoteID)))
         if not os.path.exists(fileName):
-            lg.out(2, "io_throttle.QueueSendFile ERROR %s not exist" % fileName)
+            lg.err("%s not exist" % fileName)
             if callOnFail is not None:
                 reactor.callLater(.01, callOnFail, remoteID, packetID, 'not exist')
             return False
         if remoteID not in self.supplierQueues.keys():
             self.supplierQueues[remoteID] = SupplierQueue(remoteID, self.creatorID)
-            lg.out(6, "io_throttle.QueueSendFile made a new queue for %s" % nameurl.GetName(remoteID))
+            lg.info("made a new sending queue for %s" % nameurl.GetName(remoteID))
         return self.supplierQueues[remoteID].SupplierSendFile(
             fileName, packetID, ownerID, callOnAck, callOnFail,)
 
@@ -840,7 +963,10 @@ class IOThrottle:
     def QueueRequestFile(self, callOnReceived, creatorID, packetID, ownerID, remoteID):
         # make sure that we don't actually already have the file
         # if packetID != settings.BackupInfoFileName():
-        if packetID not in [settings.BackupInfoFileName(), settings.BackupInfoFileNameOld(), settings.BackupInfoEncryptedFileName(), ]:
+        if packetID not in [
+                settings.BackupInfoFileName(),
+                settings.BackupInfoFileNameOld(),
+                settings.BackupInfoEncryptedFileName(), ]:
             customer, pathID = packetid.SplitPacketID(packetID)
             filename = os.path.join(settings.getLocalBackupsDir(), customer, pathID)
             if os.path.exists(filename):
@@ -851,7 +977,7 @@ class IOThrottle:
         if remoteID not in self.supplierQueues.keys():
             # made a new queue for this man
             self.supplierQueues[remoteID] = SupplierQueue(remoteID, self.creatorID)
-            lg.out(6, "io_throttle.QueueRequestFile made a new queue for %s" % nameurl.GetName(remoteID))
+            lg.info("made a new receiving queue for %s" % nameurl.GetName(remoteID))
         # lg.out(10, "io_throttle.QueueRequestFile asking for %s from %s" % (packetID, nameurl.GetName(remoteID)))
         return self.supplierQueues[remoteID].SupplierRequestFile(
             callOnReceived, creatorID, packetID, ownerID)

@@ -33,12 +33,13 @@ EVENTS:
     * :red:`connection-made`
     * :red:`data-received`
     * :red:`disconnect`
+    * :red:`send-keep-alive`
     * :red:`timer-10sec`
 """
 #------------------------------------------------------------------------------
 
-_Debug = True
-_DebugLevel = 8
+_Debug = False
+_DebugLevel = 12
 
 #------------------------------------------------------------------------------
 
@@ -81,6 +82,23 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         self.total_bytes_received = 0
         self.total_bytes_sent = 0
         self.outboxQueue = []
+        self.last_wazap_received = 0
+
+    def connectionMade(self):
+        if _Debug:
+            lg.out(_DebugLevel, 'tcp_connection.connectionMade %s:%d' % self.getTransportAddress())
+        address = self.getAddress()
+        name = 'tcp_connection[%s:%d]' % (address[0], address[1])
+        automat.Automat.__init__(
+            self, name, 'AT_STARTUP',
+            debug_level=_DebugLevel, log_events=_Debug, publish_events=False)
+        self.log_transitions = _Debug
+        self.automat('connection-made')
+
+    def connectionLost(self, reason):
+        if _Debug:
+            lg.out(_DebugLevel, 'tcp_connection.connectionLost with %s:%d' % self.getTransportAddress())
+        self.automat('connection-lost')
 
     def init(self):
         """
@@ -89,8 +107,18 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         """
 
     def A(self, event, arg):
+        #---AT_STARTUP---
+        if self.state == 'AT_STARTUP':
+            if event == 'connection-made' and not self.isOutgoing(arg):
+                self.state = 'SERVER?'
+                self.doInit(arg)
+            elif event == 'connection-made' and self.isOutgoing(arg):
+                self.state = 'CLIENT?'
+                self.doInit(arg)
+                self.doCloseOutgoing(arg)
+                self.doSendHello(arg)
         #---CONNECTED---
-        if self.state == 'CONNECTED':
+        elif self.state == 'CONNECTED':
             if event == 'data-received':
                 self.doReceiveData(arg)
             elif event == 'connection-lost':
@@ -103,16 +131,8 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
                 self.doStopInOutFiles(arg)
                 self.doCloseStream(arg)
                 self.doDisconnect(arg)
-        #---AT_STARTUP---
-        elif self.state == 'AT_STARTUP':
-            if event == 'connection-made' and not self.isOutgoing(arg):
-                self.state = 'SERVER?'
-                self.doInit(arg)
-            elif event == 'connection-made' and self.isOutgoing(arg):
-                self.state = 'CLIENT?'
-                self.doInit(arg)
-                self.doCloseOutgoing(arg)
-                self.doSendHello(arg)
+            elif event == 'send-keep-alive':
+                self.doSendWazap(arg)
         #---CLIENT?---
         elif self.state == 'CLIENT?':
             if event == 'connection-lost':
@@ -123,7 +143,7 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
                 self.doReadWazap(arg)
                 self.doOpenStream(arg)
                 self.doStartPendingFiles(arg)
-            elif event == 'timer-10sec' or event == 'disconnect' or (event == 'data-received' and not (self.isWazap(arg) and self.isSomePendingFiles())):
+            elif event == 'timer-10sec' or event == 'disconnect' or ( event == 'data-received' and not ( self.isWazap(arg) and self.isSomePendingFiles(arg) ) ):
                 self.state = 'DISCONNECT'
                 self.doDisconnect(arg)
         #---SERVER?---
@@ -137,7 +157,7 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
                 self.doSendWazap(arg)
                 self.doOpenStream(arg)
                 self.doStartPendingFiles(arg)
-            elif event == 'timer-10sec' or event == 'disconnect' or (event == 'data-received' and not self.isHello(arg)):
+            elif event == 'timer-10sec' or event == 'disconnect' or ( event == 'data-received' and not self.isHello(arg) ):
                 self.state = 'DISCONNECT'
                 self.doDisconnect(arg)
         #---CLOSED---
@@ -266,6 +286,8 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
             self.stream.ok_received(payload)
         elif command == CMD_ABORT:
             self.stream.abort_received(payload)
+        elif command == CMD_WAZAP:
+            self.last_wazap_received = time.time()
         else:
             pass
 
@@ -291,8 +313,8 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         """
         Action method.
         """
-        for filename, description, result_defer, single in self.factory.pendingoutboxfiles:
-            self.append_outbox_file(filename, description, result_defer, single)
+        for filename, description, result_defer, keep_alive in self.factory.pendingoutboxfiles:
+            self.append_outbox_file(filename, description, result_defer, keep_alive)
         self.factory.pendingoutboxfiles = []
 
     def doStopInOutFiles(self, arg):
@@ -323,9 +345,12 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         if _Debug:
             lg.out(_DebugLevel, 'tcp_connection.doDisconnect with %s' % str(self.peer_address))
         try:
-            self.transport.abortConnection()
+            self.transport.stopListening()
         except:
-            self.transport.loseConnection()
+            try:
+                self.transport.loseConnection()
+            except:
+                lg.exc()
 
     def doDestroyMe(self, arg):
         """
@@ -360,19 +385,6 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
             addr = self.getTransportAddress()
         return addr
 
-    def connectionMade(self):
-        if _Debug:
-            lg.out(_DebugLevel, 'tcp_connection.connectionMade %s:%d' % self.getTransportAddress())
-        address = self.getAddress()
-        name = 'tcp_connection[%s:%d]' % (address[0], address[1])
-        automat.Automat.__init__(self, name, 'AT_STARTUP', _DebugLevel, _Debug)
-        self.automat('connection-made')
-
-    def connectionLost(self, reason):
-        if _Debug:
-            lg.out(_DebugLevel, 'tcp_connection.connectionLost with %s:%d' % self.getTransportAddress())
-        self.automat('connection-lost')
-
     def sendData(self, command, payload):
         try:
             data = self.SoftwareVersion + str(command.lower())[0] + payload
@@ -388,14 +400,20 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
             command = data[1]
             payload = data[2:]
         except:
-            lg.exc()
-            self.transport.loseConnection()
+            lg.warn('invalid string received in tcp connection')
+            try:
+                self.transport.stopListening()
+            except:
+                try:
+                    self.transport.loseConnection()
+                except:
+                    lg.exc()
             return
         # print '>>>>>> [%s] %d bytes' % (command, len(payload))
         self.automat('data-received', (command, payload))
 
-    def append_outbox_file(self, filename, description='', result_defer=None, single=False):
-        self.outboxQueue.append((filename, description, result_defer, single))
+    def append_outbox_file(self, filename, description='', result_defer=None, keep_alive=True):
+        self.outboxQueue.append((filename, description, result_defer, keep_alive))
 
     def process_outbox_queue(self):
         if self.state != 'CONNECTED':
@@ -405,28 +423,31 @@ class TCPConnection(automat.Automat, basic.Int32StringReceiver):
         from transport.tcp import tcp_stream
         has_reads = False
         while len(self.outboxQueue) > 0 and len(self.stream.outboxFiles) < tcp_stream.MAX_SIMULTANEOUS_OUTGOING_FILES:
-            filename, description, result_defer, single = self.outboxQueue.pop(0)
+            filename, description, result_defer, keep_alive = self.outboxQueue.pop(0)
             has_reads = True
             # we have a queue of files to be sent
             # somehow file may be removed before we start sending it
             # so we check it here and skip not existed files
             if not os.path.isfile(filename):
                 self.failed_outbox_queue_item(filename, description, 'file not exist')
-                if single:
+                if not keep_alive:
                     self.automat('shutdown')
                 continue
             try:
                 filesize = os.path.getsize(filename)
             except:
                 self.failed_outbox_queue_item(filename, description, 'can not get file size')
-                if single:
+                if not keep_alive:
                     self.automat('shutdown')
                 continue
-            self.stream.create_outbox_file(filename, filesize, description, result_defer, single)
+            self.stream.create_outbox_file(filename, filesize, description, result_defer, keep_alive)
         return has_reads
 
     def failed_outbox_queue_item(self, filename, description='', error_message=''):
         from transport.tcp import tcp_interface
         lg.out(6, 'tcp_connection.failed_outbox_queue_item %s because %s' % (filename, error_message))
-        tcp_interface.interface_cancelled_file_sending(
-            self.getAddress(), filename, 0, description, error_message)
+        try:
+            tcp_interface.interface_cancelled_file_sending(
+                self.getAddress(), filename, 0, description, error_message).addErrback(lambda err: lg.exc(err))
+        except Exception as exc:
+            lg.warn(str(exc))

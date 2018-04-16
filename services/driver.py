@@ -33,7 +33,7 @@ module:: driver
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -42,7 +42,8 @@ import os
 import sys
 import importlib
 
-from twisted.internet.defer import Deferred, DeferredList, succeed
+from twisted.internet import reactor
+from twisted.internet.defer import Deferred, DeferredList, succeed, failure
 
 #------------------------------------------------------------------------------
 
@@ -129,18 +130,18 @@ def is_exist(name):
     return name in services()
 
 
-def request(name, request, info):
-    svc = services().get(name, None)
+def request(service_name, service_request_payload, request, info):
+    svc = services().get(service_name, None)
     if svc is None:
-        raise Exception('service %s not found' % name)
-    return svc.request(request, info)
+        raise Exception('service %s not found' % service_name)
+    return svc.request(service_request_payload, request, info)
 
 
-def cancel(name, request, info):
-    svc = services().get(name, None)
+def cancel(service_name, service_cancel_payload, request, info):
+    svc = services().get(service_name, None)
     if svc is None:
-        raise Exception('service %s not found' % name)
-    return svc.cancel(request, info)
+        raise Exception('service %s not found' % service_name)
+    return svc.cancel(service_cancel_payload, request, info)
 
 #------------------------------------------------------------------------------
 
@@ -153,8 +154,7 @@ def init():
     available_services_dir = os.path.join(bpio.getExecutableDir(), 'services')
     loaded = set()
     for filename in os.listdir(available_services_dir):
-        if not filename.endswith('.py') and not filename.endswith(
-                '.pyo') and not filename.endswith('.pyc'):
+        if not filename.endswith('.py') and not filename.endswith('.pyo') and not filename.endswith('.pyc'):
             continue
         if not filename.startswith('service_'):
             continue
@@ -169,22 +169,14 @@ def init():
             py_mod = importlib.import_module('services.' + name)
         except:
             if _Debug:
-                lg.out(
-                    _DebugLevel -
-                    4,
-                    '%s exception during module import' %
-                    name)
+                lg.out(_DebugLevel - 4, '%s exception during module import' % name)
             lg.exc()
             continue
         try:
             services()[name] = py_mod.create_service()
         except:
             if _Debug:
-                lg.out(
-                    _DebugLevel -
-                    4,
-                    '%s exception while creating service instance' %
-                    name)
+                lg.out(_DebugLevel - 4, '%s exception while creating service instance' % name)
             lg.exc()
             continue
         loaded.add(name)
@@ -256,17 +248,24 @@ def build_order():
     return order
 
 
-def start():
+def start(services_list=[]):
     """
     """
     global _StartingDeferred
+    global _StopingDeferred
     if _StartingDeferred:
         lg.warn('driver.start already called')
         return _StartingDeferred
+    if _StopingDeferred:
+        d = Deferred()
+        d.errback('currently another service is stopping')
+        return d
+    if not services_list:
+        services_list.extend(boot_up_order())
     if _Debug:
-        lg.out(_DebugLevel - 6, 'driver.start')
+        lg.out(_DebugLevel - 6, 'driver.start with %d services' % len(services_list))
     dl = []
-    for name in boot_up_order():
+    for name in services_list:
         svc = services().get(name, None)
         if not svc:
             raise ServiceNotFound(name)
@@ -284,17 +283,24 @@ def start():
     return _StartingDeferred
 
 
-def stop():
+def stop(services_list=[]):
     """
     """
     global _StopingDeferred
+    global _StartingDeferred
     if _StopingDeferred:
         lg.warn('driver.stop already called')
         return _StopingDeferred
+    if _StartingDeferred:
+        d = Deferred()
+        d.errback('currently another service is starting')
+        return d
+    if not services_list:
+        services_list.extend(reversed(boot_up_order()))
     if _Debug:
-        lg.out(_DebugLevel - 6, 'driver.stop')
+        lg.out(_DebugLevel - 6, 'driver.stop with %d services' % len(services_list))
     dl = []
-    for name in reversed(boot_up_order()):
+    for name in services_list:
         svc = services().get(name, None)
         if not svc:
             raise ServiceNotFound(name)
@@ -305,12 +311,78 @@ def stop():
     _StopingDeferred.addCallback(on_stopped_all_services)
     return _StopingDeferred
 
+
+def restart(service_name, wait_timeout=None):
+    """
+    """
+    global _StopingDeferred
+    global _StartingDeferred
+    restart_result = Deferred()
+
+    def _on_started(start_result, stop_result, dependencies_results):
+        lg.out(4, 'api.service_restart._on_started : %s with %s' % (service_name, start_result))
+        try:
+            stop_resp = {stop_result[0][1]: stop_result[0][0], }
+        except:
+            stop_resp = {'stopped': str(stop_result), }
+        try:
+            start_resp = {start_result[0][1]: start_result[0][0], }
+        except:
+            start_resp = {'started': str(start_result), }
+        restart_result.callback([stop_resp, start_resp, ])
+        return start_result
+
+    def _do_start(stop_result=None, dependencies_results=None):
+        lg.out(4, 'api.service_restart._do_start : %s' % service_name)
+        start_defer = start(services_list=[service_name, ])
+        start_defer.addCallback(_on_started, stop_result, dependencies_results)
+        start_defer.addErrback(restart_result.errback)
+        return start_defer
+
+    def _on_stopped(stop_result, dependencies_results):
+        lg.out(4, 'api.service_restart._on_stopped : %s with %s' % (service_name, stop_result))
+        _do_start(stop_result, dependencies_results)
+        return stop_result
+
+    def _do_stop(dependencies_results=None):
+        lg.out(4, 'api.service_restart._do_stop : %s' % service_name)
+        stop_defer = stop(services_list=[service_name, ])
+        stop_defer.addCallback(_on_stopped, dependencies_results)
+        stop_defer.addErrback(restart_result.errback)
+        return stop_defer
+
+    def _on_timeout(err):
+        all_states = [_svc.state for _svc in services().values()]
+        if 'INFLUENCE' in all_states or 'STARTING' in all_states or 'STOPPING' in all_states:
+            restart_result.errback(failure.Failure(Exception('timeout')))
+            return err
+        _do_stop()
+        return None
+
+    dl = []
+    if _StopingDeferred:
+        dl.append(_StartingDeferred)
+    if _StartingDeferred:
+        dl.append(_StartingDeferred)
+    if wait_timeout:
+        all_states = [_svc.state for _svc in services().values()]
+        if 'INFLUENCE' in all_states or 'STARTING' in all_states or 'STOPPING' in all_states:
+            wait_timeout_defer = Deferred()
+            wait_timeout_defer.addTimeout(wait_timeout, clock=reactor)
+            dl.append(wait_timeout_defer)
+    if not dl:
+        dl.append(succeed(True))
+
+    dependencies = DeferredList(dl, fireOnOneErrback=True, consumeErrors=True)
+    dependencies.addCallback(_do_stop)
+    dependencies.addErrback(_on_timeout)
+    return restart_result
+
 #------------------------------------------------------------------------------
 
 
 def on_service_callback(result, service_name):
     """
-    
     """
     if _Debug:
         lg.out(_DebugLevel +

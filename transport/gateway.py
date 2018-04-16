@@ -66,7 +66,7 @@ Some of them uses DHT to store data on nodes - we can use that stuff also.
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 14
+_DebugLevel = 16
 
 #------------------------------------------------------------------------------
 
@@ -117,7 +117,6 @@ from web import control
 
 _AvailableTransports = {}
 _TransportsDict = {}
-_DoingShutdown = False
 _LocalListener = None
 _XMLRPCListener = None
 _XMLRPCPort = None
@@ -134,7 +133,6 @@ _TransportLogFilename = None
 
 def transport(proto):
     """
-    
     """
     global _TransportsDict
     return _TransportsDict[proto]
@@ -142,7 +140,6 @@ def transport(proto):
 
 def transports():
     """
-    
     """
     global _TransportsDict
     return _TransportsDict
@@ -150,7 +147,6 @@ def transports():
 
 def listener():
     """
-    
     """
     global _LocalListener
     return _LocalListener
@@ -165,14 +161,12 @@ def is_installed(proto):
 
 def can_send(proto):
     """
-    
     """
     return transport(proto).state == 'LISTENING'
 
 
 def last_inbox_time():
     """
-    
     """
     global _LastInboxPacketTime
     return _LastInboxPacketTime
@@ -182,16 +176,15 @@ def last_inbox_time():
 
 def init():
     """
-    
     """
     global _LocalListener
-    global _DoingShutdown
     if _Debug:
         lg.out(4, 'gateway.init')
-    if _DoingShutdown:
-        return
     open_transport_log(settings.TransportLog())
-    _LocalListener = TransportGateLocalProxy()
+    if _LocalListener:
+        lg.warn('local listener already exist')
+    else:
+        _LocalListener = TransportGateLocalProxy()
 
 
 def shutdown():
@@ -202,14 +195,12 @@ def shutdown():
     global _XMLRPCListener
     global _XMLRPCPort
     global _XMLRPCURL
-    global _DoingShutdown
     if _Debug:
         lg.out(4, 'gateway.shutdown')
-    if _DoingShutdown:
-        return
-    _DoingShutdown = True
     if _LocalListener:
         _LocalListener = None
+    else:
+        lg.warn('local listener not exist')
     close_transport_log()
 
 
@@ -219,6 +210,7 @@ def start():
     if _Debug:
         lg.out(4, 'gateway.start')
     callback.append_outbox_filter_callback(on_outbox_packet)
+    callback.add_finish_file_receiving_callback(on_file_received)
     result = []
     for proto, transp in transports().items():
         if settings.transportIsEnabled(proto):
@@ -240,6 +232,7 @@ def cold_start():
     if _Debug:
         lg.out(4, 'gateway.cold_start : sending "start" only to one transport - most preferable')
     callback.append_outbox_filter_callback(on_outbox_packet)
+    callback.add_finish_file_receiving_callback(on_file_received)
     ordered_list = transports().keys()
     ordered_list.sort(key=settings.getTransportPriority, reverse=True)
     result = []
@@ -261,7 +254,6 @@ def cold_start():
 
 def stop():
     """
-    
     """
     if _Debug:
         lg.out(4, 'gateway.stop')
@@ -279,13 +271,13 @@ def stop():
             else:
                 if _Debug:
                     lg.out(4, '    %s already stopped' % proto)
+    callback.remove_finish_file_receiving_callback(on_file_received)
     callback.remove_outbox_filter_callback(on_outbox_packet)
     return result
 
 
 def verify():
     """
-    
     """
     ordered_list = transports().keys()
     ordered_list.sort(key=settings.getTransportPriority, reverse=True)
@@ -343,7 +335,6 @@ def verify():
 
 def attach(transport_instance):
     """
-    
     """
     global _TransportsDict
     global _AvailableTransports
@@ -355,7 +346,6 @@ def attach(transport_instance):
 
 def detach(transport_instance):
     """
-    
     """
     global _TransportsDict
     global _AvailableTransports
@@ -389,12 +379,11 @@ def inbox(info):
     every 24 hours    which we send to BitDust sometime in the 24 hours
     after that.
     """
-    global _DoingShutdown
     global _LastInboxPacketTime
-    if _DoingShutdown:
-        if _Debug:
-            lg.out(_DebugLevel - 4, "gateway.inbox ignoring input since _DoingShutdown ")
-        return None
+#     if _DoingShutdown:
+#         if _Debug:
+#             lg.out(_DebugLevel - 4, "gateway.inbox ignoring input since _DoingShutdown ")
+#         return None
     if info.filename == "" or not os.path.exists(info.filename):
         lg.err("bad filename=" + info.filename)
         return None
@@ -405,6 +394,9 @@ def inbox(info):
         return None
     if len(data) == 0:
         lg.err("gateway.inbox ERROR zero byte file from %s://%s" % (info.proto, info.host))
+        return None
+    if callback.run_finish_file_receiving_callbacks(info, data):
+        lg.warn('incoming data of %d bytes was filtered out in file receiving callback' % len(data))
         return None
     try:
         newpacket = signed.Unserialize(data)
@@ -447,7 +439,7 @@ def inbox(info):
     return newpacket
 
 
-def outbox(outpacket, wide=False, callbacks={}, target=None, route=None):
+def outbox(outpacket, wide=False, callbacks={}, target=None, route=None, response_timeout=None, keep_alive=True, ):
     """
     Sends `packet` to the network.
 
@@ -464,6 +456,7 @@ def outbox(outpacket, wide=False, callbacks={}, target=None, route=None):
                 'host': <receiver host>,
                 'remoteid': <receiver idurl>,
                 'description': <description on the packet>,
+        :param response_timeout   None, or integer to indicate how long to wait for an ack
 
     Returns:
         `None` if data was not sent, no filter was applied
@@ -477,7 +470,15 @@ def outbox(outpacket, wide=False, callbacks={}, target=None, route=None):
             nameurl.GetName(outpacket.CreatorID),
             nameurl.GetName(outpacket.RemoteID),
             wide,))
-    return callback.run_outbox_filter_callbacks(outpacket, wide, callbacks)
+    return callback.run_outbox_filter_callbacks(
+        outpacket,
+        wide=wide,
+        callbacks=callbacks,
+        target=target,
+        route=route,
+        response_timeout=response_timeout,
+        keep_alive=keep_alive,
+    )
 
 #------------------------------------------------------------------------------
 
@@ -492,6 +493,7 @@ def make_transfer_ID():
     _LastTransferID += 1
     return _LastTransferID
 
+#------------------------------------------------------------------------------
 
 def send_work_item(proto, host, filename, description):
     """
@@ -507,35 +509,40 @@ def send_work_item(proto, host, filename, description):
 
 def connect_to(proto, host):
     """
-    
     """
     return transport(proto).call('connect_to', host)
 
 
 def disconnect_from(proto, host):
     """
-    
     """
     return transport(proto).call('disconnect_from', host)
 
 
-def send_file(remote_idurl, proto, host, filename, description=''):
+def send_file(remote_idurl, proto, host, filename, description='', pkt_out=None):
     """
-    
     """
-    return transport(proto).call('send_file', remote_idurl, filename, host, description)
+    result_defer = transport(proto).call('send_file', remote_idurl, filename, host, description)
+    callback.run_begin_file_sending_callbacks(result_defer, remote_idurl, proto, host, filename, description, pkt_out)
+    return result_defer
 
 
-def send_file_single(remote_idurl, proto, host, filename, description=''):
+def send_file_single(remote_idurl, proto, host, filename, description='', pkt_out=None):
     """
-    
     """
-    return transport(proto).call('send_file_single', remote_idurl, filename, host, description)
+    result_defer = transport(proto).call('send_file_single', remote_idurl, filename, host, description)
+    callback.run_begin_file_sending_callbacks(result_defer, remote_idurl, proto, host, filename, description, pkt_out)
+    return result_defer
+
+
+def send_keep_alive(proto, host):
+    """
+    """
+    return transport(proto).call('send_keep_alive', host)
 
 
 def list_active_transports():
     """
-    
     """
     result = []
     for proto, transp in transports().items():
@@ -547,16 +554,25 @@ def list_active_transports():
 
 def list_active_sessions(proto):
     """
-    
     """
     return transport(proto).call('list_sessions')
 
 
 def list_active_streams(proto):
     """
-    
     """
     return transport(proto).call('list_streams')
+
+
+def find_active_session(proto, host):
+    """
+    """
+    return transport(proto).call('find_session', host)
+
+def find_active_stream(proto, stream_id=None, transfer_id=None):
+    """
+    """
+    return transport(proto).call('find_stream', stream_id=stream_id, transfer_id=transfer_id)
 
 #------------------------------------------------------------------------------
 
@@ -616,7 +632,6 @@ def current_bytes_received():
 
 def shutdown_all_outbox_packets():
     """
-    
     """
     if _Debug:
         lg.out(_DebugLevel, 'gateway.shutdown_all_outbox_packets, %d live objects at the moment' % len(packet_out.queue()))
@@ -626,7 +641,6 @@ def shutdown_all_outbox_packets():
 
 def shutdown_all_inbox_packets():
     """
-    
     """
     if _Debug:
         lg.out(_DebugLevel, 'gateway.shutdown_all_inbox_packets, %d live objects at the moment' % len(packet_in.items().values()))
@@ -646,12 +660,12 @@ def packets_timeout_loop():
     for pkt_in in packet_in.items().values():
         if pkt_in.is_timed_out():
             if _Debug:
-                lg.out(_DebugLevel - 4, 'gateway.packets_timeout_loop %r is timed out' % pkt_in)
+                lg.out(_DebugLevel - 4, 'gateway.packets_timeout_loop %r is timed out: %s' % (pkt_in, pkt_in.timeout))
             pkt_in.automat('cancel', 'timeout')
     for pkt_out in packet_out.queue():
         if pkt_out.is_timed_out():
             if _Debug:
-                lg.out(_DebugLevel - 4, 'gateway.packets_timeout_loop %r is timed out' % pkt_out)
+                lg.out(_DebugLevel - 4, 'gateway.packets_timeout_loop %r is timed out: %s' % (pkt_out, pkt_out.timeout))
             pkt_out.automat('cancel', 'timeout')
     if _Debug and lg.is_debug(_DebugLevel):
         monitoring()
@@ -685,7 +699,13 @@ def monitoring():
 #------------------------------------------------------------------------------
 
 
-def on_outbox_packet(outpacket, wide, callbacks, target=None, route=None):
+def on_file_received(info, data):
+    if _Debug:
+        lg.out(_DebugLevel, '~~~~ received %d bytes in %s' % (len(data), info))
+    return False
+
+
+def on_outbox_packet(outpacket, wide, callbacks, target=None, route=None, response_timeout=None, keep_alive=True):
     """
     """
     started_packets = packet_out.search_similar_packets(outpacket)
@@ -695,7 +715,7 @@ def on_outbox_packet(outpacket, wide, callbacks, target=None, route=None):
                 for command, cb in callbacks.items():
                     active_packet.set_callback(command, cb)
             return active_packet
-    pkt_out = packet_out.create(outpacket, wide, callbacks, target, route)
+    pkt_out = packet_out.create(outpacket, wide, callbacks, target, route, response_timeout, keep_alive)
     if _Debug and lg.is_debug(_DebugLevel):
         monitoring()
     control.request_update([('packet', outpacket.PacketID)])
@@ -834,7 +854,6 @@ def on_unregister_file_sending(transfer_id, status, bytes_sent, error_message=No
 
 def on_cancelled_file_sending(proto, host, filename, size, description='', error_message=None):
     """
-    
     """
     pkt_out, work_item = packet_out.search(proto, host, filename)
     if pkt_out is None:
@@ -864,7 +883,8 @@ def on_register_file_receiving(proto, host, sender_idurl, filename, size=0):
         lg.out(_DebugLevel, '... IN ... %d receive {%s} via [%s] from %s at %s' % (
             transfer_id, os.path.basename(filename), proto,
             nameurl.GetName(sender_idurl), host))
-    packet_in.create(transfer_id).automat('register-item', (proto, host, sender_idurl, filename, size))
+    incoming_packet = packet_in.create(transfer_id)
+    incoming_packet.automat('register-item', (proto, host, sender_idurl, filename, size))
     control.request_update([('stream', transfer_id)])
     return transfer_id
 
@@ -1055,8 +1075,8 @@ def main():
     def _in(a, b, c, d):
         lg.out(2, 'INBOX %d : %r' % (globals()['num_in'], a))
         globals()['num_in'] += 1
-        return True
-    callback.insert_inbox_callback(-1, _in)
+        return False
+    callback.insert_inbox_callback(0, _in)
     if len(args) > 0:
         globals()['num_out'] = 0
 

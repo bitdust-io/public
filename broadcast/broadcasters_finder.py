@@ -163,7 +163,7 @@ class BroadcastersFinder(automat.Automat):
         """
         Action method.
         """
-        callback.insert_inbox_callback(0, self._inbox_packet_received)
+        callback.append_inbox_callback(self._inbox_packet_received)
 
     def doSetNotifyCallback(self, arg):
         """
@@ -195,9 +195,9 @@ class BroadcastersFinder(automat.Automat):
         """
         Action method.
         """
-        service_info = 'service_broadcasting ' + self.request_service_params
+        # service_info = 'service_broadcasting ' + self.request_service_params
         out_packet = p2p_service.SendRequestService(
-            self.target_idurl, service_info, callbacks={
+            self.target_idurl, 'service_broadcasting', json_payload=self.request_service_params, callbacks={
                 commands.Ack(): self._node_acked,
                 commands.Fail(): self._node_failed,
             }

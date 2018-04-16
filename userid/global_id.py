@@ -35,10 +35,30 @@ import re
 
 #------------------------------------------------------------------------------
 
+_FORMAT_GLOBAL_ID = '{key_alias}${username}@{host}'
+_FORMAT_GLOBAL_ID_USER = '{username}@{host}'
 _FORMAT_GLOBAL_ID_USER_KEY = '{user}!{key_alias}'
 _FORMAT_GLOBAL_ID_KEY_USER = '{key_alias}${user}'
+_FORMAT_GLOBAL_ID_QUEUE_ID = '{queue_alias}&{owner_id}&{supplier_id}'
+
 _REGEX_GLOBAL_ID_USER_KEY = '^(?P<user>[a-z0-9-_]+)\!(?P<key_alias>[a-z0-9-_]+)$'
 _REGEX_GLOBAL_ID_KEY_USER = '^(?P<key_alias>[a-z0-9-_]+)\$(?P<user>[a-z0-9-_]+)$'
+_REGEX_GLOBAL_ID_QUEUE_ID = '^(?P<queue_alias>[a-z0-9-_]+)\&(?P<owner_id>[a-z0-9-_\@\.]+)\&(?P<supplier_id>[a-z0-9-_\@\.]+)$'
+
+#------------------------------------------------------------------------------
+
+def idurl2glob(idurl):
+    """
+    Alias.
+    """
+    return UrlToGlobalID(idurl)
+
+
+def glob2idurl(glob_id):
+    """
+    Alias.
+    """
+    return GlobalUserToIDURL(glob_id)
 
 #------------------------------------------------------------------------------
 
@@ -82,6 +102,12 @@ def MakeGlobalID(
         if version:
             out += '#{}'.format(version)
     return out
+
+
+def ParseIDURL(idurl):
+    """
+    """
+    return ParseGlobalID(UrlToGlobalID(idurl, include_key=False))
 
 
 def ParseGlobalID(inp, detect_version=False):
@@ -187,6 +213,14 @@ def ParseGlobalID(inp, detect_version=False):
 
 def NormalizeGlobalID(inp, detect_version=False):
     """
+    Input `inp` is a string or glob_path_id dict.
+    This will fill out missed/empty fields from existing data.
+    Such an order:
+        1. if no idurl : use my local identity,
+        2. if no customer : use idurl
+        3. if no user : use customer
+        4. if no key alias : use "master"
+        5. if no idhost : use idurl
     """
     from userid import my_id
     if isinstance(inp, dict):
@@ -207,17 +241,19 @@ def NormalizeGlobalID(inp, detect_version=False):
     return g
 
 
-def CanonicalID(inp, include_key=False):
+def CanonicalID(inp, include_key=True):
     """
     """
     parts = NormalizeGlobalID(ParseGlobalID(inp))
-    if not include_key:
+    if include_key:
+        parts['key_alias'] = parts.get('key_alias') or 'master'
+    else:
         parts['key_alias'] = ''
     return MakeGlobalID(**parts)
 
 #------------------------------------------------------------------------------
 
-def UrlToGlobalID(url):
+def UrlToGlobalID(url, include_key=False):
     """
     """
     if not url:
@@ -228,6 +264,8 @@ def UrlToGlobalID(url):
         username = filename.split('.')[0]
     if port:
         host = '%s_%s' % (host, port)
+    if include_key:
+        username = 'master$%s' % username
     return '%s@%s' % (username, host)
 
 
@@ -265,6 +303,7 @@ def IsValidGlobalUser(inp):
         return False
     if not idhost:
         return False
+    # TODO: validate user and idhost
     return True
 
 
@@ -279,3 +318,32 @@ def IsFullGlobalID(inp):
     if not remote_path:
         return False
     return True
+
+#------------------------------------------------------------------------------
+
+def MakeGlobalQueueID(queue_alias, owner_id=None, supplier_id=None):
+    """
+    """
+    global _FORMAT_GLOBAL_ID_QUEUE_ID
+    return _FORMAT_GLOBAL_ID_QUEUE_ID.format(
+        queue_alias=queue_alias,
+        owner_id=owner_id,
+        supplier_id=supplier_id,
+    )
+
+def ParseGlobalQueueID(inp):
+    global _REGEX_GLOBAL_ID_QUEUE_ID
+    ret = {
+        'queue_alias': '',
+        'owner_id': '',
+        'supplier_id': '',
+    }
+    result = re.match(_REGEX_GLOBAL_ID_QUEUE_ID, inp)
+    if not result:
+        return ret
+    ret['queue_alias'] = result.group('queue_alias')
+    ret['owner_id'] = result.group('owner_id')
+    ret['supplier_id'] = result.group('supplier_id')
+    return ret
+
+#------------------------------------------------------------------------------

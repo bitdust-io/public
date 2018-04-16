@@ -53,6 +53,7 @@ class BackupsService(LocalService):
         from storage import backup_monitor
         from main import settings
         from main.config import conf
+        from transport import callback
         from p2p import p2p_connector
         backup_fs.init()
         backup_control.init()
@@ -75,15 +76,19 @@ class BackupsService(LocalService):
             self._on_p2p_connector_state_changed, 'INCOMMING?', 'CONNECTED')
         p2p_connector.A().addStateChangedCallback(
             self._on_p2p_connector_state_changed, 'MY_IDENTITY', 'CONNECTED')
+        callback.append_inbox_callback(self._on_inbox_packet_received)
         return True
 
     def stop(self):
         from storage import backup_fs
         from storage import backup_monitor
         from storage import backup_control
+        from transport import callback
         from p2p import p2p_connector
         from main.config import conf
-        p2p_connector.A().removeStateChangedCallback(self._on_p2p_connector_state_changed)
+        callback.remove_inbox_callback(self._on_inbox_packet_received)
+        if p2p_connector.A():
+            p2p_connector.A().removeStateChangedCallback(self._on_p2p_connector_state_changed)
         backup_monitor.Destroy()
         backup_fs.shutdown()
         backup_control.shutdown()
@@ -101,3 +106,36 @@ class BackupsService(LocalService):
     def _on_p2p_connector_state_changed(self, oldstate, newstate, event_string, args):
         from storage import backup_monitor
         backup_monitor.A('restart')
+
+    def _on_inbox_packet_received(self, newpacket, info, status, error_message):
+        from logs import lg
+        from main import settings
+        from contacts import contactsdb
+        from userid import my_id
+        from userid import global_id
+        from storage import backup_control
+        from p2p import commands
+        if newpacket.Command == commands.Data():
+            if newpacket.OwnerID != my_id.getLocalID():
+                # only catch data belongs to me
+                return False
+            lg.out(self.debug_level, "service_backups._on_inbox_packet_received: %r for us from %s" % (
+                newpacket, newpacket.RemoteID, ))
+            if newpacket.PacketID == global_id.MakeGlobalID(
+                idurl=my_id.getLocalID(),
+                path=settings.BackupIndexFileName(),
+            ):
+                # TODO: move to service_backup_db
+                backup_control.IncomingSupplierBackupIndex(newpacket)
+                return True
+        if newpacket.Command == commands.Files():
+            if not newpacket.PacketID.startswith(my_id.getGlobalID() + ':'):
+                # skip Files() which are from another customer
+                return False
+            if not contactsdb.is_supplier(newpacket.OwnerID):
+                # skip Files() if this is not my supplier
+                return False
+            lg.out(self.debug_level, "service_backups._on_inbox_packet_received: %r for us from %s" % (
+                newpacket, newpacket.RemoteID, ))
+            return backup_control.IncomingSupplierListFiles(newpacket)
+        return False

@@ -64,8 +64,6 @@ from logs import lg
 
 from automats import automat
 
-from main import settings
-
 from driver import services
 from driver import on_service_callback
 from driver import RequireSubclass
@@ -109,10 +107,10 @@ class LocalService(automat.Automat):
     def stop(self):
         raise RequireSubclass()
 
-    def request(self, request, info):
+    def request(self, newpacket, info):
         raise RequireSubclass()
 
-    def cancel(self, request, info):
+    def cancel(self, newpacket, info):
         raise RequireSubclass()
 
     #------------------------------------------------------------------------------
@@ -121,9 +119,6 @@ class LocalService(automat.Automat):
         """
         Method to catch the moment when automat's state were changed.
         """
-        if not settings.NewWebGUI():
-            from web import webcontrol
-            webcontrol.OnServiceStateChanged(self.service_name)
 
     def state_not_changed(self, curstate, event, arg):
         """

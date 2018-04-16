@@ -159,8 +159,7 @@ class BroadcastListener(automat.Automat):
         scope = arg
         if not scope:
             scope = []
-        broadcasters_finder.A('start',
-                              (self.automat, 'listen %s' % json.dumps(scope), []))
+        broadcasters_finder.A('start', (self.automat, {'action': 'listen', 'scopes': json.dumps(scope), }, []))
 
     def doSetBroadcaster(self, arg):
         """
@@ -205,8 +204,6 @@ class BroadcastListener(automat.Automat):
     #-----------------------------------------------------------------------------
 
     def _on_inbox_packet(self, newpacket, info, status, error_message):
-        if status != 'finished':
-            return False
         if newpacket.Command == commands.Broadcast():
             from broadcast import broadcast_service
             msg = broadcast_service.read_message_from_packet(newpacket)

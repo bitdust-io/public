@@ -127,10 +127,6 @@ def erase_index(automatid):
     if _Index is None:
         return None
     return _Index.pop(automatid, None)
-#     index = _Index.get(automatid, None)
-#     if index is None:
-#         return None
-#     del _Index[automatid]
 
 
 def set_object(index, obj):
@@ -149,8 +145,6 @@ def clear_object(index):
     if _Objects is None:
         return
     return _Objects.pop(index, None)
-#     if index in _Objects:
-#         del _Objects[index]
 
 
 def objects():
@@ -167,6 +161,19 @@ def index():
     """
     global _Index
     return _Index
+
+
+def find(name):
+    """
+    Find state machine by name, this method will iterate all registered state machines
+    and match "name" field to find the result.
+    Return a list of indexes, then you can access those automats via `objects()` dict.
+    """
+    results = []
+    for sm in objects().values():
+        if sm.name == name:
+            results.append(sm.index)
+    return results
 
 
 def communicate(index, event, arg=None):
@@ -307,34 +314,56 @@ class Automat(object):
     put ``[post]`` string into the last line of the LABEL shape.
     """
 
-    def __init__(self, name, state, debug_level=_DebugLevel * 2, log_events=False):
+    def __init__(self,
+                 name,
+                 state,
+                 debug_level=_DebugLevel * 2,
+                 log_events=False,
+                 log_transitions=False,
+                 publish_events=False,
+                 **kwargs):
         self.id, self.index = create_index(name)
         self.name = name
         self.state = state
         self.debug_level = debug_level
         self.log_events = log_events
-        self.log_transitions = log_events
+        self.log_transitions = log_transitions
+        self.publish_events = publish_events
         self._timers = {}
         self._state_callbacks = {}
-        self.init()
+        self.init(**kwargs)
         self.startTimers()
         self.register()
-        if _Debug:
+        if _Debug and self.log_transitions:
             self.log(max(_DebugLevel, self.debug_level),
                      'CREATED AUTOMAT %s with index %d, %d running' % (
                 str(self), self.index, len(objects())))
+
+    def _on_state_change(self, oldstate, newstate, event_string, args):
+        from main import events
+        if oldstate != newstate:
+            events.send('%s-state-change' % self.name, dict(
+                newstate=newstate,
+                oldstate=oldstate,
+                event=event_string,
+            ))
 
     def register(self):
         """
         Put reference to this automat instance into a global dictionary.
         """
         set_object(self.index, self)
+        if self.publish_events:
+            self.addStateChangedCallback(self._on_state_change)
+        return self.index
 
     def unregister(self):
         """
         Removes reference to this instance from global dictionary tracking all state machines.
         """
+        self.removeStateChangedCallback(self._on_state_change)
         clear_object(self.index)
+        return True
 
     def __del__(self):
         """
@@ -342,7 +371,7 @@ class Automat(object):
         """
         global _StateChangedCallback
         if self is None:
-            # Some crazy stuff happens? :-)
+            # Some crazy stuff happens?
             return
         o = self
         automatid = self.id
@@ -352,7 +381,7 @@ class Automat(object):
             _StateChangedCallback(index, automatid, name, '')
         debug_level = max(_DebugLevel, self.debug_level)
         erase_index(automatid)
-        if _Debug:
+        if _Debug and self.log_transitions:
             self.log(debug_level,
                      'DESTROYED AUTOMAT %s with index %d, %d running' % (
                          str(o), index, len(objects())))
@@ -373,10 +402,10 @@ class Automat(object):
         """
         raise NotImplementedError
 
-    def init(self):
+    def init(self, **kwargs):
         """
-        Define this method in subclass to execute some code when creating an
-        object.
+        Define this method in subclass to execute some code when creating a
+        new instance of Automat class.
         """
 
     def destroy(self, dead_state='NOT_EXIST'):
@@ -412,7 +441,8 @@ class Automat(object):
 
         into the state machine and return that defer to outside - to catch result.
         In the action method you must call ``callback`` or ``errback`` to pass result.
-        See ``addStateChangedCallback()`` for more advanced interaction.
+
+        See ``addStateChangedCallback()`` for more advanced interactions/callbacks.
         """
         d = Deferred()
         args = arg
@@ -436,6 +466,7 @@ class Automat(object):
             self.event(event_string, arg)
         else:
             reactor.callLater(0, self.event, event_string, arg)  # @UndefinedVariable
+        return self
 
     def event(self, event_string, arg=None):
         """
@@ -482,6 +513,7 @@ class Automat(object):
         else:
             self.state_not_changed(self.state, event_string, arg)
         self.executeStateChangedCallbacks(old_state, new_state, event_string, arg)
+        return self
 
     def timerEvent(self, name, interval):
         """
@@ -547,9 +579,6 @@ class Automat(object):
         try:
             from logs import lg
             lg.exc(msg)
-#             if msg:
-#                 lg.out(0, msg)
-#             lg.out(0, e)
         except:
             pass
 
@@ -563,6 +592,8 @@ class Automat(object):
         global _LogFilename
         global _LogsCount
         global _LifeBeginsTime
+        if not text.startswith(self.name):
+            text = '%s(): %s' % (self.name, text, )
         if _LogFile is not None:
             if _LogsCount > 100000 and _LogFilename:
                 _LogFile.close()
@@ -643,9 +674,9 @@ class Automat(object):
             catched = False
             if old is None and new is None:
                 catched = True
-            elif old is None and new == newstate:
+            elif old is None and new == newstate and newstate != oldstate:
                 catched = True
-            elif new is None and old == oldstate:
+            elif new is None and old == oldstate and newstate != oldstate:
                 catched = True
             elif old == oldstate and new == newstate:
                 catched = True

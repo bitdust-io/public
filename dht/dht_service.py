@@ -33,7 +33,7 @@ module:: dht_service
 #------------------------------------------------------------------------------
 
 _Debug = True
-_DebugLevel = 12
+_DebugLevel = 18
 
 #------------------------------------------------------------------------------
 
@@ -316,10 +316,14 @@ class DHTNode(DistributedTupleSpacePeer):
         if _Debug:
             lg.out(_DebugLevel + 10, 'dht_service.DHTNode.store key=[%s], value=[%s]' % (
                 base64.b32encode(key), str(value)[:20]))
-        # TODO: add verification methods for different type of data we store in DHT
-        # TODO: add signature validation to be sure this is the owner of that key:value pair
-        return DistributedTupleSpacePeer.store(self, key, value,
-                                               originalPublisherID=originalPublisherID, age=age, **kwargs)
+        try:
+            # TODO: add verification methods for different type of data we store in DHT
+            # TODO: add signature validation to be sure this is the owner of that key:value pair
+            return DistributedTupleSpacePeer.store(self, key, value,
+                                                   originalPublisherID=originalPublisherID, age=age, **kwargs)
+        except:
+            lg.exc()
+            return 'OK'
 
     @rpcmethod
     def request(self, key):
@@ -327,7 +331,7 @@ class DHTNode(DistributedTupleSpacePeer):
         if _Debug:
             lg.out(_DebugLevel + 10, 'dht_service.DHTNode.request key=[%s], return value=[%s]' % (
                 base64.b32encode(key), str(value)[:20]))
-        return {str(key): value}
+        return {str(key): value, }
 
     def reconnect(self, knownNodeAddresses=None):
         """

@@ -112,27 +112,27 @@ def readExternalIP():
     return bpio.ReadBinaryFile(settings.ExternalIPFilename())
 
 
-def readSupplierData(idurl, filename, customer_idurl):
+def readSupplierData(supplier_idurl, filename, customer_idurl):
     """
     Read a file from [BitDust data dir]/suppliers/[IDURL] folder.
 
     The file names right now is ['connected', 'disconnected',
     'listfiles'].
     """
-    path = settings.SupplierPath(idurl, customer_idurl, filename)
+    path = settings.SupplierPath(supplier_idurl, customer_idurl, filename)
     if not os.path.isfile(path):
         return ''
     return bpio.ReadTextFile(path)
 
 
-def writeSupplierData(idurl, filename, data, customer_idurl):
+def writeSupplierData(supplier_idurl, filename, data, customer_idurl):
     """
     Writes to a config file for given supplier.
     """
-    dirPath = settings.SupplierPath(idurl, customer_idurl)
+    dirPath = settings.SupplierPath(supplier_idurl, customer_idurl)
     if not os.path.isdir(dirPath):
         os.makedirs(dirPath)
-    path = settings.SupplierPath(idurl, customer_idurl, filename)
+    path = settings.SupplierPath(supplier_idurl, customer_idurl, filename)
     return bpio.WriteFile(path, data)
 
 #-------------------------------------------------------------------------------
@@ -331,19 +331,43 @@ def ToFloat(inpt, default=0.0):
 
 #------------------------------------------------------------------------------
 
+def ValidKeyAlias(key_alias):
+    if len(key_alias) > settings.MaximumUsernameLength():
+        lg.warn("key_alias is too long")
+        return False
+    if len(key_alias) < settings.MinimumUsernameLength():
+        lg.warn("key_alias is too short")
+        return False
+    pos = 0
+    for c in key_alias:
+        if c not in settings.LegalUsernameChars():
+            lg.warn("key_alias has illegal character at position: %d" % pos)
+            return False
+        pos += 1
+    if key_alias[0] not in set('abcdefghijklmnopqrstuvwxyz'):
+        lg.warn('key_alias not begins with letter')
+        return False
+    return True
+
 
 def ValidUserName(username):
     """
     A method to validate account name entered by user.
     """
     if len(username) < settings.MinimumUsernameLength():
+        lg.warn("username is too long")
         return False
     if len(username) > settings.MaximumUsernameLength():
+        lg.warn("username is too short")
         return False
+    pos = 0
     for c in username:
         if c not in settings.LegalUsernameChars():
+            lg.warn("username has illegal character at position: %d" % pos)
             return False
+        pos += 1
     if username[0] not in set('abcdefghijklmnopqrstuvwxyz'):
+        lg.warn('username not begins with letter')
         return False
     return True
 
@@ -755,7 +779,6 @@ def percent2string(percent, precis=3):
 
 def value2percent(value, total, precis=3):
     """
-    
     """
     if not total:
         return '0%'
@@ -968,14 +991,6 @@ def setClipboardText(txt):
             lg.exc()
 
 #------------------------------------------------------------------------------
-
-
-def hmac_hash(string):
-    """
-    Not used.
-    """
-    h = hmac.HMAC(settings.HMAC_key_word(), string)
-    return h.hexdigest().upper()
 
 
 def encode64(s):

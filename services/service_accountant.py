@@ -44,6 +44,7 @@ class CoinsAccountantService(LocalService):
 
     def dependent_on(self):
         return ['service_broadcasting',
+                'service_blockchain',
                 ]
 
     def start(self):
@@ -68,32 +69,33 @@ class CoinsAccountantService(LocalService):
         coins_db.shutdown()
         return True
 
-    def request(self, request, info):
+    def request(self, json_payload, newpacket, info):
         from logs import lg
         from p2p import p2p_service
-        words = request.Payload.split(' ')
+        # words = newpacket.Payload.split(' ')
         try:
-            mode = words[1][:10]
+            # mode = words[1][:10]
+            mode = json_payload['action']
         except:
             lg.exc()
-            return None
+            return p2p_service.SendFail(newpacket, "invalid json payload")
         if mode != 'join' and mode != 'write' and mode != 'read':
             lg.out(8, "service_accountant.request DENIED, wrong mode provided : %s" % mode)
-            return None
+            return p2p_service.SendFail(newpacket, "invalid request")
         from coins import accountant_node
         if not accountant_node.A():
             lg.out(8, "service_accountant.request DENIED, accountant_node() state machine not exist")
-            return p2p_service.SendFail(
-                request, "accountant_node service not started")
+            return p2p_service.SendFail(newpacket, "accountant_node service not started")
         # if accountant_node.A().state not in ['ACCOUNTANTS?', "READY", "VALID_COIN?", "WRITE_COIN!", ]:
         #     lg.out(8, "service_accountant.request DENIED, accountant_node() state is : %s" % accountant_node.A().state)
         # return p2p_service.SendFail(request, "accountant_node service
         # currently unavailable")
         if mode == 'join':
-            accountant_node.A('accountant-connected', request.OwnerID)
+            accountant_node.A('accountant-connected', newpacket.OwnerID)
 #             if accountant_node.A().state == 'OFFLINE':
 #                 accountant_node.A('start')
-        return p2p_service.SendAck(request, 'accepted')
+            return p2p_service.SendAck(newpacket, 'accepted')
+        return p2p_service.SendFail(newpacket, 'bad request')
 
     def _on_accountant_node_switched(self, oldstate, newstate, evt, args):
         from logs import lg

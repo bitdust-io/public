@@ -46,7 +46,7 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 12
 
 #------------------------------------------------------------------------------
@@ -58,9 +58,8 @@ from twisted.internet import reactor
 
 from logs import lg
 
-from lib import misc
-
 from main import settings
+from main import events
 
 from automats import automat
 
@@ -162,15 +161,20 @@ def process(newpacket, info):
     if _Debug:
         lg.out(_DebugLevel, 'packet_in.process %s from %s://%s : %s' % (
             str(newpacket), info.proto, info.host, info.status))
+    if info.status != 'finished':
+        if _Debug:
+            lg.out(_DebugLevel, '    skip, packet status is : [%s]' % info.status)
+        return
     from p2p import commands
     from p2p import p2p_service
-    if newpacket.Command == commands.Identity() and newpacket.RemoteID == my_id.getLocalID():
+    if newpacket.Command == commands.Identity():  # and newpacket.RemoteID == my_id.getLocalID():
         # contact sending us current identity we might not have
         # so we handle it before check that packet is valid
         # because we might not have his identity on hands and so can not verify the packet
         # so we check that his Identity is valid and save it into cache
         # than we check the packet to be valid too.
         if not p2p_service.Identity(newpacket):
+            lg.warn('non-valid identity received')
             return
     # check that signed by a contact of ours
     if not newpacket.Valid():
@@ -181,11 +185,8 @@ def process(newpacket, info):
         p.automat('inbox-packet', (newpacket, info))
         handled = True
     handled = callback.run_inbox_callbacks(newpacket, info, info.status, info.error_message) or handled
-    if not handled and newpacket.Command not in [commands.Ack(), commands.Fail()]:
-        if _Debug:
-            lg.out(_DebugLevel - 8, '    incoming %s from [%s://%s]' % (
-                newpacket, info.proto, info.host))
-            lg.out(_DebugLevel - 8, '        NOT HANDLED !!!')
+    if not handled and newpacket.Command not in [commands.Ack(), commands.Fail(), commands.Identity(), ]:
+        lg.warn('incoming %s from [%s://%s] was NOT HANDLED' % (newpacket, info.proto, info.host))
     if _Debug:
         history().append({
             'time': newpacket.Date,
@@ -222,7 +223,9 @@ class PacketIn(automat.Automat):
         self.status = None
         self.error_message = None
         self.label = 'in_%d_%s' % (get_packets_counter(), self.transfer_id)
-        automat.Automat.__init__(self, self.label, 'AT_STARTUP', _DebugLevel, _Debug)
+        automat.Automat.__init__(
+            self, self.label, 'AT_STARTUP',
+            debug_level=_DebugLevel, log_events=_Debug, publish_events=False, )
         increment_packets_counter()
 
     def is_timed_out(self):
@@ -236,7 +239,6 @@ class PacketIn(automat.Automat):
         Method to initialize additional variables and flags at creation of the
         state machine.
         """
-        self.log_events = False
 
     def A(self, event, arg):
         #---AT_STARTUP---
@@ -323,6 +325,7 @@ class PacketIn(automat.Automat):
             self.timeout = 300
         if not self.sender_idurl:
             lg.warn('sender_idurl is None: %s' % str(arg))
+        reactor.callLater(0, callback.run_begin_file_receiving_callbacks, self)
 
     def doEraseInputFile(self, arg):
         """
@@ -377,6 +380,14 @@ class PacketIn(automat.Automat):
         if _Debug:
             lg.out(_DebugLevel + 2, 'packet_in.doReadAndUnserialize: %s' % newpacket)
         self.automat('valid-inbox-packet', newpacket)
+        events.send('inbox-packet-recevied', data=dict(
+            packet_id=newpacket.PacketID,
+            command=newpacket.Command,
+            creator_id=newpacket.CreatorID,
+            date=newpacket.Date,
+            size=len(newpacket.Payload),
+            remote_id=newpacket.RemoteID,
+        ))
 
     def doReportReceived(self, arg):
         """

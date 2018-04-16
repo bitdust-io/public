@@ -36,6 +36,11 @@ EVENTS:
     * :red:`shutdown`
     * :red:`timer-10sec`
     * :red:`timer-5min`
+
+
+TODO: periodically send Request service Customer to be sure that i am still your supplier
+if not - remove that customer and stop assistant
+
 """
 
 #------------------------------------------------------------------------------
@@ -51,6 +56,7 @@ from logs import lg
 
 from lib import nameurl
 from lib import packetid
+from lib import diskspace
 
 from main import settings
 
@@ -58,6 +64,10 @@ from p2p import p2p_service
 from p2p import commands
 
 from supplier import list_files
+
+from storage import accounting
+
+from userid import global_id
 
 #------------------------------------------------------------------------------
 
@@ -100,8 +110,12 @@ class CustomerAssistant(automat.Automat):
         Create customer_assistant() state machine for given customer.
         """
         self.customer_idurl = customer_idurl
-        self.name = nameurl.GetName(self.customer_idurl)
-        super(CustomerAssistant, self).__init__("customer_%s" % self.name, 'AT_STARTUP', _DebugLevel, _Debug)
+        self.donated_bytes = accounting.get_customer_quota(self.customer_idurl)
+        name = "customer_%s_%s" % (
+            nameurl.GetName(self.customer_idurl),
+            diskspace.MakeStringFromBytes(self.donated_bytes).replace(' ', ''),
+        )
+        super(CustomerAssistant, self).__init__(name, 'AT_STARTUP', _DebugLevel, _Debug)
 
     def init(self):
         """
@@ -184,7 +198,8 @@ class CustomerAssistant(automat.Automat):
         """
         Action method.
         """
-        list_files.send(self.customer_idurl, packetid.UniqueID(), settings.ListFilesFormat())
+        packet_id = '%s:%s' % (global_id.UrlToGlobalID(self.customer_idurl), packetid.UniqueID(), )
+        list_files.send(self.customer_idurl, packet_id, settings.ListFilesFormat())
 
     def doDestroyMe(self, arg):
         """
@@ -201,4 +216,7 @@ class CustomerAssistant(automat.Automat):
     def _customer_failed(self, response, info):
         if _Debug:
             lg.out(_DebugLevel, 'customer_assistant._customer_failed %r %r' % (response, info))
-        self.automat(response.Command.lower(), response)
+        event_id = 'fail'
+        if response:
+            event_id = response.Command.lower()
+        self.automat(event_id, response)

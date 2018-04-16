@@ -43,8 +43,9 @@ EVENTS:
     * :red:`nothing-to-send`
     * :red:`register-item`
     * :red:`remote-identity-on-hand`
+    * :red:`response-timeout`
     * :red:`run`
-    * :red:`timer-10sec`
+    * :red:`timer-30sec`
     * :red:`unregister-item`
     * :red:`write-error`
 """
@@ -68,7 +69,6 @@ from automats import automat
 from p2p import commands
 
 from lib import nameurl
-from lib import misc
 
 from system import tmpfile
 
@@ -77,6 +77,7 @@ from contacts import identitycache
 from userid import my_id
 
 from main import settings
+from main import events
 
 import callback
 import gateway
@@ -104,19 +105,17 @@ def increment_packets_counter():
 
 def queue():
     """
-    
     """
     global _OutboxQueue
     return _OutboxQueue
 
 
-def create(outpacket, wide, callbacks, target=None, route=None):
+def create(outpacket, wide, callbacks, target=None, route=None, response_timeout=None, keep_alive=True):
     """
-    
     """
     if _Debug:
         lg.out(_DebugLevel, 'packet_out.create  %s' % str(outpacket))
-    p = PacketOut(outpacket, wide, callbacks, target, route)
+    p = PacketOut(outpacket, wide, callbacks, target, route, response_timeout, keep_alive)
     queue().append(p)
     p.automat('run')
     return p
@@ -246,7 +245,6 @@ def search_similar_packets(outpacket):
 
 def correct_packet_destination(outpacket):
     """
-    
     """
     if outpacket.CreatorID == my_id.getLocalID():
         # our data will go where it should go
@@ -286,7 +284,7 @@ class PacketOut(automat.Automat):
     """
 
     timers = {
-        'timer-10sec': (10.0, ['RESPONSE?']),
+        'timer-30sec': (30.0, ['RESPONSE?']),
     }
 
     MESSAGES = {
@@ -297,7 +295,7 @@ class PacketOut(automat.Automat):
         'MSG_5': 'pushing outgoing packet was cancelled',
     }
 
-    def __init__(self, outpacket, wide, callbacks={}, target=None, route=None):
+    def __init__(self, outpacket, wide, callbacks={}, target=None, route=None, response_timeout=None, keep_alive=True):
         self.outpacket = outpacket
         self.wide = wide
         self.callbacks = {}
@@ -305,12 +303,19 @@ class PacketOut(automat.Automat):
         self.description = self.outpacket.Command + '[' + self.outpacket.PacketID + ']'
         self.remote_idurl = target
         self.route = route
+        self.response_timeout = response_timeout
         if self.route:
             self.description = self.route['description']
             self.remote_idurl = self.route['remoteid']
+        if not self.remote_idurl:
+            self.remote_idurl = correct_packet_destination(self.outpacket)
+        self.remote_name = nameurl.GetName(self.remote_idurl)
         self.label = 'out_%d_%s' % (
-            get_packets_counter(), self.description)
-        automat.Automat.__init__(self, self.label, 'AT_STARTUP', _DebugLevel, _Debug)
+            get_packets_counter(), self.remote_name)
+        self.keep_alive = keep_alive
+        automat.Automat.__init__(
+            self, self.label, 'AT_STARTUP',
+            debug_level=_DebugLevel, log_events=_Debug, publish_events=False, )
         increment_packets_counter()
         for command, cb in callbacks.items():
             self.set_callback(command, cb)
@@ -320,14 +325,18 @@ class PacketOut(automat.Automat):
         Method to initialize additional variables and flags at creation of the
         state machine.
         """
-        self.log_events = True
         self.error_message = None
         self.time = time.time()
         self.description = self.outpacket.Command + '(' + self.outpacket.PacketID + ')'
         self.payloadsize = len(self.outpacket.Payload)
-        if not self.remote_idurl:
-            self.remote_idurl = correct_packet_destination(self.outpacket)
-        self.remote_identity = contactsdb.get_contact_identity(self.remote_idurl)
+        last_modified_time = identitycache.GetLastModifiedTime(self.remote_idurl)
+        if not last_modified_time or time.time() - last_modified_time < 60:
+            # use known identity from cache
+            self.remote_identity = contactsdb.get_contact_identity(self.remote_idurl)
+        else:
+            self.remote_identity = None
+            if _Debug:
+                lg.out(_DebugLevel, 'packet_out.init  cached identity copy is outdated or not exist: %s' % self.remote_idurl)
         self.packetdata = None
         self.filename = None
         self.filesize = None
@@ -336,6 +345,8 @@ class PacketOut(automat.Automat):
         self.response_packet = None
         self.response_info = None
         self.timeout = None  # 300  # settings.SendTimeOut() * 3
+        if self.response_timeout:
+            self.timers['response-timeout'] = (self.response_timeout, ['RESPONSE?'])
 
     def msg(self, msgid, arg=None):
         return self.MESSAGES.get(msgid, '')
@@ -344,7 +355,7 @@ class PacketOut(automat.Automat):
         if self.state == 'RESPONSE?':
             return False
         if self.time is None or self.timeout is None:
-            return True
+            return False
         return time.time() - self.time > self.timeout
 
     def set_callback(self, command, cb):
@@ -363,7 +374,7 @@ class PacketOut(automat.Automat):
             elif event == 'cancel':
                 self.state = 'CANCEL'
                 self.doCancelItems(arg)
-                self.doErrMsg(event, self.msg('MSG_2', arg))
+                self.doErrMsg(event,self.msg('MSG_2', arg))
                 self.doReportCancelItems(arg)
                 self.doPopItems(arg)
                 self.doReportCancelled(arg)
@@ -392,7 +403,7 @@ class PacketOut(automat.Automat):
             if event == 'run' and self.isRemoteIdentityKnown(arg):
                 self.state = 'ITEMS?'
                 self.doInit(arg)
-                self.Cancelled = False
+                self.Cancelled=False
                 self.doReportStarted(arg)
                 self.doSerializeAndWrite(arg)
                 self.doPushItems(arg)
@@ -404,7 +415,7 @@ class PacketOut(automat.Automat):
         elif self.state == 'CACHING':
             if event == 'remote-identity-on-hand':
                 self.state = 'ITEMS?'
-                self.Cancelled = False
+                self.Cancelled=False
                 self.doReportStarted(arg)
                 self.doSerializeAndWrite(arg)
                 self.doPushItems(arg)
@@ -414,7 +425,7 @@ class PacketOut(automat.Automat):
                 self.doDestroyMe(arg)
             elif event == 'cancel':
                 self.state = 'CANCEL'
-                self.doErrMsg(event, self.msg('MSG_4', arg))
+                self.doErrMsg(event,self.msg('MSG_4', arg))
                 self.doReportCancelled(arg)
                 self.doDestroyMe(arg)
         #---FAILED---
@@ -429,11 +440,11 @@ class PacketOut(automat.Automat):
             elif event == 'items-sent' and not self.Cancelled:
                 self.state = 'IN_QUEUE'
             elif event == 'cancel':
-                self.Cancelled = True
+                self.Cancelled=True
             elif event == 'items-sent' and self.Cancelled:
                 self.state = 'CANCEL'
                 self.doCancelItems(arg)
-                self.doErrMsg(event, self.msg('MSG_5', arg))
+                self.doErrMsg(event,self.msg('MSG_5', arg))
                 self.doReportCancelItems(arg)
                 self.doPopItems(arg)
                 self.doReportCancelled(arg)
@@ -448,7 +459,7 @@ class PacketOut(automat.Automat):
             elif event == 'cancel':
                 self.state = 'CANCEL'
                 self.doCancelItems(arg)
-                self.doErrMsg(event, self.msg('MSG_1', arg))
+                self.doErrMsg(event,self.msg('MSG_1', arg))
                 self.doReportCancelItems(arg)
                 self.doPopItems(arg)
                 self.doReportCancelled(arg)
@@ -469,7 +480,7 @@ class PacketOut(automat.Automat):
         elif self.state == 'RESPONSE?':
             if event == 'cancel':
                 self.state = 'CANCEL'
-                self.doErrMsg(event, self.msg('MSG_3', arg))
+                self.doErrMsg(event,self.msg('MSG_3', arg))
                 self.doReportCancelItems(arg)
                 self.doReportCancelled(arg)
                 self.doDestroyMe(arg)
@@ -482,8 +493,9 @@ class PacketOut(automat.Automat):
             elif event == 'unregister-item' or event == 'item-cancelled':
                 self.doPopItem(arg)
                 self.doReportItem(arg)
-            elif event == 'timer-10sec' and not self.isDataExpected(arg):
+            elif ( event == 'response-timeout' or event == 'timer-30sec' ) and not self.isDataExpected(arg):
                 self.state = 'SENT'
+                self.doReportTimeOut(arg)
                 self.doReportDoneNoAck(arg)
                 self.doDestroyMe(arg)
         return None
@@ -523,14 +535,18 @@ class PacketOut(automat.Automat):
         """
         Action method.
         """
+        if self in self.outpacket.Packets:
+            lg.warn('packet_out already connected to the packet')
+        else:
+            self.outpacket.Packets.append(self)
 
     def doCacheRemoteIdentity(self, arg):
         """
         Action method.
         """
         self.caching_deferred = identitycache.immediatelyCaching(self.remote_idurl)
-        self.caching_deferred.addCallback(self._remote_identity_cached)
-        self.caching_deferred.addErrback(lambda err: self.automat('failed'))
+        self.caching_deferred.addCallback(self._on_remote_identity_cached)
+        self.caching_deferred.addErrback(self._on_remote_identity_cache_failed)
 
     def doSerializeAndWrite(self, arg):
         """
@@ -615,7 +631,9 @@ class PacketOut(automat.Automat):
         """
         Action method.
         """
-        callback.run_outbox_callbacks(self)
+        handled = callback.run_outbox_callbacks(self)
+        if not handled:
+            pass
 
     def doReportItem(self, arg):
         """
@@ -645,7 +663,18 @@ class PacketOut(automat.Automat):
         """
         if self.response_packet.Command in self.callbacks:
             for cb in self.callbacks[self.response_packet.Command]:
-                cb(self.response_packet, self.response_info)
+                try:
+                    cb(self.response_packet, self.response_info)
+                except:
+                    lg.exc()
+
+    def doReportTimeOut(self, arg):
+        """
+        Action method.
+        """
+        if None in self.callbacks:
+            for cb in self.callbacks[None]:
+                cb(self)
 
     def doReportDoneWithAck(self, arg):
         """
@@ -676,7 +705,7 @@ class PacketOut(automat.Automat):
         msg = arg
         if not isinstance(msg, str):
             msg = 'cancelled'
-        callback.run_queue_item_status_callbacks(self, 'failed', msg)
+        callback.run_queue_item_status_callbacks(self, 'cancelled', msg)
 
     def doErrMsg(self, event, arg):
         """
@@ -691,22 +720,41 @@ class PacketOut(automat.Automat):
         """
         Remove all references to the state machine object to destroy it.
         """
-        if self.caching_deferred:
-            self.caching_deferred.cancel()
-            self.caching_deferred = None
+        events.send('outbox-packet-finished', data=dict(
+            description=self.description,
+            packet_id=self.outpacket.PacketID,
+            command=self.outpacket.Command,
+            creator_id=self.outpacket.CreatorID,
+            date=self.outpacket.Date,
+            size=len(self.outpacket.Payload),
+            remote_id=self.outpacket.RemoteID,
+        ))
+        if self not in self.outpacket.Packets:
+            lg.warn('packet_out not connected to the packet')
+        else:
+            self.outpacket.Packets.remove(self)
         self.outpacket = None
         self.remote_identity = None
+        if self.caching_deferred and not self.caching_deferred.called:
+            self.caching_deferred.cancel()
+        self.caching_deferred = None
         self.callbacks.clear()
         queue().remove(self)
         self.destroy()
 
-    def _remote_identity_cached(self, xmlsrc):
-        self.caching_deferred = None
+    def _on_remote_identity_cached(self, xmlsrc):
         self.remote_identity = contactsdb.get_contact_identity(self.remote_idurl)
         if self.remote_identity is None:
             self.automat('failed')
         else:
             self.automat('remote-identity-on-hand')
+        return xmlsrc
+
+    def _on_remote_identity_cache_failed(self, err):
+        if self.outpacket:
+            self.automat('failed')
+            lg.warn('%s : %s' % (self.remote_idurl, str(err)))
+        return None
 
     def _push(self):
         if self.route:
@@ -716,7 +764,9 @@ class PacketOut(automat.Automat):
                 self.route['proto'],
                 self.route['host'],
                 self.filename,
-                self.description)
+                self.description,
+                self,
+            )
             self.items.append(WorkItem(
                 self.route['proto'],
                 self.route['host'],
@@ -730,14 +780,14 @@ class PacketOut(automat.Automat):
             # send to all his contacts
             for contactmethod in self.remote_identity.getContacts():
                 proto, host = nameurl.IdContactSplit(contactmethod)
-                if  host.strip() and \
+                if host.strip() and \
                         settings.transportIsEnabled(proto) and \
                         settings.transportSendingIsEnabled(proto) and \
                         gateway.can_send(proto) and \
                         gateway.is_installed(proto):
                     if proto == 'tcp' and localIP:
                         host = localIP
-                    gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description)
+                    gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
                     self.items.append(WorkItem(proto, host, self.filesize))
                     workitem_sent = True
             if not workitem_sent:
@@ -772,7 +822,7 @@ class PacketOut(automat.Automat):
                 proto, host, port, fn = nameurl.UrlParse(tcp_contact)
                 if port:
                     host = localIP + ':' + str(port)
-                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description)
+                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 self.automat('items-sent')
                 return
@@ -790,7 +840,7 @@ class PacketOut(automat.Automat):
         if udp_contact and 'udp' in working_protos:
             proto, host = nameurl.IdContactSplit(udp_contact)
             if host.strip() and gateway.is_installed('udp') and gateway.can_send(proto):
-                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description)
+                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 self.automat('items-sent')
                 return
@@ -800,7 +850,7 @@ class PacketOut(automat.Automat):
             if host.strip() and gateway.is_installed(proto) and gateway.can_send(proto):
                 if port:
                     host = host + ':' + str(port)
-                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description)
+                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 self.automat('items-sent')
                 return
@@ -808,7 +858,7 @@ class PacketOut(automat.Automat):
         if proxy_contact and 'proxy' in working_protos:
             proto, host = nameurl.IdContactSplit(proxy_contact)
             if host.strip() and gateway.is_installed('proxy') and gateway.can_send(proto):
-                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description)
+                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 self.automat('items-sent')
                 return
@@ -822,7 +872,7 @@ class PacketOut(automat.Automat):
                 # try sending with tcp even if it is switched off in the settings
                 if gateway.is_installed(proto) and gateway.can_send(proto):
                     if settings.enableTransport(proto) and settings.transportSendingIsEnabled(proto):
-                        gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description)
+                        gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
                         self.items.append(WorkItem(proto, host, self.filesize))
                         self.automat('items-sent')
                         return

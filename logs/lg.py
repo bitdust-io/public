@@ -60,6 +60,12 @@ _TimeCountsDict = {}
 
 #------------------------------------------------------------------------------
 
+def fqn(o):
+    """
+    """
+    return o.__module__ + "." + o.__name__
+
+#------------------------------------------------------------------------------
 
 def out(_DebugLevel, msg, nl='\n'):
     """
@@ -137,6 +143,21 @@ def out(_DebugLevel, msg, nl='\n'):
     return None
 
 
+def info(message):
+    global _UseColors
+    cod = sys._getframe().f_back.f_code
+    modul = os.path.basename(cod.co_filename).replace('.py', '')
+    caller = cod.co_name
+    if _UseColors is None:
+        _UseColors = platform.uname()[0] != 'Windows'
+    if _UseColors:
+        output_string = 'INFO from %s.%s() :\n\033[6;37;42m%s%s\033[0m' % (modul, caller, ' ' * 10, message)
+    else:
+        output_string = 'INFO from %s.%s() :\n%s' % (modul, caller, message)
+    out(0, output_string)
+    return message
+
+
 def warn(message, level=2):
     global _UseColors
     cod = sys._getframe().f_back.f_code
@@ -147,7 +168,7 @@ def warn(message, level=2):
     if _UseColors:
         output_string = 'WARNING!!!  in  %s.%s() :\n\033[0;35m%s%s\033[0m' % (modul, caller, ' ' * (level + 11), message)
     else:
-        output_string = 'WARNING!!!  in  %s.%s :\n%s' % (modul, caller, message)
+        output_string = 'WARNING!!!  in  %s.%s() :\n%s' % (modul, caller, message)
     out(level, output_string)
     return message
 
@@ -173,7 +194,7 @@ def err(message, level=0):
     return message
 
 
-def exc(msg='', level=0, maxTBlevel=100, exc_info=None, exc_value=None):
+def exc(msg='', level=0, maxTBlevel=100, exc_info=None, exc_value=None, **kwargs):
     global _UseColors
     if _UseColors is None:
         _UseColors = platform.uname()[0] != 'Windows'

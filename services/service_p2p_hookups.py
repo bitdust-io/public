@@ -50,13 +50,12 @@ class P2PHookupsService(LocalService):
             depends.append('service_tcp_transport')
         if settings.enableUDP():
             depends.append('service_udp_transport')
-#         if settings.enablePROXY():
-#             depends.append('service_proxy_transport')
         return depends
 
     def start(self):
-        from p2p import p2p_service
+        from transport import callback
         from p2p import contact_status
+        from p2p import p2p_service
         from p2p import p2p_connector
         from p2p import network_connector
         from twisted.internet.defer import Deferred
@@ -68,13 +67,18 @@ class P2PHookupsService(LocalService):
             self._on_p2p_connector_switched)
         network_connector.A().addStateChangedCallback(
             self._on_network_connector_switched)
+        callback.append_inbox_callback(self._on_inbox_packet_received)
+        callback.append_inbox_callback(p2p_service.inbox)
         return True
 
     def stop(self):
-        from p2p import p2p_service
+        from transport import callback
         from p2p import contact_status
+        from p2p import p2p_service
         from p2p import p2p_connector
         from p2p import network_connector
+        callback.remove_inbox_callback(self._on_inbox_packet_received)
+        callback.remove_inbox_callback(p2p_service.inbox)
         if network_connector.A():
             network_connector.A().removeStateChangedCallback(
                 self._on_network_connector_switched)
@@ -83,6 +87,96 @@ class P2PHookupsService(LocalService):
         contact_status.shutdown()
         p2p_connector.Destroy()
         p2p_service.shutdown()
+        return True
+
+    def _on_inbox_packet_received(self, newpacket, info, status, error_message):
+        from p2p import commands
+        if newpacket.Command == commands.RequestService():
+            return self._on_request_service_received(newpacket, info)
+        elif newpacket.Command == commands.CancelService():
+            return self._on_cancel_service_received(newpacket, info)
+        return False
+
+    def _on_request_service_received(self, newpacket, info):
+        import json
+        from twisted.internet.defer import Deferred
+        from logs import lg
+        from services import driver
+        from p2p import p2p_service
+        from transport import packet_out
+        if len(newpacket.Payload) > 1024 * 10:
+            p2p_service.SendFail(newpacket, 'too long payload')
+            return False
+        try:
+            json_payload = json.loads(newpacket.Payload)
+            json_payload['name']
+            json_payload['payload']
+        except:
+            p2p_service.SendFail(newpacket, 'json payload invalid')
+            return False
+        service_name = json_payload['name']
+        lg.out(self.debug_level, "service_p2p_hookups.RequestService {%s} from %s" % (service_name, newpacket.OwnerID, ))
+        if not driver.is_exist(service_name):
+            lg.warn("got wrong payload in %s" % service_name)
+            p2p_service.SendFail(newpacket, 'service %s not exist' % service_name)
+            return False
+        if not driver.is_on(service_name):
+            p2p_service.SendFail(newpacket, 'service %s is off' % service_name)
+            return False
+        try:
+            result = driver.request(service_name, json_payload['payload'], newpacket, info)
+        except:
+            lg.exc()
+            p2p_service.SendFail(newpacket, 'request processing failed with exception')
+            return False
+        if not result:
+            lg.out(self.debug_level, "service_p2p_hookups._send_request_service SKIP request %s" % service_name)
+            return False
+        if isinstance(result, Deferred):
+            lg.out(self.debug_level, "service_p2p_hookups._send_request_service fired delayed execution")
+        elif isinstance(result, packet_out.PacketOut):
+            lg.out(self.debug_level, "service_p2p_hookups._send_request_service outbox packet sent")
+        return True
+
+    def _on_cancel_service_received(self, newpacket, info):
+        import json
+        from twisted.internet.defer import Deferred
+        from logs import lg
+        from services import driver
+        from p2p import p2p_service
+        from transport import packet_out
+        if len(newpacket.Payload) > 1024 * 10:
+            p2p_service.SendFail(newpacket, 'too long payload')
+            return False
+        try:
+            json_payload = json.loads(newpacket.Payload)
+            json_payload['name']
+            json_payload['payload']
+        except:
+            p2p_service.SendFail(newpacket, 'json payload invalid')
+            return False
+        service_name = json_payload['name']
+        lg.out(self.debug_level, "service_p2p_hookups.CancelService {%s} from %s" % (service_name, newpacket.OwnerID, ))
+        if not driver.is_exist(service_name):
+            lg.warn("got wrong payload in %s" % newpacket)
+            p2p_service.SendFail(newpacket, 'service %s not exist' % service_name)
+            return False
+        if not driver.is_on(service_name):
+            p2p_service.SendFail(newpacket, 'service %s is off' % service_name)
+            return False
+        try:
+            result = driver.cancel(service_name, json_payload['payload'], newpacket, info)
+        except:
+            lg.exc()
+            p2p_service.SendFail(newpacket, 'request processing failed with exception')
+            return False
+        if not result:
+            lg.out(self.debug_level, "service_p2p_hookups._send_cancel_service SKIP request %s" % service_name)
+            return False
+        if isinstance(result, Deferred):
+            lg.out(self.debug_level, "service_p2p_hookups._send_cancel_service fired delayed execution")
+        elif isinstance(result, packet_out.PacketOut):
+            lg.out(self.debug_level, "service_p2p_hookups._send_cancel_service outbox packet sent")
         return True
 
     def _on_p2p_connector_switched(self, oldstate, newstate, evt, args):

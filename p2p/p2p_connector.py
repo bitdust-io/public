@@ -65,7 +65,7 @@ EVENTS:
 #------------------------------------------------------------------------------
 
 _Debug = True
-_DebugLevel = 6
+_DebugLevel = 12
 
 #------------------------------------------------------------------------------
 
@@ -155,8 +155,7 @@ def A(event=None, arg=None):
     if event is None and arg is None:
         return _P2PConnector
     if _P2PConnector is None:
-        _P2PConnector = P2PConnector(
-            'p2p_connector', 'AT_STARTUP', _DebugLevel, _Debug)
+        _P2PConnector = P2PConnector('p2p_connector', 'AT_STARTUP', _DebugLevel)
     if event is not None:
         _P2PConnector.automat(event, arg)
     return _P2PConnector
@@ -181,6 +180,9 @@ class P2PConnector(automat.Automat):
     timers = {
         'timer-20sec': (20.0, ['INCOMMING?']),
     }
+
+    def init(self):
+        self.log_transitions = _Debug
 
     def state_changed(self, oldstate, newstate, event, arg):
         global_state.set_global_state('P2P ' + newstate)
@@ -290,7 +292,7 @@ class P2PConnector(automat.Automat):
         version_number = bpio.ReadTextFile(settings.VersionNumberFile()).strip()
         if _Debug:
             lg.out(4, 'p2p_connector.doInit RevisionNumber=%s' % str(version_number))
-        callback.insert_inbox_callback(0, inbox)
+        callback.append_inbox_callback(inbox)
 
     def doUpdateMyIdentity(self, arg):
         if _Debug:

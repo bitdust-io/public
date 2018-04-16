@@ -30,6 +30,8 @@
 module:: jsonrpc_client
 """
 
+import time
+import pprint
 
 if __name__ == '__main__':
     import sys
@@ -46,23 +48,71 @@ from lib.fastjsonrpc.client import Proxy
 
 
 def output(value):
-    import pprint
     pprint.pprint(value)
     reactor.stop()
 
 #------------------------------------------------------------------------------
 
-def main():
+def loop_network_connected():
+    proxy = Proxy('http://localhost:%d' % settings.DefaultJsonRPCPort())
+
+    def _call():
+        print '_call', time.asctime()
+        proxy.callRemote('network_connected', 3).addBoth(_loop)
+
+    def _loop(x=None):
+        reason = 'unknown'
+        try:
+            status = x['status']
+            reason = x.get('reason')
+        except:
+            status = 'FAILED'
+        print '_loop', 'status:', status, '   reason:', reason, ' ...'
+        if status == 'OK':
+            reactor.callLater(3, _call)
+        else:
+            reactor.callLater(1, _call)
+
+    reactor.callLater(0, _loop)
+    reactor.run()
+
+#------------------------------------------------------------------------------
+
+def loop_event_listen():
+    proxy = Proxy('http://localhost:%d' % settings.DefaultJsonRPCPort())
+
+    def _loop(x=None):
+        if x:
+            for evt in x.get('result', []):
+                print 'EVENT:', evt['id']
+                # pprint.pprint(evt)
+        else:
+            print '.',
+        d = proxy.callRemote('events_listen', 'test_event_consumer')
+        d.addCallback(_loop)
+        d.addErrback(lambda err: reactor.callLater(1, _loop))
+
+    reactor.callLater(0, _loop)
+    reactor.run()
+
+#------------------------------------------------------------------------------
+
+def test():
     proxy = Proxy('http://localhost:%d' % settings.DefaultJsonRPCPort())
     # proxy.callRemote('ping', 'http://p2p-id.ru/bitdust_j_vps1014.xml').addBoth(output)
     # proxy.callRemote('config_set', 'logs/debug-level', '20').addBoth(output)
     # proxy.callRemote('filemanager_list', 'path=/').addBoth(output)
     # proxy.callRemote('keys_list').addBoth(output)
     # proxy.callRemote('key_create', 'ccc2').addBoth(output)
+    proxy.callRemote('nickname_set', 'veselin').addBoth(output)
     # proxy.callRemote('key_get', key_id='cool$testveselin@p2p-id.ru', include_private=True).addBoth(output)
-    proxy.callRemote('event_send', 'existing-customer-accepted', '{"idurl": "abc123@def.net"}').addBoth(output)
+    # proxy.callRemote('event_send', 'existing-customer-accepted', '{"idurl": "abc123@def.net"}').addBoth(output)
     reactor.run()
+
+#------------------------------------------------------------------------------
 
 
 if __name__ == '__main__':
-    main()
+    test()
+    # loop_network_connected()
+    # loop_event_listen()
