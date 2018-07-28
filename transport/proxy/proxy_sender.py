@@ -45,8 +45,8 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = False
-_DebugLevel = 8
+_Debug = True
+_DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
@@ -93,7 +93,8 @@ def A(event=None, arg=None):
         return _ProxySender
     if _ProxySender is None:
         # set automat name and starting state here
-        _ProxySender = ProxySender('proxy_sender', 'AT_STARTUP', debug_level=_DebugLevel, log_events=_Debug)
+        _ProxySender = ProxySender('proxy_sender', 'AT_STARTUP',
+                                   debug_level=_DebugLevel, log_events=_Debug, log_transitions=_Debug, )
     if event is not None:
         _ProxySender.automat(event, arg)
     return _ProxySender
@@ -261,11 +262,16 @@ class ProxySender(automat.Automat):
             if _Debug:
                 lg.out(_DebugLevel, 'proxy_sender._on_outbox_packet SKIP, packet addressed to router and must be sent in a usual way')
             return None
+        try:
+            raw_data = outpacket.Serialize()
+        except:
+            lg.exc('failed to Serialize %s' % outpacket)
+            return None
         src = ''
         src += my_id.getLocalID() + '\n'
         src += outpacket.RemoteID + '\n'
         src += 'wide\n' if wide else '\n'
-        src += outpacket.Serialize()
+        src += raw_data
         block = encrypted.Block(
             my_id.getLocalID(),
             'routed outgoing data',

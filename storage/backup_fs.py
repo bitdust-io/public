@@ -316,7 +316,9 @@ class FSItemInfo():
                     sz = long(os.path.getsize(filepath))
                 except:
                     lg.exc()
-                # add some bytes because on remote machines all files are packets
+                    sz = 0
+                # TODO: 
+                # add some bytes because on remote machines all files are stored as signed.Packet()
                 # so they have a header and files size will be bigger than on local machine
                 # we do not know how big head is, so just add an approximate value
                 versionSize += sz + 1024
@@ -1403,7 +1405,7 @@ def GetBackupStatusInfo(backupID, item_info, item_name, parent_path_existed=None
         restoreObj = restore_monitor.GetWorkingRestoreObject(backupID)
         if restoreObj:
             maxBlockNum = backup_matrix.GetKnownMaxBlockNum(backupID)
-            currentBlock = max(0, restoreObj.BlockNumber)
+            currentBlock = max(0, restoreObj.block_number)
             percent = 0.0
             if maxBlockNum > 0:
                 percent = 100.0 * currentBlock / maxBlockNum

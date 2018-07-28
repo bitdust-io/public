@@ -40,18 +40,21 @@ def default_nodes():
     return [
         # by Veselin Penev:
         ('datahaven.net', 14441, ),
-        ('identity.datahaven.net', 14441),
+        # ('identity.datahaven.net', 14441),
         ('p2p-id.ru', 14441),
         ('bitdust.io', 14441),
-        ('work.offshore.ai', 14441),
-        ('whmcs.whois.ai', 14441),
+        # ('work.offshore.ai', 14441),
+        # ('whmcs.whois.ai', 14441),
         ('blog.bitdust.io', 14441, ),
+        ('bitdust.ai', 14441, ),
+        ('veselin-p2p.ru', 14441, ),
+        ('test.zenaida.ai', 14441, ),
     ]
 
 
 def nodes():
     """
-    Here is a well known DHT nodes, this is "genesis" network.
+    Here is a well known DHT nodes, this is "genesys" network.
     Every new node in the network will first connect one or several of those nodes,
     and then will be routed to some other nodes already registered.
 
@@ -61,7 +64,7 @@ def nodes():
     So other nodes will be able to use your machine to connect to DHT network.
 
     The load is not big, but as network will grow we will have more machines listed here,
-    so all traffic, maintanance and ownership will be distributed accross the world.
+    so all traffic, maintanance and ownership will be distributed across the world.
 
     You can override those "genesis" nodes by configuring list of your preferred DHT nodes
     (host or IP address) in the program settings:

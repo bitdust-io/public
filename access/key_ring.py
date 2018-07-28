@@ -30,7 +30,7 @@
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 4
 
 #------------------------------------------------------------------------------
@@ -92,8 +92,9 @@ def _on_service_keys_registry_response(response, info, key_id, idurl, include_pr
     if not response.Payload.startswith('accepted'):
         result.errback(Exception('request for "service_keys_registry" refused by remote node'))
         return
-    _do_transfer_key(
-        key_id, idurl,
+    transfer_key(
+        key_id,
+        trusted_idurl=idurl,
         include_private=include_private,
         timeout=timeout,
         result=result,
@@ -123,15 +124,15 @@ def _on_transfer_key_response(response, info, key_id, result):
     return None
 
 
-def _do_transfer_key(key_id, idurl, include_private=False, timeout=10, result=None):
+def transfer_key(key_id, trusted_idurl, include_private=False, timeout=10, result=None):
     if _Debug:
-        lg.out(_DebugLevel, 'key_ring.transfer_key  %s -> %s' % (key_id, idurl))
+        lg.out(_DebugLevel, 'key_ring.transfer_key  %s -> %s' % (key_id, trusted_idurl))
     if not result:
         result = Deferred()
-    recipient_id_obj = identitycache.FromCache(idurl)
+    recipient_id_obj = identitycache.FromCache(trusted_idurl)
     if not recipient_id_obj:
-        lg.warn('not found "%s" in identity cache' % idurl)
-        result.errback(Exception('not found "%s" in identity cache' % idurl))
+        lg.warn('not found "%s" in identity cache' % trusted_idurl)
+        result.errback(Exception('not found "%s" in identity cache' % trusted_idurl))
         return result
     key_alias, creator_idurl = my_keys.split_key_id(key_id)
     if not key_alias or not creator_idurl:
@@ -218,8 +219,8 @@ def _on_audit_public_key_response(response, info, key_id, untrusted_idurl, test_
 
 def audit_public_key(key_id, untrusted_idurl, timeout=10):
     """
-    Be sure remote user posses given public key.
-    I also need to posses that public key in order to do such audit.
+    Be sure remote user stores given public key.
+    I also need to stores that public key in order to do such audit.
     I will send him a random string, he needs to encrypt it and send me back.
     I can compare his encrypted output with mine.
     Returns Deferred object.
@@ -375,7 +376,7 @@ def on_key_received(newpacket, info, status, error_message):
                 if my_keys.is_key_private(key_id):
                     # we should not overwrite existing private key
                     raise Exception('private key already registered')
-                if my_keys.get_public_key_raw(key_id, 'openssh') != key_object.toString('openssh'):
+                if my_keys.get_public_key_raw(key_id) != key_object.toString():
                     # and we should not overwrite existing public key as well
                     raise Exception('another key already registered with that ID')
                 p2p_service.SendAck(newpacket)
@@ -394,7 +395,7 @@ def on_key_received(newpacket, info, status, error_message):
             # check if we already have that key
             if my_keys.is_key_private(key_id):
                 # we have already private key with same ID!!!
-                if my_keys.get_private_key_raw(key_id, 'openssh') != key_object.toString('openssh'):
+                if my_keys.get_private_key_raw(key_id) != key_object.toString():
                     # and this is a new private key : we should not overwrite!
                     raise Exception('private key already registered')
                 # this is the same private key
@@ -402,7 +403,7 @@ def on_key_received(newpacket, info, status, error_message):
                 lg.warn('received existing private key: %s, skip' % key_id)
                 return True
             # but we have a public key with same ID
-            if my_keys.get_public_key_raw(key_id, 'openssh') != key_object.public().toString('openssh'):
+            if my_keys.get_public_key_raw(key_id) != key_object.toPublicString():
                 # and we should not overwrite existing public key as well
                 raise Exception('another key already registered with that ID')
             lg.info('erasing public key %s' % key_id)

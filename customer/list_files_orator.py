@@ -47,15 +47,9 @@ EVENTS:
     * :red:`timer-10sec`
 """
 
-import os
-import sys
+#------------------------------------------------------------------------------
 
-try:
-    from twisted.internet import reactor
-except:
-    sys.exit('Error initializing twisted.internet.reactor in list_files_orator.py')
 from twisted.internet.defer import maybeDeferred
-from twisted.internet.task import LoopingCall
 
 #------------------------------------------------------------------------------
 
@@ -173,7 +167,7 @@ class ListFilesOrator(automat.Automat):
         for idurl in contactsdb.suppliers():
             if idurl:
                 if contact_status.isOnline(idurl):
-                    p2p_service.SendListFiles(idurl)
+                    p2p_service.SendListFiles(target_supplier=idurl)
                     _RequestedListFilesPacketIDs.add(idurl)
                 else:
                     lg.out(6, 'list_files_orator.doRequestRemoteFiles SKIP %s is not online' % idurl)

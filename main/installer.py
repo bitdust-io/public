@@ -66,6 +66,8 @@ EVENTS:
     * :red:`restore-start`
 """
 
+#------------------------------------------------------------------------------
+
 import sys
 
 try:
@@ -90,7 +92,7 @@ from lib import nameurl
 from userid import id_registrator
 from userid import id_restorer
 
-import initializer
+from main import initializer
 
 #------------------------------------------------------------------------------
 
@@ -151,9 +153,6 @@ class Installer(automat.Automat):
     def state_changed(self, oldstate, newstate, event, arg):
         global_state.set_global_state('INSTALL ' + newstate)
         initializer.A('installer.state', newstate)
-        if not settings.NewWebGUI():
-            from web import webcontrol
-            reactor.callLater(0, webcontrol.OnUpdateInstallPage)
 
     def A(self, event, arg):
         #---AT_STARTUP---
@@ -292,12 +291,8 @@ class Installer(automat.Automat):
 
     def doUpdate(self, arg):
         # lg.out(4, 'installer.doUpdate')
-        if not settings.NewWebGUI():
-            from web import webcontrol
-            reactor.callLater(0, webcontrol.OnUpdateInstallPage)
-        else:
-            from web import control
-            control.request_update([{'state': self.state}, ])
+        from main import control
+        control.request_update([{'state': self.state}, ])
 
     def doClearOutput(self, arg):
         # lg.out(4, 'installer.doClearOutput')

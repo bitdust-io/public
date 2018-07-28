@@ -45,7 +45,7 @@ if not - remove that customer and stop assistant
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -59,6 +59,8 @@ from lib import packetid
 from lib import diskspace
 
 from main import settings
+
+from crypt import my_keys
 
 from p2p import p2p_service
 from p2p import commands
@@ -198,8 +200,17 @@ class CustomerAssistant(automat.Automat):
         """
         Action method.
         """
-        packet_id = '%s:%s' % (global_id.UrlToGlobalID(self.customer_idurl), packetid.UniqueID(), )
-        list_files.send(self.customer_idurl, packet_id, settings.ListFilesFormat())
+        customer_key_id = my_keys.make_key_id(alias='customer', creator_idurl=self.customer_idurl)
+        if my_keys.is_key_registered(customer_key_id):
+            list_files.send(
+                customer_idurl=self.customer_idurl,
+                packet_id='%s:%s' % (customer_key_id, packetid.UniqueID(), ),
+                format_type=settings.ListFilesFormat(),
+                key_id=customer_key_id,
+                remote_idurl=self.customer_idurl,  # send to the customer
+            )
+        else:
+            lg.warn('key %s is not registered, not able to send his files' % customer_key_id)
 
     def doDestroyMe(self, arg):
         """

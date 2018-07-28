@@ -42,15 +42,38 @@ class NetworkService(LocalService):
     service_name = 'service_network'
     config_path = 'services/network/enabled'
 
+    current_network_interfaces = None
+
     def dependent_on(self):
         return []
 
     def start(self):
+        from twisted.internet import task
         from p2p import network_connector
         network_connector.A('init')
+        self.task = task.LoopingCall(self._do_check_network_interfaces)
+        self.task.start(20, now=False)
         return True
 
     def stop(self):
         from p2p import network_connector
         network_connector.Destroy()
+        self.task.stop()
         return True
+
+    def _do_check_network_interfaces(self):
+        from lib.net_misc import getNetworkInterfaces
+        from p2p import network_connector
+        from logs import lg
+        known_interfaces = getNetworkInterfaces()
+        if '127.0.0.1' in known_interfaces:
+            known_interfaces.remove('127.0.0.1')
+        if self.current_network_interfaces is None:
+            self.current_network_interfaces = known_interfaces
+            lg.out(2, 'service_network._do_check_network_interfaces START UP: %s' % self.current_network_interfaces)
+        else:
+            if self.current_network_interfaces != known_interfaces:
+                lg.out(2, 'service_network._do_check_network_interfaces recognized changes: %s -> %s' % (
+                    self.current_network_interfaces, known_interfaces))
+                self.current_network_interfaces = known_interfaces
+                network_connector.A('check-reconnect')

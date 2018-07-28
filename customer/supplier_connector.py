@@ -48,7 +48,7 @@ EVENTS:
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 12
+_DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
@@ -75,10 +75,11 @@ from crypt import my_keys
 
 from p2p import commands
 from p2p import p2p_service
+from p2p import contact_status
+
+from raid import eccmap
 
 from userid import my_id
-
-from customer import customer_state
 
 #------------------------------------------------------------------------------
 
@@ -97,7 +98,7 @@ def connectors(customer_idurl=None):
     return _SuppliersConnectors[customer_idurl]
 
 
-def create(supplier_idurl, customer_idurl=None, needed_bytes=None):
+def create(supplier_idurl, customer_idurl=None, needed_bytes=None, key_id=None, queue_subscribe=True, ):
     """
     """
     if customer_idurl is None:
@@ -107,6 +108,8 @@ def create(supplier_idurl, customer_idurl=None, needed_bytes=None):
         supplier_idurl=supplier_idurl,
         customer_idurl=customer_idurl,
         needed_bytes=needed_bytes,
+        key_id=key_id,
+        queue_subscribe=queue_subscribe,
     )
     return connectors(customer_idurl)[supplier_idurl]
 
@@ -145,12 +148,14 @@ class SupplierConnector(automat.Automat):
         'timer-20sec': (20.0, ['REQUEST']),
     }
 
-    def __init__(self, supplier_idurl, customer_idurl, needed_bytes):
+    def __init__(self, supplier_idurl, customer_idurl, needed_bytes, key_id=None, queue_subscribe=True):
         """
         """
         self.supplier_idurl = supplier_idurl
         self.customer_idurl = customer_idurl
         self.needed_bytes = needed_bytes
+        self.key_id = key_id
+        self.queue_subscribe = queue_subscribe
         if self.needed_bytes is None:
             total_bytes_needed = diskspace.GetBytesFromString(settings.getNeededString(), 0)
             num_suppliers = settings.getSuppliersNumberDesired()
@@ -171,12 +176,14 @@ class SupplierConnector(automat.Automat):
             )).strip()
         except:
             st = 'DISCONNECTED'
-        if st == 'CONNECTED':
-            automat.Automat.__init__(self, name, 'CONNECTED', _DebugLevel, _Debug)
-        elif st == 'NO_SERVICE':
-            automat.Automat.__init__(self, name, 'NO_SERVICE', _DebugLevel, _Debug)
-        else:
-            automat.Automat.__init__(self, name, 'DISCONNECTED', _DebugLevel, _Debug)
+        automat.Automat.__init__(
+            self,
+            name,
+            state=st,
+            debug_level=_DebugLevel,
+            log_events=_Debug,
+            log_transitions=_Debug,
+        )
         for cb in self.callbacks.values():
             cb(self.supplier_idurl, self.state, self.state)
 
@@ -185,6 +192,9 @@ class SupplierConnector(automat.Automat):
         Method to initialize additional variables and flags at creation of the
         state machine.
         """
+        contact_peer = contact_status.getInstance(self.supplier_idurl)
+        if contact_peer:
+            contact_peer.addStateChangedCallback(self._on_contact_status_state_changed)
 
     def state_changed(self, oldstate, newstate, event, arg):
         """
@@ -334,14 +344,18 @@ class SupplierConnector(automat.Automat):
         """
         service_info = {
             'needed_bytes': self.needed_bytes,
+            'customer_id': global_id.UrlToGlobalID(self.customer_idurl),
         }
-        try:
+        my_customer_key_id = my_id.getGlobalID(key_alias='customer')
+        if my_keys.is_key_registered(my_customer_key_id):
             service_info['customer_public_key'] = my_keys.get_key_info(
-                key_id=customer_state.customer_key_id(),
+                key_id=my_customer_key_id,
                 include_private=False,
             )
-        except:
-            pass
+        if self.key_id:
+            service_info['key_id'] = self.key_id
+        if self.customer_idurl == my_id.getLocalIDURL():
+            service_info['ecc_map'] = eccmap.Current().name
         request = p2p_service.SendRequestService(
             remote_idurl=self.supplier_idurl,
             service_name='service_supplier',
@@ -371,6 +385,9 @@ class SupplierConnector(automat.Automat):
         """
         Action method.
         """
+        if not self.queue_subscribe:
+            self.automat('fail')
+            return
         service_info = {'items': [{
             'scope': 'consumer',
             'action': 'start',
@@ -444,7 +461,7 @@ class SupplierConnector(automat.Automat):
         Action method.
         """
         if _Debug:
-            lg.out(14, 'supplier_connector.doReportConnect')
+            lg.out(14, 'supplier_connector.doReportConnect : %s' % self.supplier_idurl)
         for cb in self.callbacks.values():
             cb(self.supplier_idurl, 'CONNECTED')
 
@@ -453,7 +470,7 @@ class SupplierConnector(automat.Automat):
         Action method.
         """
         if _Debug:
-            lg.out(14, 'supplier_connector.doReportNoService')
+            lg.out(14, 'supplier_connector.doReportNoService : %s' % self.supplier_idurl)
         for cb in self.callbacks.values():
             cb(self.supplier_idurl, 'NO_SERVICE')
 
@@ -462,7 +479,7 @@ class SupplierConnector(automat.Automat):
         Action method.
         """
         if _Debug:
-            lg.out(_DebugLevel, 'supplier_connector.doReportDisconnect')
+            lg.out(_DebugLevel, 'supplier_connector.doReportDisconnect : %s' % self.supplier_idurl)
         for cb in self.callbacks.values():
             cb(self.supplier_idurl, 'DISCONNECTED')
 
@@ -470,11 +487,14 @@ class SupplierConnector(automat.Automat):
         """
         Action method.
         """
-        
+        contact_peer = contact_status.getInstance(self.supplier_idurl)
+        if contact_peer:
+            contact_peer.removeStateChangedCallback(self._on_contact_status_state_changed)
         connectors(self.customer_idurl).pop(self.supplier_idurl)
         self.request_packet_id = None
         self.supplier_idurl = None
         self.customer_idurl = None
+        self.queue_subscribe = None
         self.destroy()
 
     def _supplier_acked(self, response, info):
@@ -489,3 +509,10 @@ class SupplierConnector(automat.Automat):
             self.automat(response.Command.lower(), response)
         else:
             self.automat('fail', None)
+
+    def _on_contact_status_state_changed(self, oldstate, newstate, event_string, args):
+        if oldstate != newstate and newstate in ['CONNECTED', 'OFFLINE', ]:
+            if _Debug:
+                lg.out(12, 'supplier_connector._on_contact_status_state_changed %s : %s->%s, reconnecting now' % (
+                    self.supplier_idurl, oldstate, newstate))
+            self.automat('connect')

@@ -67,9 +67,18 @@ EVENTS:
     * :red:`timer-5sec`
 """
 
+#------------------------------------------------------------------------------
 
-import sys
+_Debug = False
+_DebugLevel = 6
+
+#------------------------------------------------------------------------------
+
 import gc
+import sys
+import time
+
+#------------------------------------------------------------------------------
 
 try:
     from twisted.internet import reactor
@@ -99,6 +108,8 @@ from storage import backup_control
 from userid import global_id
 from userid import my_id
 
+from p2p import contact_status
+
 #------------------------------------------------------------------------------
 
 _BackupMonitor = None
@@ -112,7 +123,12 @@ def A(event=None, arg=None):
     """
     global _BackupMonitor
     if _BackupMonitor is None:
-        _BackupMonitor = BackupMonitor('backup_monitor', 'AT_STARTUP', 6, False)
+        _BackupMonitor = BackupMonitor(
+            'backup_monitor', 'AT_STARTUP',
+            debug_level=_DebugLevel,
+            log_events=False,
+            log_transitions=_Debug,
+        )
     if event is not None:
         _BackupMonitor.automat(event, arg)
     return _BackupMonitor
@@ -141,6 +157,8 @@ class BackupMonitor(automat.Automat):
 
     def init(self):
         self.current_suppliers = []
+        self.backups_progress_last_iteration = 0
+        self.last_execution_time = 0
 
     def state_changed(self, oldstate, newstate, event, arg):
         """
@@ -237,6 +255,8 @@ class BackupMonitor(automat.Automat):
         Action method.
         """
         self.current_suppliers = list(contactsdb.suppliers())
+        self.backups_progress_last_iteration = 0
+        self.last_execution_time = time.time()
 
     def doDeleteAllBackups(self, arg):
         """
@@ -279,7 +299,7 @@ class BackupMonitor(automat.Automat):
         # backup_matrix.suppliers_set().UpdateSuppliers(supplierList)
 
     def doPrepareListBackups(self, arg):
-        import backup_rebuilder
+        from storage import backup_rebuilder
         if backup_control.HasRunningBackup():
             # if some backups are running right now no need to rebuild something - too much use of CPU
             backup_rebuilder.RemoveAllBackupsToWork()
@@ -304,11 +324,20 @@ class BackupMonitor(automat.Automat):
         # here we check all backups we have and remove the old one
         # user can set how many versions of that file or folder to keep
         # other versions (older) will be removed here
+        from storage import backup_rebuilder
+        try:
+            self.backups_progress_last_iteration = len(backup_rebuilder.A().backupsWasRebuilt)
+        except:
+            self.backups_progress_last_iteration = 0
         versionsToKeep = settings.getBackupsMaxCopies()
-        bytesUsed = backup_fs.sizebackups() / contactsdb.num_suppliers()
+        if not contactsdb.num_suppliers():
+            bytesUsed = 0
+        else:
+            bytesUsed = backup_fs.sizebackups() / contactsdb.num_suppliers()
         bytesNeeded = diskspace.GetBytesFromString(settings.getNeededString(), 0)
         customerGlobID = my_id.getGlobalID()
-        lg.out(6, 'backup_monitor.doCleanUpBackups backupsToKeep=%d used=%d needed=%d' % (versionsToKeep, bytesUsed, bytesNeeded))
+        if _Debug:
+            lg.out(_DebugLevel, 'backup_monitor.doCleanUpBackups backupsToKeep=%d used=%d needed=%d' % (versionsToKeep, bytesUsed, bytesNeeded))
         delete_count = 0
         if versionsToKeep > 0:
             for pathID, localPath, itemInfo in backup_fs.IterateIDs():
@@ -319,8 +348,9 @@ class BackupMonitor(automat.Automat):
                 # TODO: do we need to sort the list? it comes from a set, so must be sorted may be
                 while len(versions) > versionsToKeep:
                     backupID = packetid.MakeBackupID(customerGlobID, pathID, versions.pop(0))
-                    lg.out(6, 'backup_monitor.doCleanUpBackups %d of %d backups for %s, so remove older %s' % (
-                        len(versions), versionsToKeep, localPath, backupID))
+                    if _Debug:
+                        lg.out(_DebugLevel, 'backup_monitor.doCleanUpBackups %d of %d backups for %s, so remove older %s' % (
+                            len(versions), versionsToKeep, localPath, backupID))
                     backup_control.DeleteBackup(backupID, saveDB=False, calculate=False)
                     delete_count += 1
         # we need also to fit used space into needed space (given from other users)
@@ -340,8 +370,9 @@ class BackupMonitor(automat.Automat):
                     backupID = packetid.MakeBackupID(customerGlobID, pathID, version)
                     versionInfo = itemInfo.get_version_info(version)
                     if versionInfo[1] > 0:
-                        lg.out(6, 'backup_monitor.doCleanUpBackups over use %d of %d, so remove %s of %s' % (
-                            bytesUsed, bytesNeeded, backupID, localPath))
+                        if _Debug:
+                            lg.out(_DebugLevel, 'backup_monitor.doCleanUpBackups over use %d of %d, so remove %s of %s' % (
+                                bytesUsed, bytesNeeded, backupID, localPath))
                         backup_control.DeleteBackup(backupID, saveDB=False, calculate=False)
                         delete_count += 1
                         bytesUsed -= versionInfo[1]
@@ -352,17 +383,37 @@ class BackupMonitor(automat.Automat):
             backup_fs.Scan()
             backup_fs.Calculate()
             backup_control.Save()
-            from web import control
+            from main import control
             control.request_update()
         collected = gc.collect()
-        lg.out(6, 'backup_monitor.doCleanUpBackups collected %d objects' % collected)
+        if self.backups_progress_last_iteration > 0:
+            if _Debug:
+                lg.out(_DebugLevel, 'backup_monitor.doCleanUpBackups  sending "restart", backups_progress_last_iteration=%s' % 
+                    self.backups_progress_last_iteration)
+            reactor.callLater(1, self.automat, 'restart')
+        if _Debug:
+            lg.out(_DebugLevel, 'backup_monitor.doCleanUpBackups collected %d objects' % collected)
 
     def doOverallCheckUp(self, arg):
         """
         Action method.
         """
         if '' in contactsdb.suppliers():
-            lg.out(6, 'backup_monitor.doOverallCheckUp found empty supplier, restart now')
+            if _Debug:
+                lg.out(_DebugLevel, 'backup_monitor.doOverallCheckUp found empty supplier, restart now')
+            self.automat('restart')
+            return
+        if contact_status.listOfflineSuppliers():
+            if time.time() - self.last_execution_time > 60:
+                # re-sync every 1 min. if at least on supplier is dead
+                if _Debug:
+                    lg.out(_DebugLevel, 'backup_monitor.doOverallCheckUp   restart after 1 min, found offline suppliers')
+                self.automat('restart')
+                return
+        if time.time() - self.last_execution_time > 60 * 10:
+            # also re-sync every 10 min.
+            if _Debug:
+                lg.out(_DebugLevel, 'backup_monitor.doOverallCheckUp   periodic 10 min. restart')
             self.automat('restart')
             return
         # TODO: more tests here: low rating(), time offline, low ping, etc..

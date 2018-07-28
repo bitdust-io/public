@@ -51,21 +51,15 @@ class BackupsService(LocalService):
         from storage import backup_control
         from storage import backup_matrix
         from storage import backup_monitor
-        from main import settings
         from main.config import conf
+        from main import control
         from transport import callback
         from p2p import p2p_connector
         backup_fs.init()
         backup_control.init()
         backup_matrix.init()
-        if settings.NewWebGUI():
-            from web import control
-            backup_matrix.SetBackupStatusNotifyCallback(control.on_backup_stats)
-            backup_matrix.SetLocalFilesNotifyCallback(control.on_read_local_files)
-        else:
-            from web import webcontrol
-            backup_matrix.SetBackupStatusNotifyCallback(webcontrol.OnBackupStats)
-            backup_matrix.SetLocalFilesNotifyCallback(webcontrol.OnReadLocalFiles)
+        backup_matrix.SetBackupStatusNotifyCallback(control.on_backup_stats)
+        backup_matrix.SetLocalFilesNotifyCallback(control.on_read_local_files)
         backup_monitor.A('init')
         backup_monitor.A('restart')
         conf().addCallback('services/backups/keep-local-copies-enabled',
@@ -97,45 +91,48 @@ class BackupsService(LocalService):
 
     def _on_keep_local_copies_modified(self, path, value, oldvalue, result):
         from storage import backup_monitor
+        from logs import lg
+        lg.warn('restarting backup_monitor() machine')
         backup_monitor.A('restart')
 
     def _on_wait_suppliers_modified(self, path, value, oldvalue, result):
         from storage import backup_monitor
+        from logs import lg
+        lg.warn('restarting backup_monitor() machine')
         backup_monitor.A('restart')
 
     def _on_p2p_connector_state_changed(self, oldstate, newstate, event_string, args):
         from storage import backup_monitor
+        from logs import lg
+        lg.warn('restarting backup_monitor() machine because p2p_connector state changed')
         backup_monitor.A('restart')
 
     def _on_inbox_packet_received(self, newpacket, info, status, error_message):
         from logs import lg
-        from main import settings
         from contacts import contactsdb
         from userid import my_id
         from userid import global_id
         from storage import backup_control
         from p2p import commands
-        if newpacket.Command == commands.Data():
-            if newpacket.OwnerID != my_id.getLocalID():
-                # only catch data belongs to me
-                return False
-            lg.out(self.debug_level, "service_backups._on_inbox_packet_received: %r for us from %s" % (
-                newpacket, newpacket.RemoteID, ))
-            if newpacket.PacketID == global_id.MakeGlobalID(
-                idurl=my_id.getLocalID(),
-                path=settings.BackupIndexFileName(),
-            ):
-                # TODO: move to service_backup_db
-                backup_control.IncomingSupplierBackupIndex(newpacket)
-                return True
+        from p2p import p2p_service
         if newpacket.Command == commands.Files():
-            if not newpacket.PacketID.startswith(my_id.getGlobalID() + ':'):
-                # skip Files() which are from another customer
+            list_files_global_id = global_id.ParseGlobalID(newpacket.PacketID)
+            if not list_files_global_id['idurl']:
+                lg.warn('invalid PacketID: %s' % newpacket.PacketID)
+                return False
+            if list_files_global_id['idurl'] != my_id.getLocalIDURL():
+                # lg.warn('skip %s which is from another customer' % newpacket)
                 return False
             if not contactsdb.is_supplier(newpacket.OwnerID):
+                lg.warn('%s came, but %s is not my supplier' % (newpacket, newpacket.OwnerID, ))
                 # skip Files() if this is not my supplier
                 return False
-            lg.out(self.debug_level, "service_backups._on_inbox_packet_received: %r for us from %s" % (
-                newpacket, newpacket.RemoteID, ))
-            return backup_control.IncomingSupplierListFiles(newpacket)
+            lg.out(self.debug_level, "service_backups._on_inbox_packet_received: %r for us from %s at %s" % (
+                newpacket, newpacket.CreatorID, info))
+            if backup_control.IncomingSupplierListFiles(newpacket, list_files_global_id):
+                # send ack packet back
+                p2p_service.SendAck(newpacket)
+            else:
+                p2p_service.SendFail(newpacket)
+            return True
         return False

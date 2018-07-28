@@ -34,7 +34,7 @@ IDURL. So this is a local cache of user ID's.
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 
 #------------------------------------------------------------------------------
 
@@ -57,6 +57,8 @@ from lib import net_misc
 from userid import identity
 
 from contacts import identitydb
+
+from p2p import p2p_stats
 
 #------------------------------------------------------------------------------
 
@@ -300,6 +302,7 @@ def getPageSuccess(src, idurl):
     This is called when requested identity source gets received.
     """
     UpdateAfterChecking(idurl, src)
+    p2p_stats.count_identity_cache(idurl, len(src))
     return src
 
 
@@ -309,6 +312,7 @@ def getPageFail(x, idurl):
     """
     if _Debug:
         lg.out(6, "identitycache.getPageFail NETERROR in request to " + idurl)
+    p2p_stats.count_identity_cache(idurl, 0)
     return x
 
 
@@ -333,7 +337,7 @@ def scheduleForCaching(idurl, timeout=0):
 
 def immediatelyCaching(idurl, timeout=0):
     """
-    A smart method to start caching some identity and get results in callbacks.
+    A smart method to cache some identity and get results in callbacks.
     """
     global _CachingTasks
     if idurl in _CachingTasks:
@@ -344,16 +348,19 @@ def immediatelyCaching(idurl, timeout=0):
         result = _CachingTasks.pop(idurl, None)
         if not result:
             lg.warn('caching task for %s was not found' % idurl)
+            return src
         if UpdateAfterChecking(idurl, src):
             if result:
                 result.callback(src)
             if _Debug:
                 lg.out(14, '    [cached] %s' % idurl)
+            p2p_stats.count_identity_cache(idurl, len(src))
         else:
             if result:
                 result.errback(Exception(src))
             if _Debug:
                 lg.out(14, '    [cache error] %s' % idurl)
+            p2p_stats.count_identity_cache(idurl, 0)
         return src
 
     def _getPageFail(x, idurl):
@@ -363,6 +370,7 @@ def immediatelyCaching(idurl, timeout=0):
             result.errback(x)
         else:
             lg.warn('caching task for %s was not found' % idurl)
+        p2p_stats.count_identity_cache(idurl, 0)
         if _Debug:
             lg.out(14, '    [cache failed] %s' % idurl)
         return None

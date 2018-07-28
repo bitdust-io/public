@@ -32,7 +32,7 @@
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 12
 
 #------------------------------------------------------------------------------
@@ -230,7 +230,7 @@ def work():
     if _CurrentLookupTask.result_defer:
         _CurrentLookupTask.result_defer.addCallback(on_lookup_task_success)
     else:
-        lg.warn('task %s was closed imediately')
+        lg.warn('task %s was closed imediately' % _CurrentLookupTask)
 
 #------------------------------------------------------------------------------
 
@@ -378,6 +378,7 @@ class DiscoveryTask(object):
                 lg.out(_DebugLevel, 'lookup._on_node_processed %s, but need more nodes' % idurl)
             else:
                 lg.out(_DebugLevel, 'lookup._on_node_processed %s, have enough nodes now' % idurl)
+        return node
 
     def _on_all_nodes_observed(self, observe_results):
         if self.stopped:

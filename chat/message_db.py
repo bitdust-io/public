@@ -32,7 +32,7 @@ module:: message_db
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -368,7 +368,7 @@ def _test_query(inp):
     return lst
 
 
-def _test():
+def main():
     if len(sys.argv) < 2:
         print """
         commands:
@@ -430,4 +430,4 @@ def _test():
 
 if __name__ == "__main__":
     lg.set_debug_level(20)
-    _test()
+    main()

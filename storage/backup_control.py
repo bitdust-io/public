@@ -35,7 +35,7 @@ gets finished.
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 12
 
 #------------------------------------------------------------------------------
@@ -69,8 +69,7 @@ from lib import nameurl
 
 from main import settings
 from main import events
-
-from transport import callback
+from main import control
 
 from raid import eccmap
 
@@ -80,8 +79,6 @@ from crypt import my_keys
 
 from userid import global_id
 from userid import my_id
-
-from web import control
 
 from services import driver
 
@@ -202,6 +199,7 @@ def ReadIndex(raw_data, encoding='utf-8'):
         return False
     _LoadingFlag = True
     backup_fs.Clear()
+    count = 0
     try:
         json_data = json.loads(raw_data, encoding=encoding)
     except:
@@ -289,7 +287,7 @@ def Save(filepath=None):
 
 #------------------------------------------------------------------------------
 
-def IncomingSupplierListFiles(newpacket):
+def IncomingSupplierListFiles(newpacket, list_files_global_id):
     """
     Called by ``p2p.p2p_service`` when command "Files" were received from one
     of our suppliers.
@@ -299,19 +297,24 @@ def IncomingSupplierListFiles(newpacket):
     """
     from p2p import p2p_service
     supplier_idurl = newpacket.OwnerID
-    customer_idurl = my_id.getLocalID()
-    if newpacket.PacketID.count(':') and newpacket.PacketID.count('@'):
-        try:
-            customer_idurl = global_id.GlobalUserToIDURL(newpacket.PacketID.split(':')[0])
-        except:
-            lg.exc()
+    # incoming_key_id = newpacket.PacketID.strip().split(':')[0]
+    customer_idurl = list_files_global_id['idurl']
     num = contactsdb.supplier_position(supplier_idurl, customer_idurl=customer_idurl)
     if num < -1:
-        lg.out(2, 'backup_control.IncomingSupplierListFiles ERROR unknown supplier: %s' % supplier_idurl)
+        lg.warn('unknown supplier: %s' % supplier_idurl)
         return False
     from supplier import list_files
     from customer import list_files_orator
-    src = list_files.UnpackListFiles(newpacket.Payload, settings.ListFilesFormat())
+    try:
+        block = encrypted.Unserialize(
+            newpacket.Payload,
+            decrypt_key=my_keys.make_key_id(alias='customer', creator_idurl=my_id.getLocalIDURL(), ),
+        )
+        input_data = block.Data()
+    except:
+        lg.out(2, 'backup_control.IncomingSupplierListFiles ERROR decrypting data from %s' % newpacket)
+        return False
+    src = list_files.UnpackListFiles(input_data, settings.ListFilesFormat())
     backups2remove, paths2remove, missed_backups = backup_matrix.ReadRawListFiles(num, src)
     list_files_orator.IncomingListFiles(newpacket)
     backup_matrix.SaveLatestRawListFiles(supplier_idurl, src)
@@ -881,6 +884,7 @@ def OnJobDone(backupID, result):
         # will be smarter to restart it once we finish all tasks
         # because user will probably leave BitDust working after starting a long running operations
         from storage import backup_monitor
+        lg.warn('restarting backup_monitor() machine because no tasks left')
         backup_monitor.A('restart')
     reactor.callLater(0, RunTask)
     reactor.callLater(0, FireTaskFinishedCallbacks, remotePath, version, result)
