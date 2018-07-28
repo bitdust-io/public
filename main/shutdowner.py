@@ -85,7 +85,7 @@ def shutdown(x=None):
     """
     lg.out(2, "shutdowner.shutdown " + str(x))
     from services import driver
-    from main import settings
+    from main import control
     from main import events
     from logs import weblog
     from logs import webtraffic
@@ -112,12 +112,7 @@ def shutdown(x=None):
     git_proc.shutdown()
     events.clear_subscribers()
     tmpfile.shutdown()
-    if settings.NewWebGUI():
-        from web import control
-        dl.append(control.shutdown())
-    else:
-        from web import webcontrol
-        dl.append(webcontrol.shutdown())
+    control.shutdown()
     weblog.shutdown()
     webtraffic.shutdown()
     for a in automat.objects().values():

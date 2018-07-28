@@ -47,7 +47,7 @@ EVENTS:
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 12
+_DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
@@ -56,6 +56,8 @@ import time
 
 from twisted.internet import reactor
 
+#------------------------------------------------------------------------------
+
 from logs import lg
 
 from main import settings
@@ -63,20 +65,20 @@ from main import events
 
 from automats import automat
 
+from lib import nameurl
+
 from system import bpio
 from system import tmpfile
-
-from userid import my_id
 
 from contacts import contactsdb
 from contacts import identitycache
 
 from services import driver
 
-import gateway
-import stats
-import callback
-import packet_out
+from p2p import commands
+from p2p import p2p_stats
+
+from transport import callback
 
 #------------------------------------------------------------------------------
 
@@ -153,20 +155,19 @@ def history():
 
 
 def process(newpacket, info):
+    from p2p import p2p_service
     if not driver.is_on('service_p2p_hookups'):
         if _Debug:
             lg.out(_DebugLevel, 'packet_in.process SKIP incoming packet, service_p2p_hookups is not started')
-        return
-    handled = False
+        return None
     if _Debug:
-        lg.out(_DebugLevel, 'packet_in.process %s from %s://%s : %s' % (
-            str(newpacket), info.proto, info.host, info.status))
+        lg.out(_DebugLevel, 'packet_in.process [%s/%s/%s]:%s(%s) from %s://%s is "%s"' % (
+            nameurl.GetName(newpacket.OwnerID), nameurl.GetName(newpacket.CreatorID), nameurl.GetName(newpacket.RemoteID),
+            newpacket.Command, newpacket.PacketID, info.proto, info.host, info.status, ))
     if info.status != 'finished':
         if _Debug:
             lg.out(_DebugLevel, '    skip, packet status is : [%s]' % info.status)
-        return
-    from p2p import commands
-    from p2p import p2p_service
+        return None
     if newpacket.Command == commands.Identity():  # and newpacket.RemoteID == my_id.getLocalID():
         # contact sending us current identity we might not have
         # so we handle it before check that packet is valid
@@ -175,15 +176,29 @@ def process(newpacket, info):
         # than we check the packet to be valid too.
         if not p2p_service.Identity(newpacket):
             lg.warn('non-valid identity received')
-            return
+            return None
+    if not identitycache.HasKey(newpacket.CreatorID):
+        lg.warn('will cache remote identity %s before processing incoming packet %s' % (newpacket.CreatorID, newpacket))
+        d = identitycache.immediatelyCaching(newpacket.CreatorID)
+        d.addCallback(lambda _: handle(newpacket, info))
+        d.addErrback(lambda err: lg.err('failed caching remote %s identity: %s' % (newpacket.CreatorID, str(err))))
+        return d
+    return handle(newpacket, info)
+
+
+def handle(newpacket, info):
+    from transport import packet_out
+    handled = False
     # check that signed by a contact of ours
     if not newpacket.Valid():
         lg.warn('new packet from %s://%s is NOT VALID: %r' % (
             info.proto, info.host, newpacket))
-        return
+        return None
     for p in packet_out.search_by_response_packet(newpacket, info.proto, info.host):
         p.automat('inbox-packet', (newpacket, info))
         handled = True
+        if _Debug:
+            lg.out(_DebugLevel, '    processed by %s as response packet' % p)
     handled = callback.run_inbox_callbacks(newpacket, info, info.status, info.error_message) or handled
     if not handled and newpacket.Command not in [commands.Ack(), commands.Fail(), commands.Identity(), ]:
         lg.warn('incoming %s from [%s://%s] was NOT HANDLED' % (newpacket, info.proto, info.host))
@@ -200,6 +215,7 @@ def process(newpacket, info):
         })
         if len(history()) > 100:
             history().pop(0)
+    return handled
 
 #------------------------------------------------------------------------------
 
@@ -337,6 +353,7 @@ class PacketIn(automat.Automat):
         """
         Action method.
         """
+        from transport import gateway
         t = gateway.transports().get(self.proto, None)
         if t:
             t.call('cancel_file_receiving', self.transfer_id)
@@ -353,6 +370,7 @@ class PacketIn(automat.Automat):
         """
         Action method.
         """
+        from transport import gateway
         self.status, self.bytes_received, self.error_message = arg
         # DO UNSERIALIZE HERE , no exceptions
         newpacket = gateway.inbox(self)
@@ -363,7 +381,7 @@ class PacketIn(automat.Automat):
                     self.host, os.path.basename(self.filename),))
             # net_misc.ConnectionFailed(None, proto, 'receiveStatusReport %s' % host)
             try:
-                fd, _ = tmpfile.make('error', '.inbox')
+                fd, _ = tmpfile.make('error', extension='.inbox')
                 data = bpio.ReadBinaryFile(self.filename)
                 os.write(fd, 'from %s:%s %s\n' % (self.proto, self.host, self.status))
                 os.write(fd, str(data))
@@ -394,7 +412,7 @@ class PacketIn(automat.Automat):
         Action method.
         """
         newpacket = arg
-        stats.count_inbox(self.sender_idurl, self.proto, self.status, self.bytes_received)
+        p2p_stats.count_inbox(self.sender_idurl, self.proto, self.status, self.bytes_received)
         process(newpacket, self)
 
     def doReportFailed(self, arg):
@@ -406,7 +424,7 @@ class PacketIn(automat.Automat):
         except:
             status = 'failed'
             bytes_received = 0
-        stats.count_inbox(self.sender_idurl, self.proto, status, bytes_received)
+        p2p_stats.count_inbox(self.sender_idurl, self.proto, status, bytes_received)
 
     def doReportCacheFailed(self, arg):
         """
@@ -414,7 +432,7 @@ class PacketIn(automat.Automat):
         """
         if arg:
             status, bytes_received, _ = arg
-            stats.count_inbox(self.sender_idurl, self.proto, status, bytes_received)
+            p2p_stats.count_inbox(self.sender_idurl, self.proto, status, bytes_received)
         lg.out(18, 'packet_in.doReportCacheFailed WARNING : %s' % self.sender_idurl)
 
     def doDestroyMe(self, arg):

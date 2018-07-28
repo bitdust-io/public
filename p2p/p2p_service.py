@@ -49,8 +49,9 @@ _DebugLevel = 2
 
 #------------------------------------------------------------------------------
 
-import os
 import json
+
+from twisted.internet import reactor
 
 #------------------------------------------------------------------------------
 
@@ -190,14 +191,16 @@ def Ack(newpacket, info):
             info.proto, info.host, len(newpacket.Payload)))
 
 
-def SendAck(packettoack, response='', wide=False, callbacks={}, packetid=None):
+def SendAck(packettoack, response='', wide=False, callbacks={}, remote_idurl=None):
+    if remote_idurl is None:
+        remote_idurl = packettoack.OwnerID
     result = signed.Packet(
         commands.Ack(),
         my_id.getLocalID(),
         my_id.getLocalID(),
-        packetid or packettoack.PacketID,
+        packettoack.PacketID,
         response,
-        packettoack.OwnerID)
+        remote_idurl, )
     if _Debug:
         lg.out(_DebugLevel, "p2p_service.SendAck %s to %s  with %d bytes" % (
             result.PacketID, result.RemoteID, len(response)))
@@ -212,7 +215,7 @@ def SendAckNoRequest(remoteID, packetid, response='', wide=False, callbacks={}):
         my_id.getLocalID(),
         packetid,
         response,
-        remoteID)
+        remoteID, )
     if _Debug:
         lg.out(_DebugLevel, "p2p_service.SendAckNoRequest packetID=%s to %s  with %d bytes" % (
             result.PacketID, result.RemoteID, len(response)))
@@ -244,7 +247,7 @@ def SendFail(request, response='', remote_idurl=None, wide=False):
     return result
 
 
-def SendFailNoRequest(remoteID, packetID, response):
+def SendFailNoRequest(remoteID, packetID, response=''):
     result = signed.Packet(
         commands.Fail(),
         my_id.getLocalID(),
@@ -292,7 +295,8 @@ def Identity(newpacket):
         if _Debug:
             lg.out(_DebugLevel, "p2p_service.Identity idurl=%s, but packet ownerID=%s  ... also sent WIDE Acks" % (
                 nameurl.GetName(idurl), newpacket.OwnerID, ))
-    SendAck(newpacket, wide=True)
+    reactor.callLater(0, SendAck, newpacket, wide=True)
+    # SendAck(newpacket, wide=True)
     # TODO: after receiving the full identity sources we can call ALL OF them if some are not cached yet.
     # this way we can be sure that even if first source (server holding your public key) is not availabble
     # other sources still can give you required user info: public key, contacts, etc..
@@ -395,7 +399,7 @@ def ListFiles(request, info):
             request.RemoteID, request.OwnerID, request.CreatorID))
 
 
-def SendListFiles(supplierNumORidurl, customer_idurl=None, wide=False, callbacks={}):
+def SendListFiles(target_supplier, customer_idurl=None, key_id=None, wide=False, callbacks={}):
     """
     This is used as a request method from your supplier : if you send him a ListFiles() packet
     he will reply you with a list of stored files in a Files() packet.
@@ -403,16 +407,18 @@ def SendListFiles(supplierNumORidurl, customer_idurl=None, wide=False, callbacks
     MyID = my_id.getLocalID()
     if not customer_idurl:
         customer_idurl = MyID
-    if not str(supplierNumORidurl).isdigit():
-        RemoteID = supplierNumORidurl
+    if not str(target_supplier).isdigit():
+        RemoteID = target_supplier
     else:
-        RemoteID = contactsdb.supplier(supplierNumORidurl, customer_idurl=customer_idurl)
+        RemoteID = contactsdb.supplier(target_supplier, customer_idurl=customer_idurl)
     if not RemoteID:
-        lg.warn("RemoteID is empty supplierNumORidurl=%s" % str(supplierNumORidurl))
+        lg.warn("RemoteID is empty target_supplier=%s" % str(target_supplier))
         return None
     if _Debug:
         lg.out(_DebugLevel, "p2p_service.SendListFiles to %s" % nameurl.GetName(RemoteID))
-    PacketID = "%s:%s" % (global_id.UrlToGlobalID(customer_idurl), packetid.UniqueID())
+    if not key_id:
+        key_id = global_id.MakeGlobalID(idurl=customer_idurl, key_alias='customer')
+    PacketID = "%s:%s" % (key_id, packetid.UniqueID(), )
     Payload = settings.ListFilesFormat()
     result = signed.Packet(
         Command=commands.ListFiles(),
@@ -437,7 +443,7 @@ def Files(request, info):
             request.RemoteID, request.OwnerID, request.CreatorID))
 
 
-def SendFiles(idurl, raw_list_files_info, packet_id=None, callbacks={}, timeout=10, ):
+def SendFiles(idurl, raw_list_files_info, packet_id, callbacks={}, timeout=10, ):
     """
     Sending information about known files stored locally for given customer (if you are supplier).
     You can also send a list of your files to another user if you wish to grand access.
@@ -445,8 +451,6 @@ def SendFiles(idurl, raw_list_files_info, packet_id=None, callbacks={}, timeout=
     So pass list of files in encrypted form in the `payload` or leave it empty.
     """
     MyID = my_id.getLocalID()
-    if not packet_id:
-        packet_id = "%s:%s" % (global_id.UrlToGlobalID(idurl), packetid.UniqueID())
     if _Debug:
         lg.out(_DebugLevel, 'p2p_service.SendFiles %d bytes in packetID=%s' % (len(raw_list_files_info), packet_id))
         lg.out(_DebugLevel, '  to remoteID=%s' % idurl)
@@ -492,7 +496,7 @@ def SendData(raw_data, ownerID, creatorID, remoteID, packetID, callbacks={}):
         lg.out(_DebugLevel, 'p2p_service.SendData %d bytes in packetID=%s' % (
             len(raw_data), packetID))
         lg.out(_DebugLevel, '  to remoteID=%s  ownerID=%s  creatorID=%s' % (remoteID, ownerID, creatorID))
-    return result
+    return newpacket, result
 
 
 def Retrieve(request):
@@ -724,11 +728,11 @@ def Key(request, info):
 
 
 def SendKey(remote_idurl, encrypted_key_data, packet_id=None, wide=False, callbacks={}, timeout=10, ):
-    if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendKey to %s with %d bytes encrypted key data" % (
-            remote_idurl, len(encrypted_key_data)))
     if packet_id is None:
         packet_id = packetid.UniqueID()
+    if _Debug:
+        lg.out(_DebugLevel, "p2p_service.SendKey [%s] to %s with %d bytes encrypted key data" % (
+            packet_id, remote_idurl, len(encrypted_key_data)))
     outpacket = signed.Packet(
         Command=commands.Key(),
         OwnerID=my_id.getLocalID(),

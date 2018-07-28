@@ -78,8 +78,13 @@ from twisted.python.failure import Failure
 #------------------------------------------------------------------------------
 
 _Debug = True
-_DebugLevel = 12
+_DebugLevel = 10
+
 _LogEvents = True
+_LogFile = None  # : This is to have a separated Log file for state machines logs
+_LogFilename = None
+_LogsCount = 0  # : If not zero - it will print time since that value, not system time
+_LifeBeginsTime = 0
 
 #------------------------------------------------------------------------------
 
@@ -87,10 +92,6 @@ _Counter = 0  # : Increment by one for every new object, the idea is to keep uni
 _Index = {}  # : Index dictionary, unique id (string) to index (int)
 _Objects = {}  # : Objects dictionary to store all state machines objects
 _StateChangedCallback = None  # : Called when some state were changed
-_LogFile = None  # : This is to have a separated Log file for state machines logs
-_LogFilename = None
-_LogsCount = 0  # : If not zero - it will print time since that value, not system time
-_LifeBeginsTime = 0
 
 #------------------------------------------------------------------------------
 
@@ -519,12 +520,15 @@ class Automat(object):
         """
         This method fires the timer events.
         """
-        if name in self.timers and self.state in self.timers[name][1]:
-            self.automat(name)
-        else:
-            self.log(
-                max(_DebugLevel, self.debug_level),
-                '%s.timerEvent ERROR timer %s not found in self.timers' % (str(self), name))
+        try:
+            if name in self.timers and self.state in self.timers[name][1]:
+                self.automat(name)
+            else:
+                self.log(
+                    max(_DebugLevel, self.debug_level),
+                    '%s.timerEvent ERROR timer %s not found in self.timers' % (str(self), name))
+        except Exception as exc:
+            self.exc(str(exc))
 
     def stopTimers(self):
         """
@@ -619,7 +623,7 @@ class Automat(object):
             except:
                 pass
 
-    def addStateChangedCallback(self, cb, oldstate=None, newstate=None):
+    def addStateChangedCallback(self, cb, oldstate=None, newstate=None, callback_id=None):
         """
         You can add a callback function to be executed when state machine
         reaches particular condition, it will be called with such arguments:
@@ -640,18 +644,25 @@ class Automat(object):
         if key not in self._state_callbacks:
             self._state_callbacks[key] = []
         if cb not in self._state_callbacks[key]:
-            self._state_callbacks[key].append(cb)
+            self._state_callbacks[key].append((callback_id, cb))
 
-    def removeStateChangedCallback(self, cb):
+    def removeStateChangedCallback(self, cb=None, callback_id=None):
         """
         Remove given callback from the state machine.
         """
+        removed_count = 0
         for key, cb_list in self._state_callbacks.items():
-            for cb_ in cb_list:
-                if cb == cb_:
-                    self._state_callbacks[key].remove(cb)
-                    if len(self._state_callbacks[key]) == 0:
-                        self._state_callbacks.pop(key)
+            for cb_tupl in cb_list:
+                cb_id_, cb_ = cb_tupl
+                if cb and cb == cb_:
+                    self._state_callbacks[key].remove(cb_tupl)
+                    removed_count += 1
+                if callback_id and callback_id == cb_id_:
+                    self._state_callbacks[key].remove(cb_tupl)
+                    removed_count += 1
+                if len(self._state_callbacks[key]) == 0:
+                    self._state_callbacks.pop(key)
+        return removed_count
 
     def removeStateChangedCallbackByState(self, oldstate=None, newstate=None):
         """
@@ -681,5 +692,6 @@ class Automat(object):
             elif old == oldstate and new == newstate:
                 catched = True
             if catched:
-                for cb in cb_list:
+                for cb_tupl in cb_list:
+                    cb_id, cb = cb_tupl
                     cb(oldstate, newstate, event_string, args)

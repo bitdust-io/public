@@ -43,7 +43,7 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 6
 
 #------------------------------------------------------------------------------
@@ -59,6 +59,8 @@ from automats import automat
 
 from lib import packetid
 
+from main import events
+
 from contacts import identitycache
 from contacts import contactsdb
 
@@ -70,6 +72,7 @@ from crypt import my_keys
 from crypt import encrypted
 
 from userid import my_id
+from userid import global_id
 
 from access import key_ring
 
@@ -87,7 +90,7 @@ class SharedAccessDonor(automat.Automat):
         'timer-5sec': (5.0, ['PUB_KEY', 'PING', 'AUDIT', 'CACHE']),
     }
 
-    def __init__(self, debug_level=None, log_events=False, publish_events=False, **kwargs):
+    def __init__(self, debug_level=0, log_events=False, publish_events=False, **kwargs):
         """
         Create shared_access_donor() state machine.
         Use this method if you need to call Automat.__init__() in a special way.
@@ -310,16 +313,18 @@ class SharedAccessDonor(automat.Automat):
             filter_cb=lambda path_id, path, info: True if info.key_id == self.key_id else False,
         )
         raw_list_files = json.dumps(json_list_files, indent=2, encoding='utf-8')
+        if _Debug:
+            lg.out(_DebugLevel, 'shared_access_donor.doSendMyListFiles prepared list of files for %s :\n%s' % (
+                self.remote_idurl, raw_list_files))
         block = encrypted.Block(
             CreatorID=my_id.getLocalID(),
             BackupID=self.key_id,
             Data=raw_list_files,
             SessionKey=key.NewSessionKey(),
-            # encrypt data using public key of recipient
-            EncryptKey=lambda inp: self.remote_identity.encrypt(inp),
+            EncryptKey=self.key_id,
         )
         encrypted_list_files = block.Serialize()
-        packet_id = "%s:%s" % (self.key_id, packetid.UniqueID())
+        packet_id = "%s:%s" % (self.key_id, packetid.UniqueID(), )
         p2p_service.SendFiles(
             idurl=self.remote_idurl,
             raw_list_files_info=encrypted_list_files,
@@ -335,6 +340,11 @@ class SharedAccessDonor(automat.Automat):
         """
         Action method.
         """
+        events.send('private-key-shared', dict(
+            global_id=global_id.UrlToGlobalID(self.remote_idurl),
+            remote_idurl=self.remote_idurl,
+            key_id=self.key_id,
+        ))
         if self.result_defer:
             self.result_defer.callback(True)
 
@@ -344,14 +354,38 @@ class SharedAccessDonor(automat.Automat):
         """
         if self.result_defer:
             if arg:
+                events.send('private-key-share-failed', dict(
+                    global_id=global_id.UrlToGlobalID(self.remote_idurl),
+                    remote_idurl=self.remote_idurl,
+                    key_id=self.key_id,
+                    reason=arg,
+                ))
                 self.result_defer.errback(Exception(arg))
             else:
                 if self.remote_identity is None:
+                    events.send('private-key-share-failed', dict(
+                        global_id=global_id.UrlToGlobalID(self.remote_idurl),
+                        remote_idurl=self.remote_idurl,
+                        key_id=self.key_id,
+                        reason='remote id caching failed',
+                    ))
                     self.result_defer.errback(Exception('remote id caching failed'))
                 else:
                     if self.ping_response is None:
+                        events.send('private-key-share-failed', dict(
+                            global_id=global_id.UrlToGlobalID(self.remote_idurl),
+                            remote_idurl=self.remote_idurl,
+                            key_id=self.key_id,
+                            reason='remote node not responding',
+                        ))
                         self.result_defer.errback(Exception('remote node not responding'))
                     else:
+                        events.send('private-key-share-failed', dict(
+                            global_id=global_id.UrlToGlobalID(self.remote_idurl),
+                            remote_idurl=self.remote_idurl,
+                            key_id=self.key_id,
+                            reason='failed',
+                        ))
                         self.result_defer.errback(Exception('failed'))
 
     def doDestroyMe(self, arg):

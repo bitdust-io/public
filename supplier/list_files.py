@@ -22,7 +22,7 @@
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 6
 
 #------------------------------------------------------------------------------
@@ -43,20 +43,25 @@ from lib import misc
 
 from main import settings
 
+from crypt import encrypted
+from crypt import key
+from crypt import my_keys
+
 from p2p import commands
 from p2p import p2p_service
 
-from contacts import contactsdb
-
 from userid import my_id
-from userid import global_id
 
 #------------------------------------------------------------------------------
 
-def send(customer_idurl, packet_id, format_type):
-    customer_name = nameurl.GetName(customer_idurl)
+def send(customer_idurl, packet_id, format_type, key_id, remote_idurl):
+    if not my_keys.is_key_registered(key_id):
+        lg.warn('not able to return Files() for customer %s, key %s not registered' % (
+            customer_idurl, key_id, ))
+        return p2p_service.SendFailNoRequest(customer_idurl, packet_id)
     if _Debug:
-        lg.out(_DebugLevel, "list_files.send to %s, format is '%s'" % (customer_name, format_type))
+        lg.out(_DebugLevel, "list_files.send to %s, customer_idurl=%s, key_id=%s" % (
+            remote_idurl, customer_idurl, key_id, ))
     ownerdir = settings.getCustomerFilesDir(customer_idurl)
     plaintext = ''
     if os.path.isdir(ownerdir):
@@ -69,11 +74,40 @@ def send(customer_idurl, packet_id, format_type):
         lg.warn('did not found customer dir: %s' % ownerdir)
     if _Debug:
         lg.out(_DebugLevel + 8, '\n%s' % plaintext)
-    return p2p_service.SendFiles(
-        idurl=customer_idurl,
-        raw_list_files_info=PackListFiles(plaintext, format_type),
-        packet_id=packet_id,
+    raw_list_files = PackListFiles(plaintext, format_type)
+    block = encrypted.Block(
+        CreatorID=my_id.getLocalID(),
+        BackupID=key_id,
+        Data=raw_list_files,
+        SessionKey=key.NewSessionKey(),
+        EncryptKey=key_id,
     )
+    encrypted_list_files = block.Serialize()
+    newpacket = p2p_service.SendFiles(
+        idurl=remote_idurl,
+        raw_list_files_info=encrypted_list_files,
+        packet_id=packet_id,
+        callbacks={
+            commands.Ack(): on_acked,
+            commands.Fail(): on_failed,
+            None: on_timeout,
+        },
+    )
+    return newpacket
+
+#------------------------------------------------------------------------------
+
+def on_acked(response, info):
+    if _Debug:
+        lg.out(_DebugLevel, 'list_files.on_acked with %s in %s' % (response, info, ))
+
+
+def on_failed(response, error):
+    lg.warn('send files %s failed with %s' % (response, error, ))
+
+
+def on_timeout(pkt_out):
+    lg.warn('send files with %s was timed out' % pkt_out)
 
 #------------------------------------------------------------------------------
 

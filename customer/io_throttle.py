@@ -46,8 +46,8 @@ In future we can use that to do "overlay" communications to hide users.
 
 #------------------------------------------------------------------------------
 
-_Debug = True
-_DebugLevel = 14
+_Debug = False
+_DebugLevel = 12
 
 #------------------------------------------------------------------------------
 
@@ -487,22 +487,34 @@ class SupplierQueue:
                     lg.exc()
                     continue
             # prepare the packet
-            dt = time.time()
+            # dt = time.time()
             Payload = str(bpio.ReadBinaryFile(fileToSend.fileName))
-            newpacket = signed.Packet(
-                commands.Data(),
-                fileToSend.ownerID,
-                self.creatorID,
-                fileToSend.packetID,
-                Payload,
-                fileToSend.remoteID)
+            # newpacket = signed.Packet(
+            #     commands.Data(),
+            #     fileToSend.ownerID,
+            #     self.creatorID,
+            #     fileToSend.packetID,
+            #     Payload,
+            #     fileToSend.remoteID,
+            # )
+            p2p_service.SendData(
+                raw_data=Payload,
+                ownerID=fileToSend.ownerID,
+                creatorID=self.creatorID,
+                remoteID=fileToSend.remoteID,
+                packetID=fileToSend.packetID,
+                callbacks={
+                    commands.Ack(): self.OnFileSendAckReceived,
+                    commands.Fail(): self.OnFileSendAckReceived,
+                },
+            )
             # outbox will not resend, because no ACK, just data,
             # need to handle resends on own
             # transport_control.outboxNoAck(newpacket)
-            gateway.outbox(newpacket, callbacks={
-                commands.Ack(): self.OnFileSendAckReceived,
-                commands.Fail(): self.OnFileSendAckReceived,
-            })
+            # gateway.outbox(newpacket, callbacks={
+            #     commands.Ack(): self.OnFileSendAckReceived,
+            #     commands.Fail(): self.OnFileSendAckReceived,
+            # })
 
             # str(bpio.ReadBinaryFile(fileToSend.fileName))
             # {commands.Ack(): self.OnFileSendAckReceived,
@@ -728,7 +740,8 @@ class SupplierQueue:
         for pkt_out in packetsToCancel:
             if pkt_out.outpacket.Command == commands.Retrieve():
                 if pkt_out.outpacket.PacketID in packetsToRemove:
-                    lg.warn('sending "cancel" to %s' % pkt_out)
+                    lg.warn('sending "cancel" to %s addressed to %s   from io_throttle' % (
+                        pkt_out, pkt_out.remote_idurl, ))
                     pkt_out.automat('cancel')
         if len(self.fileRequestQueue) > 0:
             reactor.callLater(0, self.DoRequest)
@@ -796,8 +809,8 @@ class SupplierQueue:
                 sc.automat('ack', newpacket)
             elif newpacket.Command == commands.Fail():
                 sc.automat('fail', newpacket)
-            elif newpacket.Command == commands.Data():
-                sc.automat('data', newpacket)
+            # elif newpacket.Command == commands.Data():
+            #     sc.automat('data', newpacket)
             else:
                 raise Exception('incorrect packet type received')
         self.DoSend()
@@ -852,17 +865,23 @@ class SupplierQueue:
                 del self.fileRequestDict[packetID]
             lg.warn('supplier queue is shutting down')
             return
+        if _Debug:
+            lg.out(_DebugLevel, "io_throttle.OnDataReceived  %s with result=[%s]" % (newpacket, result, ))
         if packetID in self.fileRequestQueue:
             self.fileRequestQueue.remove(packetID)
             if _Debug:
-                lg.out(_DebugLevel, "io_throttle.OnDataReceived removed %s from %s receiving queue, %d more items" % (
+                lg.out(_DebugLevel, "    removed %s from %s receiving queue, %d more items" % (
                     packetID, self.remoteName, len(self.fileRequestQueue)))
         if newpacket.Command == commands.Data():
+            wrapped_packet = signed.Unserialize(newpacket.Payload)
+            if not wrapped_packet or not wrapped_packet.Valid():
+                lg.err('incoming Data() is not valid')
+                return
             if packetID in self.fileRequestDict:
                 self.fileRequestDict[packetID].fileReceivedTime = time.time()
                 self.fileRequestDict[packetID].result = 'received'
                 for callBack in self.fileRequestDict[packetID].callOnReceived:
-                    callBack(newpacket, 'received')
+                    callBack(wrapped_packet, 'received')
         elif newpacket.Command == commands.Fail():
             if packetID in self.fileRequestDict:
                 self.fileRequestDict[packetID].fileReceivedTime = time.time()
@@ -908,11 +927,12 @@ class SupplierQueue:
 
 #------------------------------------------------------------------------------
 
-# all of the backup rebuilds will run their data requests through this
-# so it gets throttled, also to reduce duplicate requests
-
 
 class IOThrottle:
+    """
+    All of the backup rebuilds will run their data requests through this
+    So it gets throttled, also to reduce duplicate requests.
+    """
 
     def __init__(self):
         self.creatorID = my_id.getLocalID()

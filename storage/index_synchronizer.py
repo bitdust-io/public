@@ -59,7 +59,7 @@ current local index file and update local copy if required.
 On next step index_synchronizer() sends a latest version of index file to all suppliers to hold.
 
 The backup_monitor() machine should be restarted every one hour
-or every time when your backups is changed.
+or every time when your files were changed.
 It sends "restart" event to index_synchronizer() to synchronize index file.
 
 
@@ -80,7 +80,7 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 6
 
 #------------------------------------------------------------------------------
@@ -138,7 +138,13 @@ def A(event=None, arg=None):
     if event is None and arg is None:
         return _IndexSynchronizer
     if _IndexSynchronizer is None:
-        _IndexSynchronizer = IndexSynchronizer('index_synchronizer', 'AT_STARTUP', _DebugLevel, _Debug)
+        _IndexSynchronizer = IndexSynchronizer(
+            name='index_synchronizer',
+            state='AT_STARTUP',
+            debug_level=_DebugLevel,
+            log_events=_Debug,
+            log_transitions=_Debug,
+        )
     if event is not None:
         _IndexSynchronizer.automat(event, arg)
     return _IndexSynchronizer
@@ -353,12 +359,23 @@ class IndexSynchronizer(automat.Automat):
                 continue
             if not contact_status.isOnline(supplierId):
                 continue
-            newpacket = signed.Packet(
-                commands.Data(), localID, localID, packetID,
-                Payload, supplierId)
-            pkt_out = gateway.outbox(newpacket, callbacks={
-                commands.Ack(): self._on_supplier_acked,
-                commands.Fail(): self._on_supplier_acked, })
+            newpacket, pkt_out = p2p_service.SendData(
+                raw_data=Payload,
+                ownerID=localID,
+                creatorID=localID,
+                remoteID=supplierId,
+                packetID=packetID,
+                callbacks={
+                    commands.Ack(): self._on_supplier_acked,
+                    commands.Fail(): self._on_supplier_acked,
+                },
+            )
+            # newpacket = signed.Packet(
+            #     commands.Data(), localID, localID, packetID,
+            #     Payload, supplierId)
+            # pkt_out = gateway.outbox(newpacket, callbacks={
+            #     commands.Ack(): self._on_supplier_acked,
+            #     commands.Fail(): self._on_supplier_acked, })
             if pkt_out:
                 self.sending_suppliers.add(supplierId)
                 self.sent_suppliers_number += 1
@@ -370,15 +387,16 @@ class IndexSynchronizer(automat.Automat):
         """
         Action method.
         """
-        packetID = global_id.MakeGlobalID(
-            customer=my_id.getGlobalID(key_alias='master'),
-            path=settings.BackupIndexFileName(),
-        )
-        packetsToCancel = packet_out.search_by_backup_id(packetID)
-        for pkt_out in packetsToCancel:
-            if pkt_out.outpacket.Command == commands.Retrieve():
-                lg.warn('sending "cancel" to %s' % pkt_out)
-                pkt_out.automat('cancel')
+#         packetID = global_id.MakeGlobalID(
+#             customer=my_id.getGlobalID(key_alias='master'),
+#             path=settings.BackupIndexFileName(),
+#         )
+#         packetsToCancel = packet_out.search_by_backup_id(packetID)
+#         for pkt_out in packetsToCancel:
+#             if pkt_out.outpacket.Command == commands.Retrieve():
+#                 lg.warn('sending "cancel" to %s addressed to %s from index_synchronizer' % (
+#                     pkt_out, pkt_out.remote_idurl, ))
+#                 pkt_out.automat('cancel')
 
     def doCheckVersion(self, arg):
         """
@@ -399,14 +417,16 @@ class IndexSynchronizer(automat.Automat):
 
     def _on_supplier_response(self, newpacket, pkt_out):
         if newpacket.Command == commands.Data():
-            self.requesting_suppliers.discard(newpacket.RemoteID)
+            wrapped_packet = signed.Unserialize(newpacket.Payload)
+            if not wrapped_packet or not wrapped_packet.Valid():
+                lg.err('incoming Data() is not valid')
+                return
+            from storage import backup_control
+            backup_control.IncomingSupplierBackupIndex(wrapped_packet)
+            # p2p_service.SendAck(newpacket)
+            self.requesting_suppliers.discard(wrapped_packet.RemoteID)
         elif newpacket.Command == commands.Fail():
             self.requesting_suppliers.discard(newpacket.OwnerID)
-#             sc = supplier_connector.by_idurl(newpacket.OwnerID)
-#             if sc:
-#                 sc.automat('fail', newpacket)
-#             else:
-#                 raise Exception('supplier connector was not found')
         else:
             raise Exception('wrong type of response')
         if _Debug:

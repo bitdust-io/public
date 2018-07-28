@@ -1,16 +1,14 @@
-pip
-twisted<17
-pyasn1
-pycrypto
-pyOpenSSL
+twisted
+pycryptodomex
+# pyasn1
+# pycrypto
+# pyOpenSSL
 pyparsing
 appdirs
-CodernityDB
-cryptography
-service_identity
+# cryptography
+# service_identity
 psutil
-enum34
-ipaddress
+# enum34
+# ipaddress
 cffi
-pkgversion
-# django<1.10  # if only you want to have a gui
+# pkgversion

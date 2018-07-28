@@ -32,14 +32,17 @@ Here is a bunch of methods to interact with BitDust software.
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
+_DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
 import os
+import sys
 import time
+import json
 
-from twisted.internet.defer import Deferred, succeed
+from twisted.internet.defer import Deferred
 
 from logs import lg
 
@@ -64,6 +67,9 @@ def OK(result='', message=None, status='OK', extra_fields=None):
     if extra_fields is not None:
         o.update(extra_fields)
     o = on_api_result_prepared(o)
+    api_method = sys._getframe().f_back.f_code.co_name
+    if _Debug:
+        lg.out(_DebugLevel, 'api.%s return OK(%s)' % (api_method, json.dumps(o, sort_keys=True)[:150]))
     return o
 
 
@@ -77,6 +83,9 @@ def RESULT(result=[], message=None, status='OK', errors=None, source=None):
     if errors is not None:
         o['errors'] = errors
     o = on_api_result_prepared(o)
+    api_method = sys._getframe().f_back.f_code.co_name
+    if _Debug:
+        lg.out(_DebugLevel, 'api.%s return RESULT(%s)' % (api_method, json.dumps(o, sort_keys=True)[:150]))
     return o
 
 
@@ -88,6 +97,9 @@ def ERROR(errors=[], message=None, status='ERROR', extra_fields=None):
     if extra_fields is not None:
         o.update(extra_fields)
     o = on_api_result_prepared(o)
+    api_method = sys._getframe().f_back.f_code.co_name
+    if _Debug:
+        lg.out(_DebugLevel, 'api.%s return ERROR(%s)' % (api_method, json.dumps(o, sort_keys=True)[:150]))
     return o
 
 #------------------------------------------------------------------------------
@@ -140,14 +152,20 @@ def show():
         {'status': 'OK',   'result': '"show" event has been sent to the main process'}
     """
     lg.out(4, 'api.show')
-    from main import settings
-    if settings.NewWebGUI():
-        from web import control
-        control.show()
-    else:
-        from web import webcontrol
-        webcontrol.show()
+    # TODO: raise up electron window ?
     return OK('"show" event has been sent to the main process')
+
+def health():
+    """
+    Returns true if system is running 
+
+    Return:
+
+        {'status': 'OK' }
+    """
+    lg.out(4, 'api.health')
+
+    return OK()
 
 #------------------------------------------------------------------------------
 
@@ -298,7 +316,7 @@ def identity_get(include_xml_source=False):
     """
     from userid import my_id
     if not my_id.isLocalIdentityReady():
-        return ERROR('local identity is not exist')
+        return ERROR('local identity is not valid or not exist')
     r = my_id.getLocalIdentity().serialize_json()
     if include_xml_source:
         r['xml'] = my_id.getLocalIdentity().serialize()
@@ -383,6 +401,17 @@ def identity_recover(private_key_source, known_idurl=None):
     my_id_restorer.A('start', {'idurl': idurl, 'keysrc': pk_source, })
     return ret
 
+def identity_list():
+    """
+    """
+    from contacts import identitycache
+    results = []
+    for id_obj in identitycache.Items().values():
+        r = id_obj.serialize_json()
+        results.append(r)
+    results.sort(key=lambda r: r['name'])
+    return RESULT(results)
+
 #------------------------------------------------------------------------------
 
 def key_get(key_id, include_private=False):
@@ -423,7 +452,7 @@ def keys_list(sort=False, include_private=False):
         {'status': 'OK',
          'result': [{
              'alias': 'master',
-             'id': 'master$veselin@p2p-id.ru',
+             'key_id': 'master$veselin@p2p-id.ru',
              'creator': 'http://p2p-id.ru/veselin.xml',
              'fingerprint': '60:ce:ea:98:bf:3d:aa:ba:29:1e:b9:0c:3e:5c:3e:32',
              'size': '2048',
@@ -433,7 +462,7 @@ def keys_list(sort=False, include_private=False):
              'private': '-----BEGIN RSA PRIVATE KEY-----\nMIIJKAIBAAKCAgEAj8uw...'
          }, {
              'alias': 'another_key01',
-             'id': 'another_key01$veselin@p2p-id.ru',
+             'key_id': 'another_key01$veselin@p2p-id.ru',
              'creator': 'http://p2p-id.ru/veselin.xml',
              'fingerprint': '43:c8:3b:b6:da:3e:8a:3c:48:6f:92:bb:74:b4:05:6b',
              'size': '4096',
@@ -462,7 +491,7 @@ def keys_list(sort=False, include_private=False):
     return RESULT(r)
 
 
-def key_create(key_alias, key_size=4096, include_private=False):
+def key_create(key_alias, key_size=2048, include_private=False):
     """
     Generate new Private Key and add it to the list of known keys with given `key_id`.
 
@@ -485,9 +514,10 @@ def key_create(key_alias, key_size=4096, include_private=False):
     from crypt import my_keys
     from userid import my_id
     key_alias = str(key_alias)
-    # TODO: add validation for key_alias
     key_alias = key_alias.strip().lower()
     key_id = my_keys.make_key_id(key_alias, creator_idurl=my_id.getLocalID())
+    if not my_keys.is_valid_key_id(key_id):
+        return ERROR('key "%s" is not valid' % key_id)
     if my_keys.is_key_registered(key_id):
         return ERROR('key "%s" already exist' % key_id)
     lg.out(4, 'api.key_create id=%s, size=%s' % (key_id, key_size))
@@ -539,14 +569,14 @@ def key_share(key_id, trusted_global_id_or_idurl, include_private=False, timeout
         trusted_global_id_or_idurl = str(trusted_global_id_or_idurl)
         full_key_id = str(key_id)
     except:
-        return succeed(ERROR('error reading input parameters'))
+        return ERROR('error reading input parameters')
     if not driver.is_on('service_keys_registry'):
-        return succeed(ERROR('service_keys_registry() is not started'))
+        return ERROR('service_keys_registry() is not started')
     glob_id = global_id.ParseGlobalID(full_key_id)
     if glob_id['key_alias'] == 'master':
-        return succeed(ERROR('"master" key can not be shared'))
+        return ERROR('"master" key can not be shared')
     if not glob_id['key_alias'] or not glob_id['idurl']:
-        return succeed(ERROR('icorrect key_id format'))
+        return ERROR('icorrect key_id format')
     idurl = trusted_global_id_or_idurl
     if global_id.IsValidGlobalUser(idurl):
         idurl = global_id.GlobalUserToIDURL(idurl)
@@ -576,12 +606,12 @@ def key_audit(key_id, untrusted_global_id_or_idurl, is_private=False, timeout=10
         untrusted_global_id_or_idurl = str(untrusted_global_id_or_idurl)
         full_key_id = str(key_id)
     except:
-        return succeed(ERROR('error reading input parameters'))
+        return ERROR('error reading input parameters')
     if not driver.is_on('service_keys_registry'):
-        return succeed(ERROR('service_keys_registry() is not started'))
+        return ERROR('service_keys_registry() is not started')
     glob_id = global_id.ParseGlobalID(full_key_id)
     if not glob_id['key_alias'] or not glob_id['idurl']:
-        return succeed(ERROR('icorrect key_id format'))
+        return ERROR('icorrect key_id format')
     if global_id.IsValidGlobalUser(untrusted_global_id_or_idurl):
         idurl = global_id.GlobalUserToIDURL(untrusted_global_id_or_idurl)
     else:
@@ -655,13 +685,15 @@ def files_sync():
     """
     if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
+    if _Debug:
+        lg.out(_DebugLevel, 'api.files_sync')
     from storage import backup_monitor
     backup_monitor.A('restart')
     lg.out(4, 'api.files_sync')
     return OK('the main files sync loop has been restarted')
 
 
-def files_list(remote_path=None, key_id=None, recursive=True):
+def files_list(remote_path=None, key_id=None, recursive=True, all_customers=False):
     """
     Returns list of known files registered in the catalog under given `remote_path` folder.
     By default returns items from root of the catalog.
@@ -703,8 +735,10 @@ def files_list(remote_path=None, key_id=None, recursive=True):
     """
     if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
+    if _Debug:
+        lg.out(_DebugLevel, 'api.files_list remote_path=%s key_id=%s recursive=%s all_customers=%s' % (
+            remote_path, key_id, recursive, all_customers))
     from storage import backup_fs
-    from lib import packetid
     from system import bpio
     from userid import global_id
     from crypt import my_keys
@@ -713,14 +747,28 @@ def files_list(remote_path=None, key_id=None, recursive=True):
     norm_path = global_id.NormalizeGlobalID(glob_path.copy())
     remotePath = bpio.remotePath(norm_path['path'])
     customer_idurl = norm_path['idurl']
-    if customer_idurl not in backup_fs.known_customers():
+    if not all_customers and customer_idurl not in backup_fs.known_customers():
         return ERROR('customer "%s" not found' % customer_idurl)
-    lookup = backup_fs.ListChildsByPath(
-        path=remotePath,
-        recursive=recursive,
-        iter=backup_fs.fs(customer_idurl),
-        iterID=backup_fs.fsID(customer_idurl),
-    )
+    if all_customers:
+        lookup = []
+        for customer_idurl in backup_fs.known_customers():
+            look = backup_fs.ListChildsByPath(
+                path=remotePath,
+                recursive=recursive,
+                iter=backup_fs.fs(customer_idurl),
+                iterID=backup_fs.fsID(customer_idurl),
+            )
+            if isinstance(look, list):
+                lookup.extend(look)
+            else:
+                lg.warn(look)
+    else:
+        lookup = backup_fs.ListChildsByPath(
+            path=remotePath,
+            recursive=recursive,
+            iter=backup_fs.fs(customer_idurl),
+            iterID=backup_fs.fsID(customer_idurl),
+        )
     if not isinstance(lookup, list):
         return ERROR(lookup)
     for i in lookup:
@@ -735,14 +783,20 @@ def files_list(remote_path=None, key_id=None, recursive=True):
                 continue
         key_alias = 'master'
         if i['item']['k']:
-            key_alias = packetid.KeyAlias(i['item']['k'])
-        full_glob_id = global_id.MakeGlobalID(path=i['path_id'], customer=norm_path['customer'], key_alias=key_alias, )
-        full_remote_path = global_id.MakeGlobalID(path=i['path'], customer=norm_path['customer'], key_alias=key_alias, )
+            real_key_id = i['item']['k']
+            key_alias, real_idurl = my_keys.split_key_id(real_key_id)
+            real_customer_id = global_id.UrlToGlobalID(real_idurl)
+        else:
+            real_key_id = my_keys.make_key_id(alias='master', creator_idurl=customer_idurl)
+            real_idurl = customer_idurl
+            real_customer_id = global_id.UrlToGlobalID(customer_idurl)
+        full_glob_id = global_id.MakeGlobalID(path=i['path_id'], customer=real_customer_id, key_alias=key_alias, )
+        full_remote_path = global_id.MakeGlobalID(path=i['path'], customer=real_customer_id, key_alias=key_alias, )
         result.append({
             'remote_path': full_remote_path,
             'global_id': full_glob_id,
-            'customer': norm_path['customer'],
-            'idurl': customer_idurl,
+            'customer': real_customer_id,
+            'idurl': real_idurl,
             'path_id': i['path_id'],
             'name': i['name'],
             'path': i['path'],
@@ -750,12 +804,13 @@ def files_list(remote_path=None, key_id=None, recursive=True):
             'size': i['total_size'],
             'local_size': i['item']['s'],
             'latest': i['latest'],
-            'key_id': i['item']['k'],
+            'key_id': real_key_id,
             'key_alias': key_alias,
             'childs': i['childs'],
             'versions': i['versions'],
         })
-    lg.out(4, 'api.files_list %d items returned' % len(result))
+    if _Debug:
+        lg.out(_DebugLevel, '    %d items returned' % len(result))
     return RESULT(result)
 
 
@@ -764,6 +819,9 @@ def file_info(remote_path, include_uploads=True, include_downloads=True):
     """
     if not driver.is_on('service_restores'):
         return ERROR('service_restores() is not started')
+    if _Debug:
+        lg.out(_DebugLevel, 'api.file_info remote_path=%s include_uploads=%s include_downloads=%s' % (
+            remote_path, include_uploads, include_downloads))
     from storage import backup_fs
     from lib import misc
     from lib import packetid
@@ -791,7 +849,9 @@ def file_info(remote_path, include_uploads=True, include_downloads=True):
         'remote_path': global_id.MakeGlobalID(
             path=norm_path['path'], customer=norm_path['customer'], key_alias=key_alias,),
         'global_id': global_id.MakeGlobalID(
-            path=norm_path['path_id'], customer=norm_path['customer'], key_alias=key_alias,),
+            path=pathID,
+            customer=norm_path['customer'],
+            key_alias=key_alias, ),
         'customer': norm_path['customer'],
         'path_id': pathID,
         'path': remotePath,
@@ -849,15 +909,15 @@ def file_info(remote_path, include_uploads=True, include_downloads=True):
             d = restore_monitor.GetWorkingRestoreObject(backupID)
             if d:
                 downloads.append({
-                    'backup_id': r.BackupID,
-                    'creator_id': r.CreatorID,
-                    'path_id': r.PathID,
-                    'version': r.Version,
-                    'block_number': r.BlockNumber,
-                    'bytes_processed': r.BytesWritten,
+                    'backup_id': r.backup_id,
+                    'creator_id': r.creator_id,
+                    'path_id': r.path_id,
+                    'version': r.version,
+                    'block_number': r.block_number,
+                    'bytes_processed': r.bytes_written,
                     'created': time.asctime(time.localtime(r.Started)),
-                    'aborted': r.AbortState,
-                    'done': r.Done,
+                    'aborted': r.abort_flag,
+                    'done': r.done_flag,
                     'eccmap': '' if not r.EccMap else r.EccMap.name,
                 })
         r['downloads'] = downloads
@@ -870,10 +930,13 @@ def file_create(remote_path, as_folder=False):
     """
     if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
+    if _Debug:
+        lg.out(_DebugLevel, 'api.file_create remote_path=%s as_folder=%s' % (
+            remote_path, as_folder, ))
     from storage import backup_fs
     from storage import backup_control
     from system import bpio
-    from web import control
+    from main import control
     from userid import global_id
     from crypt import my_keys
     parts = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
@@ -947,11 +1010,13 @@ def file_delete(remote_path):
     """
     if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
+    if _Debug:
+        lg.out(_DebugLevel, 'api.file_delete remote_path=%s' % remote_path)
     from storage import backup_fs
     from storage import backup_control
     from storage import backup_monitor
     from main import settings
-    from web import control
+    from main import control
     from lib import packetid
     from system import bpio
     from userid import global_id
@@ -1026,8 +1091,10 @@ def files_uploads(include_running=True, include_pending=True):
         return ERROR('service_backups() is not started')
     from lib import misc
     from storage import backup_control
-    lg.out(4, 'api.files_uploads  %d is running, %d is pending' % (
-        len(backup_control.jobs()), len(backup_control.tasks())))
+    if _Debug:
+        lg.out(_DebugLevel, 'api.file_uploads include_running=%s include_pending=%s' % (include_running, include_pending, ))
+        lg.out(_DebugLevel, '     %d jobs running, %d tasks pending' % (
+            len(backup_control.jobs()), len(backup_control.tasks())))
     r = {'running': [], 'pending': [], }
     if include_running:
         r['running'].extend([{
@@ -1058,16 +1125,19 @@ def files_uploads(include_running=True, include_pending=True):
     return RESULT(r)
 
 
-def file_upload_start(local_path, remote_path, wait_result=True):
+def file_upload_start(local_path, remote_path, wait_result=False, open_share=False):
     """
     """
     if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
+    if _Debug:
+        lg.out(_DebugLevel, 'api.file_upload_start local_path=%s remote_path=%s wait_result=%s open_share=%s' % (
+            local_path, remote_path, wait_result, open_share, ))
     from system import bpio
     from storage import backup_fs
     from storage import backup_control
     from lib import packetid
-    from web import control
+    from main import control
     from userid import global_id
     from crypt import my_keys
     if not bpio.pathExist(local_path):
@@ -1082,6 +1152,13 @@ def file_upload_start(local_path, remote_path, wait_result=True):
         return ERROR('path "%s" not registered yet' % path)
     customerID = global_id.MakeGlobalID(customer=parts['customer'], key_alias=parts['key_alias'])
     pathIDfull = packetid.MakeBackupID(customerID, pathID)
+    if open_share and parts['key_alias'] != 'master':
+        from access import shared_access_coordinator
+        active_share = shared_access_coordinator.get_active_share(keyID)
+        if not active_share:
+            active_share = shared_access_coordinator.SharedAccessCoordinator(
+                keyID, log_events=True, publish_events=True, )
+        active_share.automat('restart')
     if wait_result:
         d = Deferred()
         tsk = backup_control.StartSingle(
@@ -1135,6 +1212,8 @@ def file_upload_stop(remote_path):
     """
     if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
+    if _Debug:
+        lg.out(_DebugLevel, 'api.file_upload_stop remote_path=%s' % remote_path)
     from storage import backup_control
     from storage import backup_fs
     from system import bpio
@@ -1189,23 +1268,25 @@ def files_downloads():
     if not driver.is_on('service_restores'):
         return ERROR('service_restores() is not started')
     from storage import restore_monitor
-    lg.out(4, 'api.files_downloads %d items downloading at the moment' % len(restore_monitor.GetWorkingObjects()))
+    if _Debug:
+        lg.out(_DebugLevel, 'api.files_downloads')
+        lg.out(_DebugLevel, '    %d items downloading at the moment' % len(restore_monitor.GetWorkingObjects()))
     return RESULT([{
-        'backup_id': r.BackupID,
-        'creator_id': r.CreatorID,
-        'path_id': r.PathID,
-        'version': r.Version,
-        'block_number': r.BlockNumber,
-        'bytes_processed': r.BytesWritten,
+        'backup_id': r.backup_id,
+        'creator_id': r.creator_id,
+        'path_id': r.path_id,
+        'version': r.version,
+        'block_number': r.block_number,
+        'bytes_processed': r.bytes_written,
         'created': time.asctime(time.localtime(r.Started)),
-        'aborted': r.AbortState,
-        'done': r.Done,
-        'key_id': r.KeyID,
+        'aborted': r.abort_flag,
+        'done': r.done_flag,
+        'key_id': r.key_id,
         'eccmap': '' if not r.EccMap else r.EccMap.name,
     } for r in restore_monitor.GetWorkingObjects()])
 
 
-def file_download_start(remote_path, destination_path=None, wait_result=False):
+def file_download_start(remote_path, destination_path=None, wait_result=False, open_share=True):
     """
     Download data from remote suppliers to your local machine. You can use
     different methods to select the target data with `remote_path` input:
@@ -1225,18 +1306,19 @@ def file_download_start(remote_path, destination_path=None, wait_result=False):
     """
     if not driver.is_on('service_restores'):
         return ERROR('service_restores() is not started')
+    if _Debug:
+        lg.out(_DebugLevel, 'api.file_download_start remote_path=%s destination_path=%s wait_result=%s open_share=%s' % (
+            remote_path, destination_path, wait_result, open_share, ))
     from storage import backup_fs
     from storage import backup_control
     from storage import restore_monitor
-    from web import control
+    from main import control
     from system import bpio
     from lib import packetid
     from main import settings
     from userid import my_id
     from userid import global_id
     from crypt import my_keys
-    lg.out(4, 'api.file_download_start %s to %s, wait_result=%s' % (
-        remote_path, destination_path, wait_result))
     glob_path = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
     if packetid.Valid(glob_path['path']):
         _, pathID, version = packetid.SplitBackupID(remote_path)
@@ -1284,59 +1366,109 @@ def file_download_start(remote_path, destination_path=None, wait_result=False):
         destination_path = settings.getRestoreDir()
     if not destination_path:
         destination_path = settings.DefaultRestoreDir()
-    if wait_result:
-        d = Deferred()
-
-        def _on_result(backupID, result):
-            if result == 'restore done':
-                d.callback(OK(
-                    result,
-                    'version "%s" downloaded to "%s"' % (backupID, destination_path),
-                    extra_fields={
-                        'backup_id': backupID,
-                        'local_path': destination_path,
-                        'path_id': pathID_target,
-                        'remote_path': knownPath,
-                    },
-                ))
-            else:
-                d.callback(ERROR(
-                    'downloading version "%s" failed, result: %s' % (backupID, result),
-                    extra_fields={
-                        'backup_id': backupID,
-                        'local_path': destination_path,
-                        'path_id': pathID_target,
-                        'remote_path': knownPath,
-                    },
-                ))
-            return True
-
-        restore_monitor.Start(
-            backupID, destination_path,
-            keyID=my_keys.make_key_id(alias=glob_path['key_alias'], creator_glob_id=glob_path['customer']),
-            callback=_on_result)
+    key_id = my_keys.make_key_id(alias=glob_path['key_alias'], creator_glob_id=glob_path['customer'])
+    ret = Deferred()
+        
+    def _on_result(backupID, result):
+        if result == 'restore done':
+            ret.callback(OK(
+                result,
+                'version "%s" downloaded to "%s"' % (backupID, destination_path),
+                extra_fields={
+                    'backup_id': backupID,
+                    'local_path': destination_path,
+                    'path_id': pathID_target,
+                    'remote_path': knownPath,
+                },
+            ))
+        else:
+            ret.callback(ERROR(
+                'downloading version "%s" failed, result: %s' % (backupID, result),
+                extra_fields={
+                    'backup_id': backupID,
+                    'local_path': destination_path,
+                    'path_id': pathID_target,
+                    'remote_path': knownPath,
+                },
+            ))
+        return True
+    
+    def _start_restore():
+        if wait_result:
+            lg.out(4, 'api.file_download_start %s to %s, wait_result=True' % (backupID, destination_path))
+            restore_monitor.Start(backupID, destination_path, keyID=key_id, callback=_on_result)
+            control.request_update([('pathID', knownPath), ])
+            return ret
+        lg.out(4, 'api.download_start %s to %s' % (backupID, destination_path))
+        restore_monitor.Start(backupID, destination_path, keyID=key_id, )
         control.request_update([('pathID', knownPath), ])
-        lg.out(4, 'api.file_download_start %s to %s, wait_result=True' % (backupID, destination_path))
-        return d
-    restore_monitor.Start(
-        backupID,
-        destination_path,
-        keyID=my_keys.make_key_id(
-            alias=glob_path['key_alias'],
-            creator_glob_id=glob_path['customer'],
-        ),
-    )
-    control.request_update([('pathID', knownPath), ])
-    lg.out(4, 'api.download_start %s to %s' % (backupID, destination_path))
-    return OK(
-        'started',
-        'downloading of version "%s" has been started to "%s"' % (backupID, destination_path),
-        extra_fields={
-            'backup_id': backupID,
-            'local_path': destination_path,
-            'path_id': pathID_target,
-            'remote_path': knownPath,
-        },)
+        ret.callback(OK(
+            'started',
+            'downloading of version "%s" has been started to "%s"' % (backupID, destination_path),
+            extra_fields={
+                'key_id': key_id,
+                'backup_id': backupID,
+                'local_path': destination_path,
+                'path_id': pathID_target,
+                'remote_path': knownPath,
+            },
+        ))
+        return True
+    
+    def _share_state_changed(callback_id, active_share, oldstate, newstate, event_string, args):
+        if oldstate != newstate and newstate == 'CONNECTED':
+            lg.out(4, 'api.download_start share %s is CONNECTED, removing callback %s' % (
+                active_share.key_id, callback_id,))
+            active_share.removeStateChangedCallback(callback_id=callback_id)
+            _start_restore()
+            return True
+        if oldstate != newstate and newstate == 'DISCONNECTED':
+            lg.out(4, 'api.download_start share %s is DISCONNECTED, removing callback %s' % (
+                active_share.key_id, callback_id,))
+            active_share.removeStateChangedCallback(callback_id=callback_id)
+            ret.callback(ERROR(
+                'downloading version "%s" failed, result: %s' % (backupID, 'share disconnected'),
+                extra_fields={
+                    'key_id': active_share.key_id,
+                    'backup_id': backupID,
+                    'local_path': destination_path,
+                    'path_id': pathID_target,
+                    'remote_path': knownPath,
+                },
+            ))
+            return True
+        return False
+
+    def _open_share():
+        from access import shared_access_coordinator
+        active_share = shared_access_coordinator.get_active_share(key_id)
+        if not active_share:
+            active_share = shared_access_coordinator.SharedAccessCoordinator(
+                key_id, log_events=True, publish_events=True, )
+            lg.out(4, 'api.download_start opened new share : %s' % active_share.key_id)
+        else:
+            lg.out(4, 'api.download_start found existing share : %s' % active_share.key_id)
+        if active_share.state != 'CONNECTED':
+            cb_id = 'file_download_start_' + str(time.time())
+            active_share.addStateChangedCallback(
+                cb=lambda o, n, e, a: _share_state_changed(cb_id, active_share, o, n, e, a),
+                callback_id=cb_id,
+            )
+            active_share.automat('restart')
+            lg.out(4, 'api.download_start added callback %s to the active share : %s' % (cb_id, active_share.key_id))
+        else:
+            lg.out(4, 'api.download_start existing share %s is currently CONNECTED' % active_share.key_id)
+            _start_restore()
+        return True
+
+    if open_share and key_alias != 'master':
+        _open_share()
+    else:
+        if _Debug:
+            lg.out(_DebugLevel, '    "open_share" skipped, starting restore')
+        _start_restore()
+    
+    return ret
 
 
 def file_download_stop(remote_path):
@@ -1349,6 +1481,8 @@ def file_download_stop(remote_path):
     """
     if not driver.is_on('service_restores'):
         return ERROR('service_restores() is not started')
+    if _Debug:
+        lg.out(_DebugLevel, 'api.file_download_stop remote_path=%s' % remote_path)
     from storage import backup_fs
     from storage import restore_monitor
     from system import bpio
@@ -1391,7 +1525,8 @@ def file_download_stop(remote_path):
     r = []
     for backupID in backupIDs:
         r.append({'backup_id': backupID, 'aborted': restore_monitor.Abort(backupID), })
-    lg.out(4, 'api.file_download_stop %s' % r)
+    if _Debug:
+        lg.out(_DebugLevel, '    stopping %s' % r)
     return RESULT(r)
 
 
@@ -1408,20 +1543,87 @@ def file_explore(local_path):
 
 #------------------------------------------------------------------------------
 
-def share_create(key_alias, remote_path=None):
+def share_list(only_active=False, include_mine=True, include_granted=True):
     """
     """
     if not driver.is_on('service_shared_data'):
-        return succeed(ERROR('service_shared_data() is not started'))
-    ret = Deferred()
-    return ret
+        return ERROR('service_shared_data() is not started')
+    from access import shared_access_coordinator
+    from crypt import my_keys
+    from userid import global_id
+    from userid import my_id
+    results = []
+    if only_active:
+        for key_id in shared_access_coordinator.list_active_shares():
+            _glob_id = global_id.ParseGlobalID(key_id)
+            to_be_listed = False
+            if include_mine and _glob_id['idurl'] == my_id.getLocalIDURL():
+                to_be_listed = True
+            if include_granted and _glob_id['idurl'] != my_id.getLocalIDURL():
+                to_be_listed = True
+            if not to_be_listed:
+                continue
+            cur_share = shared_access_coordinator.get_active_share(key_id)
+            if not cur_share:
+                lg.warn('share %s not found' % key_id)
+                continue
+            results.append(cur_share.to_json())
+        return RESULT(results)
+    for key_id in my_keys.known_keys():
+        if not key_id.startswith('share_'):
+            continue
+        _glob_id = global_id.ParseGlobalID(key_id)
+        to_be_listed = False
+        if include_mine and _glob_id['idurl'] == my_id.getLocalIDURL():
+            to_be_listed = True
+        if include_granted and _glob_id['idurl'] != my_id.getLocalIDURL():
+            to_be_listed = True
+        if not to_be_listed:
+            continue
+        results.append({
+            'key_id': key_id,
+            'idurl': _glob_id['idurl'],
+            'state': None,
+            'suppliers': [],
+        })
+    return RESULT(results)
+
+
+def share_create(owner_id=None, key_size=2048):
+    """
+    """
+    if not driver.is_on('service_shared_data'):
+        return ERROR('service_shared_data() is not started')
+    from crypt import key
+    from crypt import my_keys
+    from userid import my_id
+    if not owner_id:
+        owner_id = my_id.getGlobalID()
+    key_id = None
+    while True:
+        random_sample = os.urandom(24)
+        key_alias = 'share_%s' % key.HashMD5(random_sample, hexdigest=True)
+        key_id = my_keys.make_key_id(alias=key_alias, creator_glob_id=owner_id)
+        if my_keys.is_key_registered(key_id):
+            continue
+        break
+    key_object = my_keys.generate_key(key_id, key_size=key_size)
+    if key_object is None:
+        return ERROR('failed to generate private key "%s"' % key_id)
+    return OK(my_keys.make_key_info(
+        key_object,
+        key_id=key_id,
+        include_private=False,
+    ), message='new share "%s" was generated successfully' % key_id, )
 
 
 def share_grant(trusted_remote_user, key_id):
     """
     """
     if not driver.is_on('service_shared_data'):
-        return succeed(ERROR('service_shared_data() is not started'))
+        return ERROR('service_shared_data() is not started')
+    if not key_id.startswith('share_'):
+        return ERROR('invlid share name')
     from userid import global_id
     remote_idurl = trusted_remote_user
     if trusted_remote_user.count('@'):
@@ -1443,10 +1645,7 @@ def share_grant(trusted_remote_user, key_id):
     d = Deferred()
     d.addCallback(_on_shared_access_donor_success)
     d.addErrback(_on_shared_access_donor_failed)
-    shared_access_donor_machine = shared_access_donor.SharedAccessDonor(
-        log_events=True,
-        publish_events=True,
-    )
+    shared_access_donor_machine = shared_access_donor.SharedAccessDonor(log_events=True, publish_events=True, )
     shared_access_donor_machine.automat('init', (remote_idurl, key_id, d, ))
     return ret
 
@@ -1455,38 +1654,31 @@ def share_open(key_id):
     """
     """
     if not driver.is_on('service_shared_data'):
-        return succeed(ERROR('service_shared_data() is not started'))
+        return ERROR('service_shared_data() is not started')
+    if not key_id.startswith('share_'):
+        return ERROR('invlid share name')
     from access import shared_access_coordinator
-    if shared_access_coordinator.get_active_share(key_id):
-        return ERROR('share already opened')
+    active_share = shared_access_coordinator.get_active_share(key_id)
+    new_share = False
+    if not active_share:
+        new_share = True
+        active_share = shared_access_coordinator.SharedAccessCoordinator(key_id, log_events=True, publish_events=True, )
     ret = Deferred()
 
-    def _on_shared_access_coordinator_success(result):
-        lg.info(result)
-        if not result:
-            ret.callback(ERROR('failed opening share "%s"' % key_id))
-            return None
-        this_share = shared_access_coordinator.get_active_share(key_id)
-        if not this_share:
-            ret.callback(ERROR('share "%s" was not opened' % key_id))
-            return None
-        ret.callback(OK('share "%s" opened' % key_id, extra_fields=this_share.to_json()))
+    def _on_shared_access_coordinator_state_changed(oldstate, newstate, event_string, args):
+        active_share.removeStateChangedCallback(_on_shared_access_coordinator_state_changed)
+        if newstate == 'CONNECTED':
+            if new_share:
+                ret.callback(OK('share "%s" opened' % key_id, extra_fields=active_share.to_json()))
+            else:
+                ret.callback(OK('share "%s" refreshed' % key_id, extra_fields=active_share.to_json()))
+        else:
+            ret.callback(ERROR('share "%s" was not opened' % key_id, extra_fields=active_share.to_json()))
         return None
 
-    def _on_shared_access_donor_failed(err):
-        lg.err(err)
-        ret.callback(ERROR(err.getErrorMessage()))
-        return None
-
-    d = Deferred()
-    d.addCallback(_on_shared_access_coordinator_success)
-    d.addErrback(_on_shared_access_donor_failed)
-    shared_access_coordinator_machine = shared_access_coordinator.SharedAccessCoordinator(
-        key_id,
-        log_events=True,
-        publish_events=True,
-    )
-    shared_access_coordinator_machine.automat('restart')
+    active_share.addStateChangedCallback(_on_shared_access_coordinator_state_changed, oldstate=None, newstate='CONNECTED')
+    active_share.addStateChangedCallback(_on_shared_access_coordinator_state_changed, oldstate=None, newstate='DISCONNECTED')
+    active_share.automat('restart')
     return ret
 
 
@@ -1494,7 +1686,9 @@ def share_close(key_id):
     """
     """
     if not driver.is_on('service_shared_data'):
-        return succeed(ERROR('service_shared_data() is not started'))
+        return ERROR('service_shared_data() is not started')
+    if not key_id.startswith('share_'):
+        return ERROR('invlid share name')
     from access import shared_access_coordinator
     this_share = shared_access_coordinator.get_active_share(key_id)
     if not this_share:
@@ -1503,40 +1697,11 @@ def share_close(key_id):
     return OK('share "%s" closed' % key_id, extra_fields=this_share.to_json())
 
 
-def share_refresh(key_id):
-    """
-    """
-    if not driver.is_on('service_shared_data'):
-        return succeed(ERROR('service_shared_data() is not started'))
-    from access import shared_access_coordinator
-    this_share = shared_access_coordinator.get_active_share(key_id)
-    if not this_share:
-        return ERROR('this share is not opened')
-    this_share.automat('restart')
-    return OK('share "%s" state machine restarted' % key_id, extra_fields=this_share.to_json())
-
-
-def share_list():
-    """
-    """
-    if not driver.is_on('service_shared_data'):
-        return succeed(ERROR('service_shared_data() is not started'))
-    from access import shared_access_coordinator
-    r = []
-    for key_id in shared_access_coordinator.list_active_shares():
-        cur_share = shared_access_coordinator.get_active_share(key_id)
-        if not cur_share:
-            lg.warn('share %s not found' % key_id)
-            continue
-        r.append(cur_share.to_json())
-    return RESULT(r)
-
-
 def share_history():
     """
     """
     if not driver.is_on('service_shared_data'):
-        return succeed(ERROR('service_shared_data() is not started'))
+        return ERROR('service_shared_data() is not started')
     return RESULT([],)
 
 #------------------------------------------------------------------------------
@@ -1550,12 +1715,22 @@ def friend_list():
     result = []
     for idurl, alias in contactsdb.correspondents():
         glob_id = global_id.ParseIDURL(idurl)
+        contact_status_label = None
+        contact_state = None
+        if driver.is_on('service_identity_propagate'):
+            from p2p import contact_status
+            state_machine_inst = contact_status.getInstance(idurl)
+            if state_machine_inst:
+                contact_status_label = contact_status.stateToLabel(state_machine_inst.state)
+                contact_state = state_machine_inst.state
         result.append({
             'idurl': idurl,
             'global_id': glob_id['customer'],
             'idhost': glob_id['idhost'],
             'username': glob_id['user'],
             'alias': alias,
+            'contact_status': contact_status_label,
+            'contact_state': contact_state,
         })
     return RESULT(result)
 
@@ -1595,7 +1770,7 @@ def friend_remove(idurl_or_global_id):
 
 #------------------------------------------------------------------------------
 
-def suppliers_list(customer_idurl_or_global_id=None):
+def suppliers_list(customer_idurl_or_global_id=None, verbose=False):
     """
     This method returns a list of suppliers - nodes which stores your encrypted data on own machines.
 
@@ -1607,13 +1782,15 @@ def suppliers_list(customer_idurl_or_global_id=None):
             'idurl': 'http://p2p-id.ru/bitdust_j_vps1014.xml',
             'files_count': 14,
             'position': 0,
-            'contact_status': 'offline'
+            'contact_status': 'offline',
+            'contact_state': 'OFFLINE'
          }, {
             'connected': '05-06-2016 13:04:57',
             'idurl': 'http://veselin-p2p.ru/bitdust_j_vps1001.xml',
             'files_count': 14,
             'position': 1,
-            'contact_status': 'offline'
+            'contact_status': 'online'
+            'contact_state': 'CONNECTED'
         }]}
     """
     if not driver.is_on('service_customer'):
@@ -1624,26 +1801,40 @@ def suppliers_list(customer_idurl_or_global_id=None):
     from lib import misc
     from userid import my_id
     from userid import global_id
+    from storage import backup_matrix
     customer_idurl = customer_idurl_or_global_id
-    if customer_idurl is None:
+    if not customer_idurl:
         customer_idurl = my_id.getLocalID()
     else:
         if global_id.IsValidGlobalUser(customer_idurl):
             customer_idurl = global_id.GlobalUserToIDURL(customer_idurl)
-    return RESULT([{
-        'position': pos,
-        'idurl': supplier_idurl,
-        'global_id': global_id.UrlToGlobalID(supplier_idurl),
-        'supplier_state':
-            None if not supplier_connector.is_supplier(supplier_idurl, customer_idurl)
-            else supplier_connector.by_idurl(supplier_idurl, customer_idurl).state,
-        'connected': misc.readSupplierData(supplier_idurl, 'connected', customer_idurl),
-        'files_count': len(misc.readSupplierData(supplier_idurl, 'listfiles', customer_idurl).split('\n')) - 1,
-        'contact_status': contact_status.getStatusLabel(supplier_idurl),
-        'contact_state': (
-            None if not contact_status.isKnown(supplier_idurl)
-            else contact_status.getInstance(supplier_idurl).state),
-    } for (pos, supplier_idurl, ) in enumerate(contactsdb.suppliers(customer_idurl))])
+    results = []
+    for (pos, supplier_idurl, ) in enumerate(contactsdb.suppliers(customer_idurl)):
+        r = {
+            'position': pos,
+            'idurl': supplier_idurl,
+            'global_id': global_id.UrlToGlobalID(supplier_idurl),
+            'supplier_state':
+                None if not supplier_connector.is_supplier(supplier_idurl, customer_idurl)
+                else supplier_connector.by_idurl(supplier_idurl, customer_idurl).state,
+            'connected': misc.readSupplierData(supplier_idurl, 'connected', customer_idurl),
+            'contact_status': None,
+            'contact_state': None,
+        }
+        if contact_status.isKnown(supplier_idurl):
+            cur_state = contact_status.getInstance(supplier_idurl).state
+            r['contact_status'] = contact_status.stateToLabel(cur_state)
+            r['contact_state'] = cur_state
+        if verbose:
+            _files, _total, _report = backup_matrix.GetSupplierStats(pos, customer_idurl=customer_idurl)
+            r['listfiles'] = misc.readSupplierData(supplier_idurl, 'listfiles', customer_idurl)
+            r['fragments'] = {
+                'items': _files,
+                'files': _total,
+                'details': _report,
+            }
+        results.append(r)
+    return RESULT(results)
 
 
 def supplier_replace(index_or_idurl_or_global_id):
@@ -1665,15 +1856,15 @@ def supplier_replace(index_or_idurl_or_global_id):
     customer_idurl = my_id.getLocalID()
     supplier_idurl = index_or_idurl_or_global_id
     if supplier_idurl.isdigit():
-        supplier_idurl = contactsdb.supplier(int(supplier_idurl), customer_idurl)
+        supplier_idurl = contactsdb.supplier(int(supplier_idurl), customer_idurl=customer_idurl)
     else:
         if global_id.IsValidGlobalUser(supplier_idurl):
             supplier_idurl = global_id.GlobalUserToIDURL(supplier_idurl)
-    if supplier_idurl and contactsdb.is_supplier(supplier_idurl, customer_idurl):
+    if supplier_idurl and supplier_idurl and contactsdb.is_supplier(supplier_idurl, customer_idurl=customer_idurl):
         from customer import fire_hire
         fire_hire.AddSupplierToFire(supplier_idurl)
         fire_hire.A('restart')
-        return OK('supplier "%s" will be replaced by new peer' % supplier_idurl)
+        return OK('supplier "%s" will be replaced by new random peer' % supplier_idurl)
     return ERROR('supplier not found')
 
 
@@ -1693,16 +1884,16 @@ def supplier_change(index_or_idurl_or_global_id, new_supplier_idurl_or_global_id
     customer_idurl = my_id.getLocalID()
     supplier_idurl = index_or_idurl_or_global_id
     if supplier_idurl.isdigit():
-        supplier_idurl = contactsdb.supplier(int(supplier_idurl), customer_idurl)
+        supplier_idurl = contactsdb.supplier(int(supplier_idurl), customer_idurl=customer_idurl)
     else:
         if global_id.IsValidGlobalUser(supplier_idurl):
             supplier_idurl = global_id.GlobalUserToIDURL(supplier_idurl)
     new_supplier_idurl = new_supplier_idurl_or_global_id
     if global_id.IsValidGlobalUser(new_supplier_idurl):
         new_supplier_idurl = global_id.GlobalUserToIDURL(new_supplier_idurl)
-    if not contactsdb.is_supplier(supplier_idurl, customer_idurl):
+    if not supplier_idurl or not contactsdb.is_supplier(supplier_idurl, customer_idurl=customer_idurl):
         return ERROR('supplier not found')
-    if contactsdb.is_supplier(new_supplier_idurl, customer_idurl):
+    if contactsdb.is_supplier(new_supplier_idurl, customer_idurl=customer_idurl):
         return ERROR('peer "%s" is your supplier already' % new_supplier_idurl)
     from customer import fire_hire
     from customer import supplier_finder
@@ -1726,10 +1917,33 @@ def suppliers_ping():
     propagate.SlowSendSuppliers(0.1)
     return OK('requests to all suppliers was sent')
 
+
+def suppliers_dht_lookup(customer_idurl_or_global_id):
+    """
+    Scans DHT network for key-value pairs related to given customer and
+    returns a list of his "possible" suppliers.
+    """
+    if not driver.is_on('service_supplier_relations'):
+        return ERROR('service_supplier_relations() is not started')
+    from dht import dht_relations
+    from userid import my_id
+    from userid import global_id
+    customer_idurl = customer_idurl_or_global_id
+    if not customer_idurl:
+        customer_idurl = my_id.getLocalID()
+    else:
+        if global_id.IsValidGlobalUser(customer_idurl):
+            customer_idurl = global_id.GlobalUserToIDURL(customer_idurl)
+    ret = Deferred()
+    d = dht_relations.scan_customer_supplier_relations(customer_idurl)
+    d.addCallback(lambda result_list: ret.callback(RESULT(result_list)))
+    d.addErrback(lambda err: ret.callback(ERROR([err, ])))
+    return ret
+
 #------------------------------------------------------------------------------
 
 
-def customers_list():
+def customers_list(verbose=False):
     """
     List of customers - nodes who stores own data on your machine.
 
@@ -1746,16 +1960,21 @@ def customers_list():
     from contacts import contactsdb
     from p2p import contact_status
     from userid import global_id
-    return RESULT([{
-        'position': pos,
-        'global_id': global_id.UrlToGlobalID(customer_idurl),
-        'idurl': customer_idurl,
-        'contact_status': contact_status.getStatusLabel(customer_idurl),
-        'contact_state': (
-            None if not contact_status.isKnown(customer_idurl)
-            else contact_status.getInstance(customer_idurl).state),
-    } for (pos, customer_idurl, ) in enumerate(contactsdb.customers())])
-
+    results = []
+    for pos, customer_idurl in enumerate(contactsdb.customers()):
+        r = {
+            'position': pos,
+            'global_id': global_id.UrlToGlobalID(customer_idurl),
+            'idurl': customer_idurl,
+            'contact_status': None,
+            'contact_state': None,
+        }
+        if contact_status.isKnown(customer_idurl):
+            cur_state = contact_status.getInstance(customer_idurl).state
+            r['contact_status'] = contact_status.stateToLabel(cur_state)
+            r['contact_state'] = cur_state
+        results.append(r)
+    return RESULT(results)
 
 def customer_reject(idurl_or_global_id):
     """
@@ -1788,6 +2007,7 @@ def customer_reject(idurl_or_global_id):
     current_customers = contactsdb.customers()
     current_customers.remove(customer_idurl)
     contactsdb.update_customers(current_customers)
+    contactsdb.remove_customer_meta_info(customer_idurl)
     contactsdb.save_customers()
     # remove records for this customers from quotas info
     space_dict = accounting.read_customers_quotas()
@@ -2138,10 +2358,10 @@ def packets_stats():
     """
     if not driver.is_on('service_gateway'):
         return ERROR('service_gateway() is not started')
-    from transport import stats
+    from p2p import p2p_stats
     return RESULT([{
-        'in': stats.counters_in(),
-        'out': stats.counters_out(),
+        'in': p2p_stats.counters_in(),
+        'out': p2p_stats.counters_out(),
     }])
 
 
@@ -2363,20 +2583,16 @@ def user_ping(idurl_or_global_id, timeout=10):
     """
     Sends Identity packet to remote peer and wait for Ack packet to check connection status.
     The "ping" command performs following actions:
-
       1. Request remote identity source by idurl,
       2. Sends my Identity to remote contact addresses, taken from identity,
       3. Wait first Ack packet from remote peer,
       4. Failed by timeout or identity fetching error.
-
     You can use this method to check and be sure that remote node is alive at the moment.
-
     Return:
-
         {'status': 'OK', 'result': '(signed.Packet[Ack(Identity) bob|bob for alice], in_70_19828906(DONE))'}
     """
     if not driver.is_on('service_identity_propagate'):
-        return succeed(ERROR('service_identity_propagate() is not started'))
+        return ERROR('service_identity_propagate() is not started')
     from p2p import propagate
     from userid import global_id
     idurl = idurl_or_global_id
@@ -2397,7 +2613,7 @@ def user_status(idurl_or_global_id):
     """
     """
     if not driver.is_on('service_identity_propagate'):
-        return succeed(ERROR('service_identity_propagate() is not started'))
+        return ERROR('service_identity_propagate() is not started')
     from p2p import contact_status
     from userid import global_id
     idurl = idurl_or_global_id
@@ -2414,6 +2630,45 @@ def user_status(idurl_or_global_id):
         'idurl': idurl,
         'global_id': global_id.UrlToGlobalID(idurl),
     }])
+
+
+def user_status_check(idurl_or_global_id, timeout=5):
+    """
+    """
+    if not driver.is_on('service_identity_propagate'):
+        return ERROR('service_identity_propagate() is not started')
+    from p2p import contact_status
+    from userid import global_id
+    idurl = idurl_or_global_id
+    if global_id.IsValidGlobalUser(idurl):
+        idurl = global_id.GlobalUserToIDURL(idurl)
+    peer_status = contact_status.getInstance(idurl)
+    if not peer_status:
+        return ERROR('failed to check peer status')
+    ret = Deferred()
+
+    def _on_peer_status_state_changed(oldstate, newstate, event_string, args):
+        if newstate not in ['CONNECTED', 'OFFLINE', ]:
+            return None
+        if newstate == 'OFFLINE' and oldstate == 'OFFLINE' and not event_string == 'ping-failed':
+            return None
+        ret.callback(OK(extra_fields=dict(
+            idurl=idurl,
+            global_id=global_id.UrlToGlobalID(idurl),
+            contact_state=newstate,
+            contact_status=contact_status.stateToLabel(newstate),
+        )))
+        return None
+
+    def _do_clean(x):
+        peer_status.removeStateChangedCallback(_on_peer_status_state_changed)
+        return x
+
+    ret.addCallback(_do_clean)
+
+    peer_status.addStateChangedCallback(_on_peer_status_state_changed)
+    peer_status.automat('ping', timeout)
+    return ret
 
 
 def user_search(nickname, attempts=1):
@@ -2557,8 +2812,6 @@ def message_send(recipient, json_data, timeout=5):
     glob_id = global_id.ParseGlobalID(recipient)
     if not glob_id['idurl']:
         return ERROR('wrong recipient')
-    if not glob_id['key_alias']:
-        glob_id['key_alias'] = 'master'
     target_glob_id = global_id.MakeGlobalID(**glob_id)
     if not my_keys.is_valid_key_id(target_glob_id):
         return ERROR('invalid key_id: %s' % target_glob_id)
@@ -2714,7 +2967,7 @@ def network_stun(udp_port=None, dht_port=None):
     """
     from stun import stun_client
     ret = Deferred()
-    d = stun_client.safe_stun(udp_port=udp_port, dht_port=udp_port)
+    d = stun_client.safe_stun(udp_port=udp_port, dht_port=dht_port)
     d.addBoth(lambda r: ret.callback(RESULT([r, ])))
     return ret
 
@@ -2744,8 +2997,8 @@ def network_connected(wait_timeout=5):
     """
     if not driver.is_on('service_network'):
         return ERROR('service_network() is not started')
-    from userid import my_id
     from twisted.internet import reactor
+    from userid import my_id
     from automats import automat
     ret = Deferred()
 
@@ -2759,8 +3012,8 @@ def network_connected(wait_timeout=5):
             return ret
 
     if not my_id.isLocalIdentityReady():
-        lg.warn('local identity is not exist')
-        return ERROR('local identity is not exist', extra_fields={'reason': 'identity_not_exist'})
+        lg.warn('local identity is not valid or not exist')
+        return ERROR('local identity is not valid or not exist', extra_fields={'reason': 'identity_not_exist'})
     if not driver.is_enabled('service_network'):
         lg.warn('service_network() is disabled')
         return ERROR('service_network() is disabled', extra_fields={'reason': 'service_network_disabled'})
@@ -2784,7 +3037,7 @@ def network_connected(wait_timeout=5):
                 ret.callback(ERROR('disconnected', extra_fields={'reason': 'p2p_connector_not_exist'}))
                 return None
             if p2p_connector_machine.state != 'CONNECTED':
-                lg.warn('disconnected, reason is "p2p_connector_not_found", sending "check-synchronize" event to p2p_connector()')
+                lg.warn('disconnected, reason is "p2p_connector_disconnected", sending "check-synchronize" event to p2p_connector()')
                 p2p_connector_machine.automat('check-synchronize')
                 ret.callback(ERROR('disconnected', extra_fields={'reason': 'p2p_connector_disconnected'}))
                 return None
@@ -2833,8 +3086,8 @@ def network_connected(wait_timeout=5):
     return ret
 
 
-def network_status(show_suppliers=False, show_customers=False, show_cache=False,
-                   show_tcp=False, show_udp=False, show_proxy=True, ):
+def network_status(show_suppliers=True, show_customers=True, show_cache=True,
+                   show_tcp=True, show_udp=True, show_proxy=True, ):
     """
     """
     if not driver.is_on('service_network'):
@@ -2843,6 +3096,12 @@ def network_status(show_suppliers=False, show_customers=False, show_cache=False,
     from main import settings
     from userid import my_id
     from userid import global_id
+
+    def _tupl_addr_to_str(addr):
+        if not addr:
+            return None
+        return ':'.join(map(str, addr))
+
     r = {
         'p2p_connector_state': None,
         'network_connector_state': None,
@@ -2925,7 +3184,7 @@ def network_status(show_suppliers=False, show_customers=False, show_cache=False,
                     if inst.state == 'CONNECTED':
                         connected += 1
                 items.append(i)
-            r['peers'] = {
+            r['cache'] = {
                 'total': identitycache.CacheLen(),
                 'connected': connected,
                 'peers': items,
@@ -2933,91 +3192,101 @@ def network_status(show_suppliers=False, show_customers=False, show_cache=False,
     if True in [show_tcp, show_udp, show_proxy, ]:
         from transport import gateway
         if show_tcp:
-            if not driver.is_on('service_tcp_transport'):
-                return ERROR('service_tcp_transport() is not started')
-            sessions = []
-            for s in gateway.list_active_sessions('tcp'):
-                i = {
-                    'peer': getattr(s, 'peer', None),
-                    'state': getattr(s, 'state', None),
-                    'id': getattr(s, 'id', None),
-                    'idurl': getattr(s, 'peer_idurl', None),
-                    'address': getattr(s, 'peer_address', None),
-                    'external_address': getattr(s, 'peer_external_address', None),
-                    'connection_address': getattr(s, 'connection_address', None),
-                    'bytes_received': getattr(s, 'total_bytes_received', 0),
-                    'bytes_sent': getattr(s, 'total_bytes_sent', 0),
-                }
-                sessions.append(i)
-            streams = []
-            for s in gateway.list_active_streams('tcp'):
-                i = {
-                    'started': s.started,
-                    'stream_id': s.file_id,
-                    'transfer_id': s.transfer_id,
-                    'size': s.size,
-                    'type': s.typ,
-                }
-                streams.append(i)
             r['tcp'] = {
-                'sessions': sessions,
-                'streams': streams,
+                'sessions': [],
+                'streams': [],
             }
+            if driver.is_on('service_tcp_transport'):
+                sessions = []
+                for s in gateway.list_active_sessions('tcp'):
+                    i = {
+                        'peer': getattr(s, 'peer', None),
+                        'state': getattr(s, 'state', None),
+                        'id': getattr(s, 'id', None),
+                        'idurl': getattr(s, 'peer_idurl', None),
+                        'address': _tupl_addr_to_str(getattr(s, 'peer_address', None)),
+                        'external_address': _tupl_addr_to_str(getattr(s, 'peer_external_address', None)),
+                        'connection_address': _tupl_addr_to_str(getattr(s, 'connection_address', None)),
+                        'bytes_received': getattr(s, 'total_bytes_received', 0),
+                        'bytes_sent': getattr(s, 'total_bytes_sent', 0),
+                    }
+                    sessions.append(i)
+                streams = []
+                for s in gateway.list_active_streams('tcp'):
+                    i = {
+                        'started': s.started,
+                        'stream_id': s.file_id,
+                        'transfer_id': s.transfer_id,
+                        'size': s.size,
+                        'type': s.typ,
+                    }
+                    streams.append(i)
+                r['tcp']['sessions'] = sessions
+                r['tcp']['streams'] = streams
         if show_udp:
-            if not driver.is_on('service_udp_transport'):
-                return ERROR('service_udp_transport() is not started')
-            sessions = []
-            for s in gateway.list_active_sessions('udp'):
-                sessions.append({
-                    'peer': s.peer_id,
-                    'state': s.state,
-                    'id': s.id,
-                    'idurl': s.peer_idurl,
-                    'address': s.peer_address,
-                    'bytes_received': s.bytes_sent,
-                    'bytes_sent': s.bytes_received,
-                    'outgoing': len(s.file_queue.outboxFiles),
-                    'incoming': len(s.file_queue.inboxFiles),
-                    'queue': len(s.file_queue.outboxQueue),
-                    'dead_streams': len(s.file_queue.dead_streams),
-                })
-            streams = []
-            for s in gateway.list_active_streams('udp'):
-                streams.append({
-                    'started': s.started,
-                    'stream_id': s.stream_id,
-                    'transfer_id': s.transfer_id,
-                    'size': s.size,
-                    'type': s.typ,
-                })
             r['udp'] = {
-                'sessions': sessions,
-                'streams': streams,
+                'sessions': [],
+                'streams': [],
             }
+            if driver.is_on('service_udp_transport'):
+                sessions = []
+                for s in gateway.list_active_sessions('udp'):
+                    sessions.append({
+                        'peer': s.peer_id,
+                        'state': s.state,
+                        'id': s.id,
+                        'idurl': s.peer_idurl,
+                        'address': _tupl_addr_to_str(s.peer_address),
+                        'bytes_received': s.bytes_sent,
+                        'bytes_sent': s.bytes_received,
+                        'outgoing': len(s.file_queue.outboxFiles),
+                        'incoming': len(s.file_queue.inboxFiles),
+                        'queue': len(s.file_queue.outboxQueue),
+                        'dead_streams': len(s.file_queue.dead_streams),
+                    })
+                streams = []
+                for s in gateway.list_active_streams('udp'):
+                    streams.append({
+                        'started': s.started,
+                        'stream_id': s.stream_id,
+                        'transfer_id': s.transfer_id,
+                        'size': s.size,
+                        'type': s.typ,
+                    })
+                r['udp']['sessions'] = sessions
+                r['udp']['streams'] = streams
         if show_proxy:
-            if not driver.is_on('service_proxy_transport'):
-                return ERROR('service_proxy_transport() is not started')
-            sessions = []
-            for s in gateway.list_active_sessions('proxy'):
-                i = {
-                    'state': s.state,
-                    'id': s.id,
-                }
-                if getattr(s, 'router_proto_host', None):
-                    i['proto'] = s.router_proto_host[0]
-                    i['peer'] = s.router_proto_host[1]
-                if getattr(s, 'router_idurl', None):
-                    i['idurl'] = s.router_idurl
-                if getattr(s, 'traffic_out', None):
-                    i['bytes_sent'] = s.traffic_out
-                if getattr(s, 'traffic_in', None):
-                    i['bytes_received'] = s.traffic_in
-                if getattr(s, 'pending_packets', None):
-                    i['queue'] = len(s.pending_packets)
-                sessions.append(i)
             r['proxy'] = {
-                'sessions': sessions,
+                'sessions': [],
             }
+            if driver.is_on('service_proxy_transport'):
+                sessions = []
+                for s in gateway.list_active_sessions('proxy'):
+                    i = {
+                        'state': s.state,
+                        'id': s.id,
+                    }
+                    if getattr(s, 'router_proto_host', None):
+                        i['proto'] = s.router_proto_host[0]
+                        i['peer'] = s.router_proto_host[1]
+                    if getattr(s, 'router_idurl', None):
+                        i['idurl'] = s.router_idurl
+                        i['router'] = global_id.UrlToGlobalID(s.router_idurl)
+                    if getattr(s, 'traffic_out', None):
+                        i['bytes_sent'] = s.traffic_out
+                    if getattr(s, 'traffic_in', None):
+                        i['bytes_received'] = s.traffic_in
+                    if getattr(s, 'pending_packets', None):
+                        i['queue'] = len(s.pending_packets)
+                    sessions.append(i)
+                r['proxy']['sessions' ] = sessions
     return RESULT([r, ])
+
+#------------------------------------------------------------------------------
+
+
+def pdb_shell():
+    import pdb; pdb.set_trace()
+    return OK()
 
 #------------------------------------------------------------------------------

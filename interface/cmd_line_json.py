@@ -174,6 +174,23 @@ def fail_and_stop(err):
 
 #------------------------------------------------------------------------------
 
+def call_rest_http_method(path, method='GET', params=None, data=None, *args, **kwargs):
+    """
+    """
+    from twisted.internet import reactor
+    from twisted.web import client, http_headers
+    from main import settings
+    # TODO: add body and params handling
+    return client.Agent(reactor).request(
+        method=method,
+        uri='http://127.0.0.1:%s/%s' % (settings.getRESTHTTPServerPort(), path),
+        headers=http_headers.Headers({
+            'User-Agent': ['Twisted Web Client Example'],
+            'Content-Type': ['application/json'],
+        }),
+    )
+
+#------------------------------------------------------------------------------
 
 def call_jsonrpc_method(method, *args, **kwargs):
     """
@@ -237,17 +254,13 @@ def kill():
     found = False
     while True:
         appList = bpio.find_process([
-            'bitdust.exe',
+            'bitdustnode.exe',
+            'BitDustNode.exe',
             'bpmain.py',
             'bitdust.py',
             'regexp:^/usr/bin/python.*bitdust.*$',
-            'bpgui.exe',
-            'bpgui.py',
-            'bppipe.exe',
             'bppipe.py',
-            'bptester.exe',
             'bptester.py',
-            'bitstarter.exe',
         ])
         if len(appList) > 0:
             found = True
@@ -285,17 +298,13 @@ def wait_then_kill(x):
     total_count = 0
     while True:
         appList = bpio.find_process([
-            'bitdust.exe',
+            'bitdustnode.exe',
+            'BitDustNode.exe',
             'bpmain.py',
             'bitdust.py',
             'regexp:^/usr/bin/python.*bitdust.*$',
-            'bpgui.exe',
-            'bpgui.py',
-            'bppipe.exe',
             'bppipe.py',
-            'bptester.exe',
             'bptester.py',
-            'bitstarter.exe',
         ])
         if len(appList) == 0:
             print_text('DONE')
@@ -333,11 +342,16 @@ def run_now(opts, args):
 def cmd_deploy(opts, args, overDict):
     from main import settings
     from system import bpio
+    status = 1
     source_dir = bpio.getExecutableDir()
-    venv_path = os.path.join(settings.BaseDir(), 'venv')
+    base_dir = settings.BaseDir()
+    if bpio.Windows() and os.path.isfile(os.path.join(settings.BaseDir(), 'shortpath.txt')):
+        base_dir = open(os.path.join(settings.BaseDir(), 'shortpath.txt')).read().strip()
+    venv_path = os.path.join(base_dir, 'venv')
+    pip_bin = '{}/bin/pip'.format(venv_path)
     if len(args) > 1 and not os.path.exists(args[1]) and os.path.isdir(os.path.dirname(args[1])):
         venv_path = args[1]
-    script_path = os.path.join(settings.BaseDir(), 'bitdust')
+    script_path = os.path.join(base_dir, 'bitdust')
     if os.path.exists(venv_path):
         print_text('Clean up existing Python virtual environment in "%s"' % venv_path)
         status = os.system('rm -rf {}'.format(venv_path))
@@ -345,19 +359,31 @@ def cmd_deploy(opts, args, overDict):
             print_text('\nClean up of existing virtual environment files failed!\n')
             return status
     print_text('Create new Python virtual environment in "%s"' % venv_path)
-    status = os.system('virtualenv -p python2.7 {}'.format(venv_path))
+    make_venv_cmd = 'virtualenv -p python2.7 {}'.format(venv_path)
+    if bpio.Windows():
+        virtualenv_bin = '"%s"' % os.path.join(base_dir, 'python', 'Scripts', 'virtualenv.exe')
+        make_venv_cmd = "{} --system-site-packages {}".format(virtualenv_bin, venv_path)
+    print_text('Executing "{}"'.format(make_venv_cmd))
+    status = os.system(make_venv_cmd)
     if status != 0:
         print_text('\nFailed to create virtual environment, please check/install virtualenv package\n')
         return status
-    print_text('Install/Upgrade pip in "%s"' % venv_path)
-    status = os.system('{}/bin/pip install --index-url=https://pypi.python.org/simple/ -U pip'.format(venv_path))
-    if status != 0:
-        print_text('\nFailed to install latest pip version, please check/install latest pip version manually\n')
-        return status
+    if bpio.Windows():
+        pass
+    else:
+        print_text('Install/Upgrade pip in "%s"' % venv_path)
+        status = os.system('{} install --index-url=https://pypi.python.org/simple/ -U pip'.format(pip_bin))
+        if status != 0:
+            print_text('\nFailed to install latest pip version, please check/install latest pip version manually\n')
+            return status
     requirements_txt = os.path.join(source_dir, 'requirements.txt')
-    venv_bin_pip = os.path.join(venv_path, 'bin', 'pip')
-    print_text('Install BitDust requirements from "%s" using "%s"' % (requirements_txt, venv_path))
-    status = os.system('{} install --index-url=https://pypi.python.org/simple/ -r "{}"'.format(venv_bin_pip, requirements_txt))
+    print_text('Install BitDust requirements from "%s"' % (requirements_txt))
+    requirements_cmd = '{} install --index-url=https://pypi.python.org/simple/ -r "{}"'.format(pip_bin, requirements_txt)
+    if bpio.Windows():
+        venv_python_path = os.path.join(base_dir, 'venv', 'Scripts', 'python.exe')
+        requirements_cmd = '{} -m pip install --index-url=https://pypi.python.org/simple/ --trusted-host=pypi.python.org --trusted-host=files.pythonhosted.org -r "{}"'.format(venv_python_path, requirements_txt)
+    print_text('Executing "{}"'.format(requirements_cmd))
+    status = os.system(requirements_cmd)
     if status != 0:
         depends = [
             'git',
@@ -373,7 +399,7 @@ def cmd_deploy(opts, args, overDict):
             'libffi-dev',
             'libssl-dev',
         ]
-        print_text('\nFound an error. Try to install all binary package dependencies:\n')
+        print_text('\nFound an error. Please try to install all binary package dependencies manually:\n')
         # TODO: try to detect package manager on target OS: debian/mandrake/OSX
         print_text('    sudo apt-get install %s\n\n' % (' '.join(depends)))
         return status
@@ -409,21 +435,21 @@ def cmd_identity(opts, args, overDict, running, executablePath):
         if my_id.isLocalIdentityReady():
             print_text(my_id.getLocalID())
         else:
-            print_text('local identity is not exist')
+            print_text('local identity is not valid or not exist')
         return 0
 
     if args[0] in ['globid', 'globalid', 'gid', 'glid', ] or (args[0] == 'id' and len(args) <= 1):
         if my_id.isLocalIdentityReady():
             print_text(my_id.getGlobalID())
         else:
-            print_text('local identity is not exist')
+            print_text('local identity is not valid or not exist')
         return 0
 
     if len(args) == 1 or args[1].lower() in ['info', '?', 'show', 'print', ]:
         if my_id.isLocalIdentityReady():
             print_text(my_id.getLocalIdentity().serialize())
         else:
-            print_text('local identity is not exist')
+            print_text('local identity is not valid or not exist')
         return 0
 
     from twisted.internet import reactor
@@ -815,7 +841,11 @@ def cmd_integrate(opts, args, overDict):
 
     from system import bpio
     if bpio.Windows():
-        print_text('this feature is not yet available in OS Windows.')
+        # TODO: 
+        src = """@echo off
+        C:\Users\veselin\BITDUS~2\venv\Scripts\python.exe C:\Users\veselin\BITDUS~2\src\bitdust.py %*
+        """
+        # print_text('this feature is not yet available in OS Windows.')
         return 0
     curpath = bpio.getExecutableDir()
     # cmdpath = '/usr/local/bin/bitdust'

@@ -99,7 +99,7 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -420,7 +420,7 @@ class FireHire(automat.Automat):
                 continue
             sc = supplier_connector.by_idurl(supplier_idurl)
             if sc is None:
-                sc = supplier_connector.create(supplier_idurl)
+                sc = supplier_connector.create(supplier_idurl, customer_idurl=my_id.getLocalID())
             sc.set_callback('fire_hire', self._on_supplier_connector_state_changed)
             self.connect_list.append(supplier_idurl)
             sc.automat('connect')
@@ -436,41 +436,102 @@ class FireHire(automat.Automat):
         Action method.
         """
         global _SuppliersToFire
-        result = set(_SuppliersToFire)
+        to_be_fired = list(set(_SuppliersToFire))
         _SuppliersToFire = []
+        if to_be_fired:
+            lg.warn('going to fire %d suppliers from external request' % len(to_be_fired))
+            self.automat('made-decision', to_be_fired)
+            return
+        potentialy_fired = set()
+        connected_suppliers = set()
         disconnected_suppliers = set()
+        requested_suppliers = set()
+        online_suppliers = set()
+        offline_suppliers = set()
+        redundant_suppliers = set()
         # if you have some empty suppliers need to get rid of them,
         # but no need to dismiss anyone at the moment.
-        if '' in contactsdb.suppliers():
-            lg.out(6, 'fire_hire.doDecideToDismiss found empty supplier, SKIP')
+        if '' in contactsdb.suppliers() or None in contactsdb.suppliers():
+            lg.warn('SKIP, found empty supplier')
             self.automat('made-decision', [])
             return
+        number_desired = settings.getSuppliersNumberDesired()
         for supplier_idurl in contactsdb.suppliers():
-            if not supplier_idurl:
-                continue
             sc = supplier_connector.by_idurl(supplier_idurl)
             if not sc:
+                lg.warn('SKIP, supplier connector for supplier %s not exist' % supplier_idurl)
                 continue
             if sc.state == 'NO_SERVICE':
-                result.add(supplier_idurl)
-            elif sc.state == 'DISCONNECTED':
+                lg.warn('found "NO_SERVICE" supplier: %s' % supplier_idurl)
                 disconnected_suppliers.add(supplier_idurl)
+                potentialy_fired.add(supplier_idurl)
+            elif sc.state == 'CONNECTED':
+                connected_suppliers.add(supplier_idurl)
+            elif sc.state in [ 'DISCONNECTED', 'REFUSE', ]:
+                disconnected_suppliers.add(supplier_idurl)
+#             elif sc.state in ['QUEUE?', 'REQUEST', ]:
+#                 requested_suppliers.add(supplier_idurl)
             if contact_status.isOffline(supplier_idurl):
-                disconnected_suppliers.add(supplier_idurl)
-        if contactsdb.num_suppliers() > settings.getSuppliersNumberDesired():
-            for supplier_index in range(
-                    settings.getSuppliersNumberDesired(),
-                    contactsdb.num_suppliers()):
+                offline_suppliers.add(supplier_idurl)
+            elif contact_status.isOnline(supplier_idurl):
+                online_suppliers.add(supplier_idurl)
+            elif contact_status.isCheckingNow(supplier_idurl):
+                requested_suppliers.add(supplier_idurl)
+        if contactsdb.num_suppliers() > number_desired:
+            for supplier_index in range(number_desired, contactsdb.num_suppliers()):
                 idurl = contactsdb.supplier(supplier_index)
                 if idurl:
-                    result.add(idurl)
-        if disconnected_suppliers:
-            from raid import eccmap
-            if len(disconnected_suppliers) >= eccmap.GetFireHireErrors(settings.getSuppliersNumberDesired()):
-                result.update(disconnected_suppliers)
-        result = list(result)
-        lg.out(6, 'fire_hire.doDecideToDismiss %s' % result)
-        self.automat('made-decision', result)
+                    lg.warn('found "REDUNDANT" supplier %s at position %d' % (
+                        idurl, supplier_index, ))
+                    potentialy_fired.add(idurl)
+                    redundant_suppliers.add(idurl)
+                else:
+                    lg.warn('supplier at position %d not exist' % supplier_index)
+        if not connected_suppliers or not online_suppliers:
+            lg.warn('SKIP, no ONLINE suppliers found at the moment')
+            self.automat('made-decision', [])
+            return
+        if requested_suppliers:
+            lg.warn('SKIP, still waiting response from some of suppliers')
+            self.automat('made-decision', [])
+            return
+        if redundant_suppliers:
+            result = list(redundant_suppliers)
+            lg.info('will replace redundant suppliers: %s' % result)
+            self.automat('made-decision', result)
+            return
+        if not disconnected_suppliers:
+            lg.warn('SKIP, no OFFLINE suppliers found at the moment')
+            # TODO: add more conditions to fire "slow" suppliers
+            self.automat('made-decision', [])
+            return
+        if len(offline_suppliers) + len(online_suppliers) != number_desired:
+            lg.warn('SKIP, offline + online != total count: %s %s %s' % (
+                offline_suppliers, online_suppliers, number_desired))
+            self.automat('made-decision', [])
+            return
+        from raid import eccmap
+        max_offline_suppliers_count = eccmap.GetCorrectableErrors(number_desired)
+        if len(offline_suppliers) > max_offline_suppliers_count:
+            lg.warn('SKIP, too many OFFLINE suppliers at the moment : %d > %d' % (
+                len(offline_suppliers), max_offline_suppliers_count, ))
+            self.automat('made-decision', [])
+            return
+        critical_offline_suppliers_count = eccmap.GetFireHireErrors(number_desired)
+        # TODO:  temporary disabled because of an issue: too aggressive replacing suppliers who still have the data
+        if False:  # len(offline_suppliers) >= critical_offline_suppliers_count:
+            one_dead_supplier = offline_suppliers.pop()
+            lg.warn('found "CRITICALLY_OFFLINE" supplier %s, max offline limit is %d' % (
+                one_dead_supplier, critical_offline_suppliers_count, ))
+            potentialy_fired.add(one_dead_supplier)
+        if not potentialy_fired:
+            lg.out(6, 'fire_hire.doDecideToDismiss   found no "bad" suppliers, all is good !!!!!')
+            self.automat('made-decision', [])
+            return
+        # only replace suppliers one by one at the moment
+        result = list(potentialy_fired)
+        lg.info('will replace supplier %s' % result[0])
+        self.automat('made-decision', [result[0], ])
 
     def doRememberSuppliers(self, arg):
         """
@@ -510,12 +571,8 @@ class FireHire(automat.Automat):
             time.strftime('%d-%m-%Y %H:%M:%S'),
             my_id.getLocalID(),
         )
-        if settings.NewWebGUI():
-            from web import control
-            control.on_suppliers_changed(current_suppliers)
-        else:
-            from web import webcontrol
-            webcontrol.OnListSuppliers()
+        from main import control
+        control.on_suppliers_changed(current_suppliers)
         if position < 0:
             lg.out(2, '!!!!!!!!!!! ADDED NEW SUPPLIER : %s' % (new_idurl))
             events.send('supplier-modified', dict(
@@ -561,12 +618,8 @@ class FireHire(automat.Automat):
         current_suppliers = current_suppliers[:desired_suppliers]
         contactsdb.update_suppliers(current_suppliers)
         contactsdb.save_suppliers()
-        if settings.NewWebGUI():
-            from web import control
-            control.on_suppliers_changed(current_suppliers)
-        else:
-            from web import webcontrol
-            webcontrol.OnListSuppliers()
+        from main import control
+        control.on_suppliers_changed(current_suppliers)
         for position, supplier_idurl in removed_suppliers:
             events.send('supplier-modified', dict(
                 new_idurl=None, old_idurl=supplier_idurl, position=position,

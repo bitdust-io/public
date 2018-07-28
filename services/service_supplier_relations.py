@@ -48,36 +48,54 @@ class SupplierRelationsService(LocalService):
                 ]
 
     def start(self):
-        from dht import dht_relations
-        from contacts import contactsdb
-        from userid import my_id
+        from twisted.internet.task import LoopingCall
         from main import events
+        from dht import dht_service
         events.add_subscriber(self._on_new_customer_accepted, 'new-customer-accepted')
         events.add_subscriber(self._on_existing_customer_accepted, 'existing-customer-accepted')
         events.add_subscriber(self._on_existing_customer_terminated, 'existing-customer-terminated')
-        for customer_idurl in contactsdb.customers():
-            dht_relations.publish_customer_supplier_relation(customer_idurl)
-        dht_relations.scan_customer_supplier_relations(my_id.getLocalID())
+        self.refresh_task = LoopingCall(self._do_refresh_dht_records)
+        self.refresh_task.start(dht_service.KEY_EXPIRE_MIN_SECONDS * 2, now=False)
         return True
 
     def stop(self):
         from main import events
+        self.refresh_task.stop()
         events.remove_subscriber(self._on_new_customer_accepted)
         events.remove_subscriber(self._on_existing_customer_accepted)
         events.remove_subscriber(self._on_existing_customer_terminated)
         return True
 
+    def cancel(self, json_payload, newpacket, info):
+        from logs import lg
+        from contacts import contactsdb
+        from p2p import p2p_service
+        customer_idurl = newpacket.OwnerID
+        if not contactsdb.is_customer(customer_idurl):
+            lg.warn("got packet from %s, but he is not a customer" % customer_idurl)
+        from dht import dht_relations
+        dht_relations.close_customer_supplier_relation(customer_idurl)
+        return p2p_service.SendAck(newpacket, 'accepted')
+
     #------------------------------------------------------------------------------
+
+    def _do_refresh_dht_records(self):
+        from dht import dht_relations
+        from contacts import contactsdb
+        for customer_idurl in contactsdb.customers():
+            dht_relations.publish_customer_supplier_relation(customer_idurl)
 
     def _on_new_customer_accepted(self, evt):
         from twisted.internet import reactor
         from dht import dht_relations
-        reactor.callLater(0, dht_relations.publish_customer_supplier_relation, evt.data['idurl'])
+        if evt.data.get('allocated_bytes', 0) > 0:
+            reactor.callLater(0, dht_relations.publish_customer_supplier_relation, evt.data['idurl'])
 
     def _on_existing_customer_accepted(self, evt):
         from twisted.internet import reactor
         from dht import dht_relations
-        reactor.callLater(0, dht_relations.publish_customer_supplier_relation, evt.data['idurl'])
+        if evt.data.get('allocated_bytes', 0) > 0:
+            reactor.callLater(0, dht_relations.publish_customer_supplier_relation, evt.data['idurl'])
 
     def _on_existing_customer_terminated(self, evt):
         from twisted.internet import reactor

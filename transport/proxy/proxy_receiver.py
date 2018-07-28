@@ -50,15 +50,16 @@ EVENTS:
     * :red:`start`
     * :red:`stop`
     * :red:`timer-10sec`
-    * :red:`timer-2sec`
+    * :red:`timer-1sec`
+    * :red:`timer-20sec`
+    * :red:`timer-4sec`
     * :red:`timer-5sec`
-    * :red:`timer-7sec`
 """
 
 #------------------------------------------------------------------------------
 
 _Debug = True
-_DebugLevel = 12
+_DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
@@ -167,7 +168,8 @@ def A(event=None, arg=None):
         return _ProxyReceiver
     if _ProxyReceiver is None:
         # set automat name and starting state here
-        _ProxyReceiver = ProxyReceiver('proxy_receiver', 'AT_STARTUP', debug_level=_DebugLevel, log_events=_Debug)
+        _ProxyReceiver = ProxyReceiver('proxy_receiver', 'AT_STARTUP',
+                                       debug_level=_DebugLevel, log_events=_Debug, log_transitions=_Debug)
     if event is not None:
         _ProxyReceiver.automat(event, arg)
     return _ProxyReceiver
@@ -182,10 +184,11 @@ class ProxyReceiver(automat.Automat):
     """
 
     timers = {
-        'timer-7sec': (7.0, ['ACK?']),
-        'timer-2sec': (2.0, ['ACK?']),
-        'timer-10sec': (10.0, ['LISTEN']),
+        'timer-1sec': (1.0, ['ACK?']),
         'timer-5sec': (5.0, ['SERVICE?']),
+        'timer-10sec': (10.0, ['LISTEN']),
+        'timer-20sec': (20.0, ['FIND_NODE?']),
+        'timer-4sec': (4.0, ['ACK?']),
     }
 
     def init(self):
@@ -239,9 +242,9 @@ class ProxyReceiver(automat.Automat):
             elif event == 'stop':
                 self.state = 'OFFLINE'
                 self.doNotifyFailed(arg)
-            elif event == 'timer-2sec':
+            elif event == 'timer-1sec':
                 self.doSendMyIdentity(arg)
-            elif event == 'timer-7sec' or event == 'fail-received':
+            elif event == 'timer-4sec' or event == 'fail-received':
                 self.state = 'FIND_NODE?'
                 self.doLookupRandomNode(arg)
         #---LISTEN---
@@ -275,7 +278,7 @@ class ProxyReceiver(automat.Automat):
             elif event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
-            elif event == 'stop' or event == 'nodes-not-found':
+            elif event == 'stop' or event == 'nodes-not-found' or event == 'timer-20sec':
                 self.state = 'OFFLINE'
                 self.doNotifyFailed(arg)
         #---SERVICE?---
@@ -439,7 +442,7 @@ class ProxyReceiver(automat.Automat):
             return
         inpt.close()
         routed_packet = signed.Unserialize(data)
-        if not routed_packet:
+        if not routed_packet or not routed_packet.Valid():
             lg.out(2, 'proxy_receiver.doProcessInboxPacket ERROR unserialize packet from %s' % newpacket.CreatorID)
             return
         self.traffic_in += len(data)
@@ -649,7 +652,7 @@ class ProxyReceiver(automat.Automat):
             self.automat('found-one-node', known_router)
             return
         if _Debug:
-            lg.out(_DebugLevel, 'proxy_receiver._find_random_node')
+            lg.out(_DebugLevel, 'proxy_receiver._find_random_node will start DHT lookup')
         tsk = lookup.start()
         if tsk:
             tsk.result_defer.addCallback(self._on_nodes_lookup_finished)
@@ -727,17 +730,18 @@ class ProxyReceiver(automat.Automat):
             self.automat('router-id-received', (newpacket, info))
             self.latest_packet_received = time.time()
             return True
-        if newpacket.Command == commands.Fail() and \
-                newpacket.CreatorID == self.router_idurl and \
-                newpacket.RemoteID == my_id.getLocalID():
-            self.automat('service-refused', (newpacket, info))
-            return True
+        # TODO: if this is a response from supplier - this must be skipped here
+        # if newpacket.Command == commands.Fail() and \
+        #         newpacket.CreatorID == self.router_idurl and \
+        #         newpacket.RemoteID == my_id.getLocalID():
+        #     self.automat('service-refused', (newpacket, info))
+        #     return True
         if newpacket.CreatorID == self.router_idurl:
             self.latest_packet_received = time.time()
-        if newpacket.Command != commands.Relay():
-            return False
-        self.automat('inbox-packet', (newpacket, info, status, error_message))
-        return True
+        if newpacket.Command == commands.Relay():
+            self.automat('inbox-packet', (newpacket, info, status, error_message))
+            return True
+        return False
 
     def _on_router_contact_status_connected(self, oldstate, newstate, event_string, args):
         pass

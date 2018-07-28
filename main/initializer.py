@@ -86,9 +86,6 @@ from automats import global_state
 
 from services import driver
 
-import installer
-import shutdowner
-
 #------------------------------------------------------------------------------
 
 _Initializer = None
@@ -139,6 +136,8 @@ class Initializer(automat.Automat):
         global_state.set_global_state('INIT ' + newstate)
 
     def A(self, event, arg):
+        from main import installer
+        from main import shutdowner
         #---AT_STARTUP---
         if self.state == 'AT_STARTUP':
             if event == 'run':
@@ -236,12 +235,8 @@ class Initializer(automat.Automat):
         return bpio.isGUIpossible()
 
     def doUpdate(self, arg):
-        if not settings.NewWebGUI():
-            from web import webcontrol
-            reactor.callLater(0, webcontrol.OnUpdateStartingPage)
-        else:
-            from web import control
-            control.request_update()
+        from main import control
+        control.request_update()
 
     def doInitLocal(self, arg):
         """
@@ -280,12 +275,8 @@ class Initializer(automat.Automat):
 
     def doShowGUI(self, arg):
         lg.out(2, 'initializer.doShowGUI')
-        if settings.NewWebGUI():
-            from web import control
-            d = control.init()
-        else:
-            from web import webcontrol
-            d = webcontrol.init()
+        from main import control
+        control.init()
         try:
             from system.tray_icon import USE_TRAY_ICON
         except:
@@ -293,21 +284,8 @@ class Initializer(automat.Automat):
             lg.exc()
         if USE_TRAY_ICON:
             from system import tray_icon
-            if settings.NewWebGUI():
-                # tray_icon.SetControlFunc(control.on_tray_icon_command)
-                tray_icon.SetControlFunc(self._on_tray_icon_command)
-            else:
-                tray_icon.SetControlFunc(webcontrol.OnTrayIconCommand)
-        if not settings.NewWebGUI():
-            webcontrol.ready()
-        if self.flagGUI or not self.is_installed:
-            if settings.NewWebGUI():
-                def _show_gui(wsgiport):
-                    reactor.callLater(0.1, control.show)
-                d.addCallback(_show_gui)
-                # reactor.callLater(0.1, control.show)
-            else:
-                d.addCallback(webcontrol.show)
+            tray_icon.SetControlFunc(self._on_tray_icon_command)
+        # TODO: raise up electron window ?
 
     def doDestroyMe(self, arg):
         global _Initializer
@@ -422,6 +400,7 @@ class Initializer(automat.Automat):
         if False:
             # TODO: add an option to the settings
             return
+        from main import shutdowner
         shutdowner.A('stop', 'restart')
 
     def _init_modules(self):
@@ -436,6 +415,7 @@ class Initializer(automat.Automat):
     def _on_tray_icon_command(self, cmd):
         lg.out(2, "initializer._on_tray_icon_command : [%s]" % cmd)
         try:
+            from main import shutdowner
             if cmd == 'exit':
                 shutdowner.A('stop', 'exit')
 
@@ -448,8 +428,8 @@ class Initializer(automat.Automat):
                     network_connector.A('reconnect')
 
             elif cmd == 'show':
-                from web import control
-                control.show()
+                # TODO: raise up electron window ?
+                pass
 
             elif cmd == 'sync':
                 try:

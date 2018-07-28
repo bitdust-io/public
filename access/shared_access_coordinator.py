@@ -37,19 +37,16 @@ EVENTS:
     * :red:`restart`
     * :red:`shutdown`
     * :red:`supplier-connected`
+    * :red:`supplier-failed`
     * :red:`timer-10sec`
-    * :red:`timer-15sec`
+    * :red:`timer-1min`
     * :red:`timer-3sec`
 """
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 6
-
-#------------------------------------------------------------------------------
-
-import json
 
 #------------------------------------------------------------------------------
 
@@ -57,14 +54,17 @@ from logs import lg
 
 from automats import automat
 
+from main import events
+
 from dht import dht_relations
 
 from userid import global_id
 
 from p2p import p2p_service
 
+from contacts import identitycache
+
 from storage import backup_fs
-from storage import backup_control
 
 from customer import supplier_connector
 
@@ -138,25 +138,32 @@ class SharedAccessCoordinator(automat.Automat):
     """
 
     timers = {
+        'timer-1min': (60, ['CONNECTED', 'DHT_LOOKUP']),
         'timer-3sec': (3.0, ['SUPPLIERS?']),
         'timer-10sec': (10.0, ['SUPPLIERS?', 'LIST_FILES?']),
-        'timer-15sec': (15.0, ['DHT_LOOKUP']),
     }
 
-    def __init__(self, key_id, debug_level=_DebugLevel, log_events=False, publish_events=False, **kwargs):
+    def __init__(self,
+                 key_id,
+                 debug_level=_DebugLevel,
+                 log_events=_Debug,
+                 log_transitions=_Debug,
+                 publish_events=False,
+                 **kwargs):
         """
         Create shared_access_coordinator() state machine.
         Use this method if you need to call Automat.__init__() in a special way.
         """
         self.key_id = key_id
-        glob_id = global_id.ParseGlobalID(self.key_id)
-        self.customer_idurl = glob_id['idurl']
-        self.suppliers_list = []
+        self.glob_id = global_id.ParseGlobalID(self.key_id)
+        self.customer_idurl = self.glob_id['idurl']
+        self.known_suppliers_list = []
         super(SharedAccessCoordinator, self).__init__(
-            name="shared_%s$%s" % (glob_id['key_alias'], glob_id['user']),
+            name="%s$%s" % (self.glob_id['key_alias'], self.glob_id['user']),
             state='AT_STARTUP',
             debug_level=debug_level,
             log_events=log_events,
+            log_transitions=log_transitions,
             publish_events=publish_events,
             **kwargs
         )
@@ -164,9 +171,10 @@ class SharedAccessCoordinator(automat.Automat):
     def to_json(self):
         return {
             'key_id': self.key_id,
+            'global_id': self.glob_id,
             'idurl': self.customer_idurl,
             'state': self.state,
-            'suppliers': self.suppliers_list,
+            'suppliers': self.known_suppliers_list,
         }
 
     def init(self):
@@ -268,7 +276,7 @@ class SharedAccessCoordinator(automat.Automat):
             elif event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
-            elif event == 'fail' or event == 'timer-15sec':
+            elif event == 'fail' or event == 'timer-1min':
                 self.state = 'DISCONNECTED'
                 self.doReportDisconnected(arg)
         #---DISCONNECTED---
@@ -286,11 +294,13 @@ class SharedAccessCoordinator(automat.Automat):
             if event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doDestroyMe(arg)
-            elif event == 'restart':
-                self.state = 'DHT_LOOKUP'
-                self.doDHTLookupSuppliers(arg)
             elif event == 'customer-list-files-received':
                 self.doProcessCustomerListFiles(arg)
+            elif event == 'timer-1min':
+                self.doCheckReconnectSuppliers(arg)
+            elif event == 'supplier-failed' or event == 'restart':
+                self.state = 'DHT_LOOKUP'
+                self.doDHTLookupSuppliers(arg)
         #---CLOSED---
         elif self.state == 'CLOSED':
             pass
@@ -307,7 +317,7 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Condition method.
         """
-        for supplier_idurl in self.suppliers_list:
+        for supplier_idurl in self.known_suppliers_list:
             sc = supplier_connector.by_idurl(supplier_idurl, customer_idurl=self.customer_idurl)
             if sc is not None and sc.state == 'CONNECTED':
                 return True
@@ -323,6 +333,8 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
+        # TODO : put in a seprate state in the state machine
+        identitycache.immediatelyCaching(self.customer_idurl)
 
     def doDHTLookupSuppliers(self, arg):
         """
@@ -336,8 +348,8 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
-        self.suppliers_list.extend(filter(None, arg))
-        for supplier_idurl in self.suppliers_list:
+        self.known_suppliers_list = filter(None, arg)
+        for supplier_idurl in self.known_suppliers_list:
             sc = supplier_connector.by_idurl(supplier_idurl, customer_idurl=self.customer_idurl)
             if sc is None:
                 sc = supplier_connector.create(
@@ -346,6 +358,8 @@ class SharedAccessCoordinator(automat.Automat):
                     # we only want to read the data at the moment,
                     # so requesting 0 bytes from that supplier
                     needed_bytes=0,
+                    key_id=self.key_id,
+                    queue_subscribe=False,
                 )
             sc.set_callback('shared_access_coordinator', self._on_supplier_connector_state_changed)
             sc.automat('connect')
@@ -354,7 +368,11 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
-        p2p_service.SendListFiles(arg, customer_idurl=self.customer_idurl)
+        p2p_service.SendListFiles(
+            target_supplier=arg,
+            customer_idurl=self.customer_idurl,
+            key_id=self.key_id,
+        )
 
     def doProcessCustomerListFiles(self, arg):
         """
@@ -365,11 +383,17 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
-        for supplier_idurl in self.suppliers_list:
+        for supplier_idurl in self.known_suppliers_list:
             sc = supplier_connector.by_idurl(supplier_idurl, customer_idurl=self.customer_idurl)
             if sc is None or sc.state != 'CONNECTED':
                 return
         self.automat('all-suppliers-connected')
+
+    def doCheckReconnectSuppliers(self, arg):
+        """
+        Action method.
+        """
+        # TODO:
 
     def doRequestRandomPacket(self, arg):
         """
@@ -383,6 +407,7 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
+        events.send('share-connected', dict(self.to_json()))
         if self.result_defer:
             self.result_defer.callback(True)
 
@@ -390,6 +415,7 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
+        events.send('share-disconnected', dict(self.to_json()))
         if self.result_defer:
             self.result_defer.errback(Exception('disconnected'))
 
@@ -401,8 +427,11 @@ class SharedAccessCoordinator(automat.Automat):
         self.unregister()
 
     def _on_supplier_connector_state_changed(self, idurl, newstate):
-        lg.out(14, 'fire_hire._supplier_connector_state_changed %s to %s, own state is %s' % (
-            idurl, newstate, self.state))
-        supplier_connector.by_idurl(idurl).remove_callback('shared_access_coordinator')
+        if _Debug:
+            lg.out(_DebugLevel, 'shared_access_coordinator._supplier_connector_state_changed %s to %s, own state is %s' % (
+                idurl, newstate, self.state))
+        sc = supplier_connector.by_idurl(idurl)
+        if sc:
+            sc.remove_callback('shared_access_coordinator')
         if newstate == 'CONNECTED':
             self.automat('supplier-connected', idurl)

@@ -197,15 +197,6 @@ Below is a set of global constants.
 """
 
 #------------------------------------------------------------------------------
-#--- CONSTANTS (BOOLEANS) -----------------------------------------------------
-#------------------------------------------------------------------------------
-
-def NewWebGUI():
-    # return False # this is web/webcontrol.py
-    return True  # this is web/control.py - a django based GUI
-
-
-#------------------------------------------------------------------------------
 #--- CONSTANTS (NUMBERS) ------------------------------------------------------
 #------------------------------------------------------------------------------
 
@@ -400,6 +391,8 @@ def DefaultDesiredSuppliers():
 
     Definitely we want to have 64 by default, but we need to have much
     more alive users to do that.
+
+    Must comply with ``DefaultEccMapName()``
     """
     return 4
 
@@ -990,12 +983,7 @@ def GUIOptionsFilename():
 def UpdateSheduleFilename():
     """
     Under Windows software update process is made by bitstarter.exe file.
-
-    Periodically, the main file process "bitdust.exe" requests the file
-    "checksum" (from user configurable repository location) to check for
-    new software release of that repository. Main process can restart
-    itself thru bitstarter to be able to update the binaries. User can
-    set a schedule to check for updates in the settings.
+    Obsolete.
     """
     return os.path.join(MetaDataDir(), "updateshedule")
 
@@ -1266,27 +1254,16 @@ def FTPServerCredentialsFile():
 def WindowsStarterFileName():
     """
     Return a file name of the Windows starter: "bitstarter.exe".
+    Obsolete.
     """
     return 'bitstarter.exe'
 
 
-def WindowsMainScritpFileName():
+def WindowsMainScriptFileName():
     """
-    Return a file name of the root Windows executable script : "bitdust.exe".
+    Return a file name of the root Windows executable script : "BitDustNode.exe".
     """
-    return 'bitdust.exe'
-
-
-def WindowsStarterFileURL(repo=DefaultRepo()):
-    """
-    Return a public URL of the "bitstarter.exe" file, according to given
-    ``repo``.
-
-    When need to modify the starter code need to place it in the
-    repository along with other binaries. It will be downloaded
-    automatically by all users and updated.
-    """
-    return DefaultRepoURL(repo) + WindowsStarterFileName()
+    return 'BitDustNode.exe'
 
 
 def getIconLaunchFilename():
@@ -1296,7 +1273,7 @@ def getIconLaunchFilename():
     For Windows platforms this should target to executable file to run
     when clicked on Desktop icon.
     """
-    return os.path.join(bpio.getExecutableDir(), 'bitdust.exe')
+    return os.path.join(bpio.getExecutableDir(), 'bitdustnode.exe')
 
 
 def getIconLinkFilename():
@@ -2633,7 +2610,8 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/udp-datagrams/enabled', 'true')
     config.conf().setDefaultValue('services/udp-datagrams/udp-port', DefaultUDPPort())
 
-    config.conf().setDefaultValue('services/udp-transport/enabled', 'true')
+    # TODO: UDP transport was temporary switched off
+    config.conf().setDefaultValue('services/udp-transport/enabled', 'false')
     config.conf().setDefaultValue('services/udp-transport/receiving-enabled', 'true')
     config.conf().setDefaultValue('services/udp-transport/sending-enabled', 'true')
     config.conf().setDefaultValue('services/udp-transport/priority', 20)
