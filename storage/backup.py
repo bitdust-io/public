@@ -77,7 +77,12 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+from io import BytesIO
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -85,7 +90,6 @@ _DebugLevel = 8
 import os
 import sys
 import time
-import cStringIO
 import gc
 
 try:
@@ -106,6 +110,7 @@ if __name__ == "__main__":
 from logs import lg
 
 from lib import packetid
+from lib import strng
 
 from userid import my_id
 from userid import global_id
@@ -163,7 +168,7 @@ class backup(automat.Automat):
         self.stateEOF = False
         self.stateReading = False
         self.closed = False
-        self.currentBlockData = cStringIO.StringIO()
+        self.currentBlockData = BytesIO()
         self.currentBlockSize = 0
         self.workBlocks = {}
         self.blockNumber = 0
@@ -283,6 +288,10 @@ class backup(automat.Automat):
         events.send('backup-started', dict(backup_id=self.backupID))
 
     def doRead(self, arg):
+        """
+        Action method.
+        """
+
         def readChunk():
             size = self.blockSize - self.currentBlockSize
             if size < 0:
@@ -290,44 +299,65 @@ class backup(automat.Automat):
                 lg.out(1, "backup.readChunk ERROR blockSize=" + str(self.blockSize))
                 lg.out(1, "backup.readChunk ERROR currentBlockSize=" + str(self.currentBlockSize))
                 raise Exception('size < 0, blockSize=%s, currentBlockSize=%s' % (self.blockSize, self.currentBlockSize))
-                return ''
             elif size == 0:
-                return ''
+                return b''
             if self.pipe is None:
                 raise Exception('backup.pipe is None')
-                return ''
             if self.pipe.state() == nonblocking.PIPE_CLOSED:
                 if _Debug:
                     lg.out(_DebugLevel, 'backup.readChunk the state is PIPE_CLOSED !!!!!!!!!!!!!!!!!!!!!!!!')
-                return ''
+                return b''
             if self.pipe.state() == nonblocking.PIPE_READY2READ:
-                newchunk = self.pipe.recv(size)
-                if newchunk == '':
+                try:
+                    inputtext = self.pipe.recv(size)
+                    newchunk = strng.to_bin(inputtext)
+                except:
+                    lg.err('pipe.recv() failed')
+                    lg.exc()
+                if newchunk:
+                    if _Debug:
+                        lg.out(_DebugLevel, 'backup.readChunk pipe.recv() returned %d bytes' % len(newchunk))
+                else:
                     if _Debug:
                         lg.out(_DebugLevel, 'backup.readChunk pipe.recv() returned empty string')
                 return newchunk
             lg.out(1, "backup.readChunk ERROR pipe.state=" + str(self.pipe.state()))
             raise Exception('backup.pipe.state is ' + str(self.pipe.state()))
-            return ''
 
         def readDone(data):
-            self.currentBlockData.write(data)
-            self.currentBlockSize += len(data)
-            self.stateReading = False
-            if data == '':
+            try:
+                self.currentBlockData.write(data)
+                self.currentBlockSize += len(data)
+                self.stateReading = False
+            except:
+                lg.exc()
+                self.automat('fail', None)
+                return None
+            if not data:
                 self.stateEOF = True
+            if _Debug:
+                lg.out(_DebugLevel + 4, 'backup.readDone %d bytes' % len(data))
             reactor.callLater(0, self.automat, 'read-success')
-            #out(12, 'backup.readDone %d bytes' % len(data))
+            return data
+
+        def readFailed(err):
+            lg.err(err)
+            self.automat('fail', err)
+            return None
 
         self.stateReading = True
         d = maybeDeferred(readChunk)
         d.addCallback(readDone)
-        d.addErrback(lambda err: self.automat('fail', err))
+        d.addErrback(readFailed)
 
     def doEncryptBlock(self, arg):
+        """
+        Action method.
+        """
+
         def _doBlock():
             dt = time.time()
-            src = self.currentBlockData.getvalue()
+            raw_bytes = self.currentBlockData.getvalue()
             block = encrypted.Block(
                 my_id.getLocalID(),
                 self.backupID,
@@ -335,14 +365,15 @@ class backup(automat.Automat):
                 key.NewSessionKey(),
                 key.SessionKeyType(),
                 self.stateEOF,
-                src,
+                raw_bytes,
                 EncryptKey=self.keyID,
             )
-            del src
+            del raw_bytes
             if _Debug:
                 lg.out(_DebugLevel, 'backup.doEncryptBlock blockNumber=%d size=%d atEOF=%s dt=%s EncryptKey=%s' % (
                     self.blockNumber, self.currentBlockSize, self.stateEOF, str(time.time() - dt), self.keyID))
             return block
+
         d = maybeDeferred(_doBlock)
         d.addCallback(lambda block: self.automat('block-encrypted', block))
         d.addErrback(lambda err: self.automat('fail', err))
@@ -365,16 +396,12 @@ class backup(automat.Automat):
         fileno, filename = tmpfile.make('raid', extension='.raid')
         serializedblock = newblock.Serialize()
         blocklen = len(serializedblock)
-        os.write(fileno, str(blocklen) + ":" + serializedblock)
+        os.write(fileno, strng.to_bin(blocklen) + b":" + serializedblock)
         os.close(fileno)
         self.workBlocks[newblock.BlockNumber] = filename
-        # key_alias = 'master'
-        # if self.keyID:
-        #     key_alias = packetid.KeyAlias(self.keyID)
         dt = time.time()
-        customer_dir = self.customerGlobalID  # global_id.MakeGlobalID(customer=self.customerGlobalID, key_alias=key_alias)
         outputpath = os.path.join(
-            settings.getLocalBackupsDir(), customer_dir, self.pathID, self.version)
+            settings.getLocalBackupsDir(), self.customerGlobalID, self.pathID, self.version)
         task_params = (filename, self.eccmap.name, self.version, newblock.BlockNumber, outputpath)
         raid_worker.add_task('make', task_params,
                              lambda cmd, params, result: self._raidmakeCallback(params, result, dt),)
@@ -400,7 +427,7 @@ class backup(automat.Automat):
         self.blocksSent = 0
         self.blockNumber = 0
         self.currentBlockSize = 0
-        self.currentBlockData = cStringIO.StringIO()
+        self.currentBlockData = BytesIO()
 
     def doNextBlock(self, arg):
         """
@@ -409,12 +436,13 @@ class backup(automat.Automat):
         self.dataSent += self.currentBlockSize
         self.blocksSent += 1
         self.blockNumber += 1
-        self.currentBlockData.close()
         self.currentBlockSize = 0
-        self.currentBlockData = cStringIO.StringIO()
+        self.currentBlockData.close()
+        self.currentBlockData = BytesIO()
 
     def doBlockReport(self, arg):
         """
+        Action method.
         """
         BlockNumber, result = arg
         if self.blockResultCallback:
@@ -422,6 +450,7 @@ class backup(automat.Automat):
 
     def doClose(self, arg):
         """
+        Action method.
         """
         self.closed = True
         for filename in self.workBlocks.values():
@@ -429,6 +458,7 @@ class backup(automat.Automat):
 
     def doReport(self, arg):
         """
+        Action method.
         """
         if self.ask4abort:
             if self.finishCallback:
@@ -441,6 +471,7 @@ class backup(automat.Automat):
 
     def doDestroyMe(self, arg):
         """
+        Action method.
         """
         self.currentBlockData.close()
         del self.currentBlockData
@@ -498,8 +529,8 @@ class backup(automat.Automat):
 
 def main():
     from system import bpio
-    import backup_tar
-    import backup_fs
+    from . import backup_tar
+    from . import backup_fs
     lg.set_debug_level(24)
     sourcePath = sys.argv[1]
     compress_mode = 'none'  # 'gz'
@@ -521,7 +552,7 @@ def main():
             pass
         for filename in os.listdir(os.path.join(settings.getLocalBackupsDir(), customer, remotePath)):
             filepath = os.path.join(settings.getLocalBackupsDir(), customer, remotePath, filename)
-            payld = str(bpio.ReadBinaryFile(filepath))
+            payld = bpio.ReadBinaryFile(filepath)
             newpacket = signed.Packet(
                 'Data',
                 my_id.getLocalID(),
@@ -530,7 +561,7 @@ def main():
                 payld,
                 'http://megafaq.ru/cvps1010.xml')
             newfilepath = os.path.join(settings.getLocalBackupsDir(), customer, remotePath + '.out', filename)
-            bpio.AtomicWriteFile(newfilepath, newpacket.Serialize())
+            bpio.WriteBinaryFile(newfilepath, newpacket.Serialize())
         reactor.stop()
     job = backup(backupID, backupPipe, _bk_done)
     reactor.callLater(1, job.automat, 'start')

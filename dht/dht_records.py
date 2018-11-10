@@ -32,6 +32,10 @@ module:: dht_records
 
 #------------------------------------------------------------------------------
 
+from __future__ import absolute_import
+
+#------------------------------------------------------------------------------
+
 _Debug = False
 _DebugLevel = 10
 
@@ -146,7 +150,7 @@ def set_relation(key, idurl, data, prefix, index):
             'data': data,
         },
         rules=get_rules('relation'),
-        expire=60 * 5,
+        expire=60 * 60,
     )
 
 #------------------------------------------------------------------------------

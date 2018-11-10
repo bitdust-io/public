@@ -1,24 +1,11 @@
 #!/usr/bin/env python
 # protocol.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
-#
-# This file (protocol.py) is part of BitDust Software.
-#
-# BitDust is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# BitDust Software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
-#
-# Please contact us if you have any questions at bitdust.io@gmail.com
+# Copyright (C) 2007-2008 Francois Aucamp, Meraka Institute, CSIR
+# See AUTHORS for all authors and contact information. 
+# 
+# License: GNU Lesser General Public License, version 3 or later; see COPYING
+#          included in this archive for details.
 #
 # This library is free software, distributed under the terms of
 # the GNU Lesser General Public License Version 3, or any later version.
@@ -27,19 +14,26 @@
 # The docstrings in this module contain epytext markup; API documentation
 # may be created by processing this file with epydoc: http://epydoc.sf.net
 
+from __future__ import absolute_import
+from __future__ import print_function
 from twisted.internet import protocol, defer
 from twisted.python import failure
 import twisted.internet.reactor
 
-import constants
-import encoding
-import msgtypes
-import msgformat
-from contact import Contact
+from . import constants
+from . import encoding
+from . import msgtypes
+from . import msgformat
+from .contact import Contact
 
 reactor = twisted.internet.reactor
 
+
+#------------------------------------------------------------------------------
+
 _Debug = False
+
+#------------------------------------------------------------------------------
 
 
 class TimeoutError(Exception):
@@ -60,6 +54,7 @@ class KademliaProtocol(protocol.DatagramProtocol):
         self._node = node
         self._encoder = msgEncoder
         self._translator = msgTranslator
+        self._counter = None
         self._sentMessages = {}
         self._partialMessages = {}
         self._partialMessagesProgress = {}
@@ -104,7 +99,9 @@ class KademliaProtocol(protocol.DatagramProtocol):
         timeoutCall = reactor.callLater(constants.rpcTimeout, self._msgTimeout, msg.id)  # IGNORE:E1101
         # Transmit the data
         if _Debug:
-            print '                sendRPC', (method, contact.address, contact.port)
+            print('                sendRPC', (method, contact.address, contact.port))
+        if self._counter:
+            self._counter('sendRPC')
         self._send(encodedMsg, msg.id, (contact.address, contact.port))
         self._sentMessages[msg.id] = (contact.id, df, timeoutCall)
         return df
@@ -120,10 +117,10 @@ class KademliaProtocol(protocol.DatagramProtocol):
             import time
             _t = time.time()
         try:
-            if datagram[0] == '\x00' and datagram[25] == '\x00':
-                totalPackets = (ord(datagram[1]) << 8) | ord(datagram[2])
+            if datagram[0:1] == b'\x00' and datagram[25:26] == b'\x00':
+                totalPackets = (ord(datagram[1:2]) << 8) | ord(datagram[2:3])
                 msgID = datagram[5:25]
-                seqNumber = (ord(datagram[3]) << 8) | ord(datagram[4])
+                seqNumber = (ord(datagram[3:4]) << 8) | ord(datagram[4:5])
                 if msgID not in self._partialMessages:
                     self._partialMessages[msgID] = {}
                 self._partialMessages[msgID][seqNumber] = datagram[26:]
@@ -134,7 +131,7 @@ class KademliaProtocol(protocol.DatagramProtocol):
                         data += self._partialMessages[msgID][key]
                     datagram = data
                     if _Debug:
-                        print '                finished partial message', keys
+                        print('                finished partial message', keys)
                     del self._partialMessages[msgID]
                 else:
                     return
@@ -146,12 +143,12 @@ class KademliaProtocol(protocol.DatagramProtocol):
             self._node.addContact(remoteContact)
 
             if _Debug:
-                print '                dht.datagramReceived %d (%s) from %s' % (
-                    len(datagram), str(type(message)), str(address))
+                print('                dht.datagramReceived %d (%s) from %s' % (
+                    len(datagram), str(type(message)), str(address)))
 
             if isinstance(message, msgtypes.RequestMessage):
                 # This is an RPC method request
-                self._handleRPC(remoteContact, message.id, message.request, message.args)
+                self._handleRPC(remoteContact, message.id, str(message.request), message.args)
             elif isinstance(message, msgtypes.ResponseMessage):
                 # Find the message that triggered this response
                 if message.id in self._sentMessages:
@@ -177,7 +174,7 @@ class KademliaProtocol(protocol.DatagramProtocol):
                             exceptionClassName = '.'.join(remoteHierarchy)
                         remoteException = None
                         try:
-                            exec 'remoteException = %s("%s") from %s' % (exceptionClassName, message.response, address)
+                            exec('remoteException = %s("%s") from %s' % (exceptionClassName, message.response, address))
                         except Exception:
                             # We could not recreate the exception; create a generic one
                             remoteException = Exception(str(message.response) + (' from %s' % str(address)))
@@ -193,7 +190,7 @@ class KademliaProtocol(protocol.DatagramProtocol):
             import traceback
             traceback.print_exc()
         if _Debug:
-            print '                dt=%s' % (time.time() - _t)
+            print('                dt=%s' % (time.time() - _t))
 
     def _send(self, data, rpcID, address):
         """
@@ -235,7 +232,9 @@ class KademliaProtocol(protocol.DatagramProtocol):
 
     def _write(self, data, address):
         if _Debug:
-            print '                dht._write %d bytes to %s' % (len(data), str(address))
+            print('                dht._write %d bytes to %s' % (len(data), str(address)))
+        if self._counter:
+            self._counter('_write')
         try:
             self.transport.write(data, address)
         except:
@@ -251,7 +250,9 @@ class KademliaProtocol(protocol.DatagramProtocol):
         msgPrimitive = self._translator.toPrimitive(msg)
         encodedMsg = self._encoder.encode(msgPrimitive)
         if _Debug:
-            print '                sendResponse', (contact.address, contact.port)
+            print('                sendResponse', (contact.address, contact.port))
+        if self._counter:
+            self._counter('_sendResponse')
         self._send(encodedMsg, rpcID, (contact.address, contact.port))
 
     def _sendError(self, contact, rpcID, exceptionType, exceptionMessage):
@@ -262,7 +263,9 @@ class KademliaProtocol(protocol.DatagramProtocol):
         msgPrimitive = self._translator.toPrimitive(msg)
         encodedMsg = self._encoder.encode(msgPrimitive)
         if _Debug:
-            print '                sendError', (contact.address, contact.port)
+            print('                sendError', (contact.address, contact.port))
+        if self._counter:
+            self._counter('_sendError')
         self._send(encodedMsg, rpcID, (contact.address, contact.port))
 
     def _handleRPC(self, senderContact, rpcID, method, args):
@@ -282,7 +285,10 @@ class KademliaProtocol(protocol.DatagramProtocol):
 
         if _Debug:
             import base64
-            print '                    _handleRPC', base64.b64encode(rpcID), method, args
+            print('                    _handleRPC', base64.b64encode(rpcID), method, args)
+
+        if self._counter:
+            self._counter('_handleRPC')
 
         # Execute the RPC
         func = getattr(self._node, method, None)
@@ -307,6 +313,9 @@ class KademliaProtocol(protocol.DatagramProtocol):
         """
         Called when an RPC request message times out.
         """
+        if self._counter:
+            self._counter('_msgTimeout')
+
         # Find the message that timed out
         if messageID in self._sentMessages:
             remoteContactID, df = self._sentMessages[messageID][0:2]
@@ -331,4 +340,4 @@ class KademliaProtocol(protocol.DatagramProtocol):
             df.errback(failure.Failure(TimeoutError(remoteContactID)))
         else:
             # This should never be reached
-            print "ERROR: deferred timed out, but is not present in sent messages list!"
+            print("ERROR: deferred timed out, but is not present in sent messages list!")

@@ -56,9 +56,17 @@ The software keeps 2 index dictionaries in the memory:
 Those dictionaries are trees - replicates the file system structure.
 """
 
+#------------------------------------------------------------------------------
+
+from __future__ import absolute_import
+from __future__ import print_function
+from six.moves import range
+from io import StringIO
+
+#------------------------------------------------------------------------------
+
 import os
 import sys
-import cStringIO
 import time
 import json
 import random
@@ -70,6 +78,8 @@ if __name__ == '__main__':
     sys.path.insert(0, _p.abspath(_p.join(_p.dirname(_p.abspath(sys.argv[0])), '..')))
 
 #------------------------------------------------------------------------------
+
+from lib import strng
 
 from logs import lg
 
@@ -158,7 +168,7 @@ def known_customers():
     """
     """
     global _FileSystemIndexByID
-    return _FileSystemIndexByID.keys()
+    return list(_FileSystemIndexByID.keys())
 
 
 def counter():
@@ -241,10 +251,7 @@ class FSItemInfo():
     """
 
     def __init__(self, name='', path_id='', typ=UNKNOWN, key_id=None):
-        if isinstance(name, unicode):
-            self.unicodename = name
-        else:
-            self.unicodename = unicode(name)
+        self.unicodename = strng.to_text(name)
         self.path_id = path_id
         self.type = typ
         self.size = -1
@@ -279,7 +286,7 @@ class FSItemInfo():
             except:
                 lg.exc()
                 return False
-        self.size = long(s.st_size)
+        self.size = int(s.st_size)
         return True
 
     def read_versions(self, local_path):
@@ -313,7 +320,7 @@ class FSItemInfo():
                     lg.warn('incorrect file name found: %s' % filepath)
                     continue
                 try:
-                    sz = long(os.path.getsize(filepath))
+                    sz = int(os.path.getsize(filepath))
                 except:
                     lg.exc()
                     sz = 0
@@ -331,7 +338,7 @@ class FSItemInfo():
         self.versions[version] = [-1, -1]
 
     def set_version_info(self, version, maxblocknum, sizebytes):
-        self.versions[version] = [maxblocknum, sizebytes]
+        self.versions[version] = [maxblocknum, sizebytes, ]
 
     def get_version_info(self, version):
         return self.versions.get(version, [-1, -1])
@@ -350,8 +357,8 @@ class FSItemInfo():
 
     def list_versions(self, sorted=False, reverse=False):
         if sorted:
-            return misc.sorted_versions(self.versions.keys(), reverse)
-        return self.versions.keys()
+            return misc.sorted_versions(list(self.versions.keys()), reverse)
+        return list(self.versions.keys())
 
     def get_versions(self):
         return self.versions
@@ -382,8 +389,8 @@ class FSItemInfo():
     def serialize(self, encoding='utf-8', to_json=False):
         if to_json:
             return {
-                'n': self.unicodename.encode(encoding),
-                'i': str(self.path_id),
+                'n': strng.to_text(self.unicodename, encoding=encoding),
+                'i': strng.to_text(self.path_id),
                 't': self.type,
                 's': self.size,
                 'k': self.key_id,
@@ -393,31 +400,34 @@ class FSItemInfo():
                     's': self.versions[v][1],
                 } for v in self.list_versions(sorted=True)]
             }
-        e = self.unicodename.encode(encoding)
+        e = strng.to_text(self.unicodename, encoding=encoding)
         return '%s %d %d %s\n%s\n' % (self.path_id, self.type,
                                       self.size, self.pack_versions(), e,)
 
     def unserialize(self, src, decoding='utf-8', from_json=False):
         if from_json:
             try:
-                self.unicodename = src['n']
-                self.path_id = str(src['i'])
+                self.unicodename = strng.to_text(src['n'], encoding=decoding)
+                self.path_id = strng.to_text(src['i'], encoding=decoding)
                 self.type = src['t']
                 self.size = src['s']
-                self.key_id = src['k']
-                self.versions = {v['n']: [v['b'], v['s'], ] for v in src['v']}
+                self.key_id = strng.to_text(src['k'], encoding=decoding)
+                self.versions = {
+                    strng.to_text(v['n']): [v['b'], v['s'], ] for v in src['v']
+                }
             except:
                 lg.exc()
                 raise KeyError('Incorrect item format:\n%s' % src)
-            return
+            return True
+
         try:
-            details, name = src.split('\n')[:2]
+            details, name = strng.to_text(src, encoding=decoding).split('\n')[:2]
         except:
             raise Exception('Incorrect item format:\n%s' % src)
-        if details == '' or name == '':
+        if not details or not name:
             raise Exception('Incorrect item format:\n%s' % src)
         try:
-            self.unicodename = name.decode(decoding)
+            self.unicodename = name
             details = details.split(' ')
             self.path_id, self.type, self.size = details[:3]
             self.type, self.size = int(self.type), int(self.size)
@@ -425,6 +435,7 @@ class FSItemInfo():
         except:
             lg.exc()
             raise KeyError('Incorrect item format:\n%s' % src)
+        return True
 
 #------------------------------------------------------------------------------
 
@@ -627,7 +638,7 @@ def AddLocalPath(localpath, read_stats=False, iter=None, iterID=None, key_id=Non
             return c
         for localname in bpio.list_dir_safe(path):
             p = os.path.join(path, localname)  # .encode("utf-8")
-            name = unicode(localname)
+            name = strng.to_text(localname)
             if bpio.pathIsDir(p):
                 if name not in iter:
                     id = MakeID(iter, lastID)
@@ -757,7 +768,7 @@ def SetDir(item, iter=None, iterID=None):
                     found = True
                     break
                 continue
-            if isinstance(iter[name], str):
+            if strng.is_string(iter[name]):
                 if iter[name] == itemname:
                     iter = iter[name]
                     iterID = iterID[id]
@@ -2022,7 +2033,7 @@ def Serialize(iterID=None, to_json=False, encoding='utf-8', filter_cb=None):
     if to_json:
         result = {'items': [], }
     else:
-        result = cStringIO.StringIO()
+        result = StringIO()
 
     def cb(path_id, path, info):
         if filter_cb is not None:
@@ -2068,8 +2079,9 @@ def Unserialize(raw_data, iter=None, iterID=None, from_json=False, decoding='utf
                 count += 1
             else:
                 raise ValueError('Incorrect entry type')
+
     else:
-        inpt = cStringIO.StringIO(raw_data)
+        inpt = StringIO(raw_data)
         while True:
             src = inpt.readline() + inpt.readline()  # 2 times because we take 2 lines for every item
             if src.strip() == '':
@@ -2107,7 +2119,7 @@ def _test():
     filepath = settings.BackupIndexFilePath()
     # print filepath
     src = bpio.ReadTextFile(filepath)
-    inpt = cStringIO.StringIO(src)
+    inpt = StringIO(src)
     inpt.readline()
     # count = Unserialize(inpt)
     json_data = json.loads(inpt.read())
@@ -2133,13 +2145,13 @@ def _test():
 #     print IsDir('dir1')
 #     print IsFile('dir2/fff')
 
-    print '------------'
+    print('------------')
     pprint.pprint(fs())
-    print
+    print()
     pprint.pprint(fsID())
-    print
+    print()
 
-    print HasChilds('', iter=fs(customer_idurl))
+    print(HasChilds('', iter=fs(customer_idurl)))
 
 #     for i in range(10000):
 #         r = AddFile('file' + str(i))
@@ -2189,8 +2201,6 @@ def _test():
     #     sz = diskspace.MakeStringFromBytes(item.size) if item.exist() else ''
     #     print '  %s %s %s' % (pathID.ljust(27), localPath.ljust(70), sz.ljust(9))
 
-    # import pdb
-    # pdb.set_trace()
     # pprint.pprint(ListRootItems())
     # pprint.pprint(ListAllBackupIDs())
     # pprint.pprint(ListChildsByPath((sys.argv[1])))
@@ -2219,7 +2229,7 @@ def _test():
 #        pprint.pprint(ListByID(id))
 #    fs().clear()
 #    fsID().clear()
-#    inp = cStringIO.StringIO(s)
+#    inp = StringIO(s)
 #    Unserialize(inp)
 #    inp.close()
 #    pprint.pprint(fs())

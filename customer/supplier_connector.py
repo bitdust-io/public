@@ -47,7 +47,11 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -66,6 +70,7 @@ from system import bpio
 
 from main import settings
 
+from lib import strng
 from lib import nameurl
 from lib import diskspace
 
@@ -209,7 +214,7 @@ class SupplierConnector(automat.Automat):
                 except:
                     lg.exc()
                     return
-            bpio.WriteFile(
+            bpio.WriteTextFile(
                 settings.SupplierServiceFilename(self.supplier_idurl, customer_idurl=self.customer_idurl),
                 newstate,
             )
@@ -218,7 +223,7 @@ class SupplierConnector(automat.Automat):
         self.callbacks[name] = cb
 
     def remove_callback(self, name):
-        if name in self.callbacks.keys():
+        if name in list(self.callbacks.keys()):
             self.callbacks.pop(name)
 
     def A(self, event, arg):
@@ -320,7 +325,7 @@ class SupplierConnector(automat.Automat):
         Condition method.
         """
         newpacket = arg
-        if newpacket.Payload.startswith('accepted'):
+        if strng.to_text(newpacket.Payload).startswith('accepted'):
             if _Debug:
                 lg.out(6, 'supplier_connector.isServiceAccepted !!!! supplier %s connected' % self.supplier_idurl)
             return True
@@ -332,7 +337,7 @@ class SupplierConnector(automat.Automat):
         """
         newpacket = arg
         if newpacket.Command == commands.Ack():
-            if newpacket.Payload.startswith('accepted'):
+            if strng.to_text(newpacket.Payload).startswith('accepted'):
                 if _Debug:
                     lg.out(6, 'supplier_connector.isServiceCancelled !!!! supplier %s disconnected' % self.supplier_idurl)
                 return True
@@ -391,16 +396,16 @@ class SupplierConnector(automat.Automat):
         service_info = {'items': [{
             'scope': 'consumer',
             'action': 'start',
-            'consumer_id': my_id.getGlobalID(),
+            'consumer_id': strng.to_text(my_id.getGlobalID()),
         }, {
             'scope': 'consumer',
             'action': 'add_callback',
-            'consumer_id': my_id.getGlobalID(),
-            'method': my_id.getLocalID(),
+            'consumer_id': strng.to_text(my_id.getGlobalID()),
+            'method': strng.to_text(my_id.getLocalID()),
         }, {
             'scope': 'consumer',
             'action': 'subscribe',
-            'consumer_id': my_id.getGlobalID(),
+            'consumer_id': strng.to_text(my_id.getGlobalID()),
             'queue_id': global_id.MakeGlobalQueueID(
                 queue_alias='supplier-file-modified',
                 owner_id=my_id.getGlobalID(),
@@ -424,7 +429,7 @@ class SupplierConnector(automat.Automat):
         service_info = json.dumps({'items': [{
             'scope': 'consumer',
             'action': 'unsubscribe',
-            'consumer_id': my_id.getGlobalID(),
+            'consumer_id': strng.to_text(my_id.getGlobalID()),
             'queue_id': global_id.MakeGlobalQueueID(
                 queue_alias='supplier-file-modified',
                 owner_id=my_id.getGlobalID(),
@@ -433,12 +438,12 @@ class SupplierConnector(automat.Automat):
         }, {
             'scope': 'consumer',
             'action': 'remove_callback',
-            'consumer_id': my_id.getGlobalID(),
-            'method': my_id.getLocalID(),
+            'consumer_id': strng.to_text(my_id.getGlobalID()),
+            'method': strng.to_text(my_id.getLocalID()),
         }, {
             'scope': 'consumer',
             'action': 'stop',
-            'consumer_id': my_id.getGlobalID(),
+            'consumer_id': strng.to_text(my_id.getGlobalID()),
         }, ], })
         p2p_service.SendCancelService(
             remote_idurl=self.supplier_idurl,
@@ -462,7 +467,7 @@ class SupplierConnector(automat.Automat):
         """
         if _Debug:
             lg.out(14, 'supplier_connector.doReportConnect : %s' % self.supplier_idurl)
-        for cb in self.callbacks.values():
+        for cb in list(self.callbacks.values()):
             cb(self.supplier_idurl, 'CONNECTED')
 
     def doReportNoService(self, arg):
@@ -471,7 +476,7 @@ class SupplierConnector(automat.Automat):
         """
         if _Debug:
             lg.out(14, 'supplier_connector.doReportNoService : %s' % self.supplier_idurl)
-        for cb in self.callbacks.values():
+        for cb in list(self.callbacks.values()):
             cb(self.supplier_idurl, 'NO_SERVICE')
 
     def doReportDisconnect(self, arg):
@@ -480,7 +485,7 @@ class SupplierConnector(automat.Automat):
         """
         if _Debug:
             lg.out(_DebugLevel, 'supplier_connector.doReportDisconnect : %s' % self.supplier_idurl)
-        for cb in self.callbacks.values():
+        for cb in list(self.callbacks.values()):
             cb(self.supplier_idurl, 'DISCONNECTED')
 
     def doDestroyMe(self, arg):

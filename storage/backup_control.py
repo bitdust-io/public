@@ -35,7 +35,13 @@ gets finished.
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+from __future__ import print_function
+from io import StringIO
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 _DebugLevel = 12
 
 #------------------------------------------------------------------------------
@@ -43,8 +49,6 @@ _DebugLevel = 12
 import os
 import sys
 import time
-import json
-import cStringIO
 
 try:
     from twisted.internet import reactor
@@ -66,6 +70,8 @@ from contacts import contactsdb
 from lib import misc
 from lib import packetid
 from lib import nameurl
+from lib import strng
+from lib import jsn
 
 from main import settings
 from main import events
@@ -179,16 +185,21 @@ def WriteIndex(filepath=None, encoding='utf-8'):
             encoding=encoding,
         )
     src = '%d\n' % revision()
-    src += json.dumps(json_data, indent=2, encoding=encoding)
+    src += jsn.dumps(
+        json_data,
+        indent=1,
+        separators=(',', ':'),
+        encoding=encoding,
+    )
     if _Debug:
         import pprint
         lg.out(_DebugLevel, pprint.pformat(json_data))
-    return bpio.AtomicWriteFile(filepath, src)
+    return bpio.WriteTextFile(filepath, src)
 
 
-def ReadIndex(raw_data, encoding='utf-8'):
+def ReadIndex(text_data, encoding='utf-8'):
     """
-    Read index data base, ``input`` is a ``cStringIO.StringIO`` object which
+    Read index data base, ``input`` is a ``StringIO.StringIO`` object which
     keeps the data.
 
     This is a simple text format, see ``p2p.backup_fs.Serialize()``
@@ -201,10 +212,13 @@ def ReadIndex(raw_data, encoding='utf-8'):
     backup_fs.Clear()
     count = 0
     try:
-        json_data = json.loads(raw_data, encoding=encoding)
+        json_data = jsn.loads(
+            text_data,
+            encoding=encoding,
+        )
     except:
         lg.exc()
-        json_data = raw_data
+        json_data = text_data
     if _Debug:
         import pprint
         lg.out(_DebugLevel, pprint.pformat(json_data))
@@ -248,12 +262,11 @@ def Load(filepath=None):
     if not os.path.isfile(filepath):
         lg.warn('file %s not exist' % filepath)
         WriteIndex(filepath)
-        # return False
     src = bpio.ReadTextFile(filepath)
     if not src:
         lg.out(2, 'backup_control.Load ERROR reading file %s' % filepath)
         return False
-    inpt = cStringIO.StringIO(src)
+    inpt = StringIO(src)
     try:
         known_revision = int(inpt.readline().rstrip('\n'))
     except:
@@ -355,7 +368,7 @@ def IncomingSupplierBackupIndex(newpacket):
     try:
         session_key = key.DecryptLocalPrivateKey(b.EncryptedSessionKey)
         padded_data = key.DecryptWithSessionKey(session_key, b.EncryptedData)
-        inpt = cStringIO.StringIO(padded_data[:int(b.Length)])
+        inpt = StringIO(strng.to_text(padded_data[:int(b.Length)]))
         supplier_revision = inpt.readline().rstrip('\n')
         if supplier_revision:
             supplier_revision = int(supplier_revision)
@@ -379,9 +392,9 @@ def IncomingSupplierBackupIndex(newpacket):
         lg.out(4, 'backup_control.IncomingSupplierBackupIndex SKIP, supplier %s revision=%d, local revision=%d' % (
             newpacket.RemoteID, supplier_revision, revision(), ))
         return
-    raw_data = inpt.read()
+    text_data = inpt.read()
     inpt.close()
-    if ReadIndex(raw_data):
+    if ReadIndex(text_data):
         commit(supplier_revision)
         backup_fs.Scan()
         backup_fs.Calculate()
@@ -438,7 +451,7 @@ def DeleteBackup(backupID, removeLocalFilesToo=True, saveDB=True, calculate=True
         lg.out(8, 'backup_control.DeleteBackup %s is in process, stopping' % backupID)
         return True
     from customer import io_throttle
-    import backup_rebuilder
+    from . import backup_rebuilder
     lg.out(8, 'backup_control.DeleteBackup ' + backupID)
     # if we requested for files for this backup - we do not need it anymore
     io_throttle.DeleteBackupRequests(backupID)
@@ -474,7 +487,7 @@ def DeletePathBackups(pathID, removeLocalFilesToo=True, saveDB=True, calculate=T
     This removes all backups of given path ID
     Doing same operations as ``DeleteBackup()``.
     """
-    import backup_rebuilder
+    from . import backup_rebuilder
     from customer import io_throttle
     pathID = global_id.CanonicalID(pathID)
     # get the working item
@@ -846,7 +859,7 @@ def OnJobDone(backupID, result):
 
     Here we need to save the index data base.
     """
-    import backup_rebuilder
+    from . import backup_rebuilder
     from customer import io_throttle
     lg.out(4, '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
     lg.out(4, 'backup_control.OnJobDone [%s] %s, %d more tasks' % (backupID, result, len(tasks())))
@@ -1083,7 +1096,7 @@ def ListRunningBackups():
     """
     List backup IDs of currently running jobs.
     """
-    return jobs().keys()
+    return list(jobs().keys())
 
 
 def GetRunningBackupObject(backupID):
@@ -1111,7 +1124,7 @@ def test():
     import pprint
     pprint.pprint(backup_fs.fsID())
     pprint.pprint(backup_fs.fs())
-    print backup_fs.GetByID('0')
+    print(backup_fs.GetByID('0'))
     # pprint.pprint(backup_fs.WalkByID('0/0/2/19/F20140106100849AM'))
     # for pathID, localPath, item in backup_fs.IterateIDs():
     #     print pathID, misc.unicode_to_str_safe(localPath)

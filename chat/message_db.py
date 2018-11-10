@@ -32,7 +32,14 @@ module:: message_db
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+from __future__ import print_function
+from six.moves import map
+import six
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -54,7 +61,6 @@ from logs import lg
 from system import bpio
 
 from lib import utime
-from lib import codernitydb
 
 from crypt import key
 
@@ -63,6 +69,21 @@ from main import settings
 from chat import message_index
 
 from userid import my_id
+
+#------------------------------------------------------------------------------
+
+if six.PY2:
+    from CodernityDB.database import (
+        Database, RecordNotFound, RecordDeleted,
+        IndexNotFoundException, DatabaseIsNotOpened,
+        PreconditionsException, DatabaseConflict,
+    )
+else:
+    from CodernityDB3.database import (
+        Database, RecordNotFound, RecordDeleted,
+        IndexNotFoundException, DatabaseIsNotOpened,
+        PreconditionsException, DatabaseConflict,
+    )
 
 #------------------------------------------------------------------------------
 
@@ -76,7 +97,7 @@ def init():
         lg.warn('local storage already initialized')
         return
     chat_history_dir = os.path.join(settings.ChatHistoryDir(), 'current')
-    _LocalStorage = codernitydb.Database(chat_history_dir)
+    _LocalStorage = Database(chat_history_dir)
     _LocalStorage.custom_header = message_index.make_custom_header()
     if _Debug:
         lg.out(_DebugLevel, 'message_db.init in %s' % chat_history_dir)
@@ -90,8 +111,18 @@ def init():
             tmpdb = regenerate_indexes(temp_dir)
             rewrite_indexes(db(), tmpdb)
             bpio._dir_remove(temp_dir)
-            db().open()
-            db().reindex()
+            try:
+                db().open()
+                db().reindex()
+            except:
+                # really bad... we will lose whole data
+                _LocalStorage = Database(chat_history_dir)
+                _LocalStorage.custom_header = message_index.make_custom_header()
+                try:
+                    _LocalStorage.destroy()
+                except DatabaseConflict:
+                    pass
+                _LocalStorage.create()
     else:
         db().create()
     refresh_indexes(db())
@@ -149,17 +180,17 @@ def rewrite_indexes(db_instance, source_db_instance):
             index_name = source_index_file[2:source_index_file.index('.')]
             destination_index_path = os.path.join(existing_location, source_index_file)
             source_index_path = os.path.join(source_location, source_index_file)
-            if not bpio.AtomicWriteFile(destination_index_path, bpio.ReadTextFile(source_index_path)):
+            if not bpio.WriteTextFile(destination_index_path, bpio.ReadTextFile(source_index_path)):
                 lg.warn('failed writing index to %s' % destination_index_path)
                 continue
             destination_buck_path = os.path.join(db_instance.path, index_name + '_buck')
             source_buck_path = os.path.join(source_db_instance.path, index_name + '_buck')
-            if not bpio.AtomicWriteFile(destination_buck_path, bpio.ReadBinaryFile(source_buck_path)):
+            if not bpio.WriteBinaryFile(destination_buck_path, bpio.ReadBinaryFile(source_buck_path)):
                 lg.warn('failed writing index bucket to %s' % destination_buck_path)
                 continue
             destination_stor_path = os.path.join(db_instance.path, index_name + '_stor')
             source_stor_path = os.path.join(source_db_instance.path, index_name + '_stor')
-            if not bpio.AtomicWriteFile(destination_stor_path, bpio.ReadBinaryFile(source_stor_path)):
+            if not bpio.WriteBinaryFile(destination_stor_path, bpio.ReadBinaryFile(source_stor_path)):
                 lg.warn('failed writing index storage to %s' % destination_stor_path)
                 continue
             if _Debug:
@@ -190,7 +221,7 @@ def refresh_indexes(db_instance):
 def regenerate_indexes(temp_dir):
     """
     """
-    tmpdb = codernitydb.Database(temp_dir)
+    tmpdb = Database(temp_dir)
     tmpdb.custom_header = message_index.make_custom_header()
     tmpdb.create()
     refresh_indexes(tmpdb)
@@ -221,9 +252,9 @@ def get(index_name, key, with_doc=True, with_storage=True):
     # TODO: here and bellow need to add input validation
     try:
         res = db().get(index_name, key, with_doc, with_storage)
-    except (codernitydb.RecordNotFound, codernitydb.RecordDeleted, ):
+    except (RecordNotFound, RecordDeleted, ):
         return iter(())
-    except (codernitydb.IndexNotFoundException, codernitydb.DatabaseIsNotOpened, ):
+    except (IndexNotFoundException, DatabaseIsNotOpened, ):
         return iter(())
     return (r for r in [res, ])
 
@@ -236,7 +267,7 @@ def get_many(index_name, key=None, limit=-1, offset=0,
                                with_doc, with_storage,
                                start, end, **kwargs):
             yield r
-    except (codernitydb.PreconditionsException, codernitydb.IndexNotFoundException, codernitydb.DatabaseIsNotOpened, ):
+    except (PreconditionsException, IndexNotFoundException, DatabaseIsNotOpened, ):
         pass
 
 
@@ -244,7 +275,7 @@ def get_all(index_name, limit=-1, offset=0, with_doc=True, with_storage=True):
     try:
         for r in db().all(index_name, limit, offset, with_doc, with_storage):
             yield r
-    except (codernitydb.PreconditionsException, codernitydb.IndexNotFoundException, codernitydb.DatabaseIsNotOpened):
+    except (PreconditionsException, IndexNotFoundException, DatabaseIsNotOpened):
         pass
 
 #------------------------------------------------------------------------------
@@ -277,7 +308,7 @@ def search(query_json):
             if 'body' in query_json:
                 if r['payload']['body'].count(query_json['body']):
                     yield r
-    except (codernitydb.PreconditionsException, codernitydb.IndexNotFoundException, codernitydb.DatabaseIsNotOpened):
+    except (PreconditionsException, IndexNotFoundException, DatabaseIsNotOpened, ):
         pass
 
 #------------------------------------------------------------------------------
@@ -359,27 +390,27 @@ def build_json_message(data, message_id, sender=None, recipient=None):
 #------------------------------------------------------------------------------
 
 def _test_query(inp):
-    print 'Query:'
-    print inp
-    print '==================================='
+    print('Query:')
+    print(inp)
+    print('===================================')
     lst = _to_list(query_json(inp))
-    print '\n'.join(map(str, lst))
-    print 'total:', len(lst)
+    print('\n'.join(map(str, lst)))
+    print('total:', len(lst))
     return lst
 
 
 def main():
     if len(sys.argv) < 2:
-        print """
+        print("""
         commands:
         get_all <index>
         get_many <index> <key>
         get <index> <key>
-        insert "message body"
+        insert "message body" "message id"
         search "json query"
         indexes
         tmpdb <destination folder>
-        """
+        """)
         return
 
     if sys.argv[1] == 'get_all':
@@ -410,8 +441,14 @@ def main():
 
     if sys.argv[1] == 'indexes':
         init()
-        print 'Indexes in %s are:' % db().path
-        print '  ' + ('\n  '.join(db().indexes_names))
+        print('Indexes in %s are:' % db().path)
+        print('  ' + ('\n  '.join(db().indexes_names)))
+        shutdown()
+
+    if sys.argv[1] == 'refresh':
+        print('ReIndexing')
+        init()
+        refresh_indexes(db())
         shutdown()
 
     if sys.argv[1] == 'tmpdb':
@@ -419,12 +456,12 @@ def main():
 
     if sys.argv[1] == 'insert':
         init()
-        print insert(build_json_message(sys.argv[2]))
+        print(insert(build_json_message(data=sys.argv[2], message_id=sys.argv[3])))
         shutdown()
 
     if sys.argv[1] == 'search':
         init()
-        print '\n'.join(map(str, [m for m in search(json.loads(sys.argv[2]))]))
+        print('\n'.join(map(str, [m for m in search(json.loads(sys.argv[2]))])))
         shutdown()
 
 

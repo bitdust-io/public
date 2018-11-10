@@ -2,6 +2,8 @@
 
 [bitdust.io](https://bitdust.io)
 
+[![Build Status](https://travis-ci.com/bitdust-io/devel.svg?branch=master)](https://travis-ci.com/bitdust-io/devel)
+
 
 ## About
 
@@ -51,6 +53,10 @@ And use pip to get all required packages:
         pip install --upgrade pip --user
         pip install virtualenv --user
 
+
+On Raspberry PI you will need to install those packages:
+
+        sudo apt-get install git gcc python-dev python-virtualenv libffi-dev libssl-dev
 
 
 #### Get BitDust to your local machine

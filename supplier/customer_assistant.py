@@ -45,7 +45,11 @@ if not - remove that customer and stop assistant
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -210,7 +214,7 @@ class CustomerAssistant(automat.Automat):
                 remote_idurl=self.customer_idurl,  # send to the customer
             )
         else:
-            lg.warn('key %s is not registered, not able to send his files' % customer_key_id)
+            lg.err('key %s is not registered, not able to send his files' % customer_key_id)
 
     def doDestroyMe(self, arg):
         """

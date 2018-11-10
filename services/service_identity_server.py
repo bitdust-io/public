@@ -30,6 +30,7 @@
 module:: service_identity_server
 """
 
+from __future__ import absolute_import
 from services.local_service import LocalService
 
 
@@ -51,9 +52,9 @@ class IdentityServerService(LocalService):
                 ]
 
     def installed(self):
-        from userid import my_id
-        if not my_id.isLocalIdentityReady():
-            return False
+        # from userid import my_id
+        # if not my_id.isLocalIdentityReady():
+        #     return False
         return True
 
     def enabled(self):

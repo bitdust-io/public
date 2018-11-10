@@ -31,6 +31,10 @@
 
 #------------------------------------------------------------------------------
 
+from __future__ import absolute_import
+
+#------------------------------------------------------------------------------
+
 _Debug = True
 _DebugLevel = 4
 
@@ -39,6 +43,8 @@ _DebugLevel = 4
 import os
 import sys
 import gc
+import six
+import base64
 
 #------------------------------------------------------------------------------
 
@@ -53,11 +59,13 @@ from logs import lg
 from system import bpio
 
 from lib import misc
+from lib import strng
 
 from main import settings
 
 from crypt import key
 from crypt import rsa_key
+from crypt import hashes
 
 from userid import my_id
 from userid import global_id
@@ -229,8 +237,8 @@ def save_keys_local(keys_folder=None):
             key_filepath = os.path.join(keys_folder, key_id + '.public')
         else:
             key_filepath = os.path.join(keys_folder, key_id + '.private')
-        key_string = key_object.toString()
-        bpio.WriteFile(key_filepath, key_string)
+        key_string = key_object.toPrivateString()
+        bpio.WriteTextFile(key_filepath, key_string)
         count += 1
     if _Debug:
         lg.out(_DebugLevel, '    %d keys saved' % count)
@@ -249,12 +257,9 @@ def generate_key(key_id, key_size=4096, keys_folder=None):
     known_keys()[key_id] = key_object
     if not keys_folder:
         keys_folder = settings.KeyStoreDir()
-    key_string = key_object.toString()
-    if key_object.isPublic():
-        key_filepath = os.path.join(keys_folder, key_id + '.public')
-    else:
-        key_filepath = os.path.join(keys_folder, key_id + '.private')
-    bpio.WriteFile(key_filepath, key_string)
+    key_string = key_object.toPrivateString()
+    key_filepath = os.path.join(keys_folder, key_id + '.private')
+    bpio.WriteTextFile(key_filepath, key_string)
     if _Debug:
         lg.out(_DebugLevel, '    key %s generated, saved to %s' % (key_id, key_filepath))
     return key_object
@@ -266,7 +271,7 @@ def register_key(key_id, key_object_or_string, keys_folder=None):
     if key_id in known_keys():
         lg.warn('key %s already exists' % key_id)
         return None
-    if isinstance(key_object_or_string, str):
+    if isinstance(key_object_or_string, six.string_types):
         lg.out(4, 'my_keys.register_key %s from %d bytes openssh_input_string' % (
             key_id, len(key_object_or_string)))
         key_object = unserialize_key_to_object(key_object_or_string)
@@ -279,12 +284,14 @@ def register_key(key_id, key_object_or_string, keys_folder=None):
     known_keys()[key_id] = key_object
     if not keys_folder:
         keys_folder = settings.KeyStoreDir()
-    key_string = key_object.toString()
     if key_object.isPublic():
+        key_string = key_object.toPublicString()
         key_filepath = os.path.join(keys_folder, key_id + '.public')
+        bpio.WriteTextFile(key_filepath, key_string)
     else:
+        key_string = key_object.toPrivateString()
         key_filepath = os.path.join(keys_folder, key_id + '.private')
-    bpio.WriteFile(key_filepath, key_string)
+        bpio.WriteTextFile(key_filepath, key_string)
     if _Debug:
         lg.out(_DebugLevel, '    key %s added, saved to %s' % (key_id, key_filepath))
     return key_filepath
@@ -317,10 +324,18 @@ def erase_key(key_id, keys_folder=None):
 def validate_key(key_object):
     """
     """
-    data256 = os.urandom(256)
-    hash_base = key.Hash(data256)
-    signature256 = key_object.sign(hash_base)
-    return key_object.verify(signature256, hash_base)
+    sample_data = strng.to_bin(base64.b64encode(os.urandom(256)))
+    sample_hash_base = hashes.sha1(sample_data, hexdigest=True)
+    sample_signature = key_object.sign(sample_hash_base)
+    is_valid = key_object.verify(sample_signature, sample_hash_base)
+    if not is_valid:
+        if _Debug:
+            lg.err('validate_key FAILED')
+            lg.out(_DebugLevel, 'pubkey=%r' % key_object.toPublicString())
+            lg.out(_DebugLevel, 'signature=%r' % sample_signature)
+            lg.out(_DebugLevel, 'hash_base=%r' % sample_hash_base)
+            lg.out(_DebugLevel, 'data=%r' % sample_data)
+    return is_valid
 
 #------------------------------------------------------------------------------
 
@@ -426,7 +441,7 @@ def serialize_key(key_id):
     if not key_object:
         lg.warn('key %s is unknown' % key_id)
         return None
-    return key_object.toString()
+    return key_object.toPrivateString()
 
 
 def unserialize_key_to_object(raw_string):
@@ -444,16 +459,18 @@ def unserialize_key_to_object(raw_string):
 
 def get_public_key_raw(key_id):
     kobj = key_obj(key_id)
-    if kobj.isPublic():
-        return kobj.toString()
+    if not kobj:
+        raise ValueError('key not exist')
     return kobj.toPublicString()
 
 
 def get_private_key_raw(key_id):
     kobj = key_obj(key_id)
+    if not kobj:
+        raise ValueError('key not exist')
     if kobj.isPublic():
-        raise Exception('not a private key')
-    return kobj.toString()
+        raise ValueError('not a private key')
+    return kobj.toPrivateString()
 
 #------------------------------------------------------------------------------
 
@@ -471,7 +488,7 @@ def make_master_key_info(include_private=False):
     }
     r['private'] = None
     if include_private:
-        r['private'] = str(key.MyPrivateKeyObject().toString())
+        r['private'] = str(key.MyPrivateKeyObject().toPrivateString())
     if hasattr(key.MyPrivateKeyObject(), 'size'):
         r['size'] = str(key.MyPrivateKeyObject().size())
     else:
@@ -496,13 +513,13 @@ def make_key_info(key_object, key_id=None, key_alias=None, creator_idurl=None, i
     }
     r['private'] = None
     if key_object.isPublic():
-        r['public'] = str(key_object.toString())
+        r['public'] = str(key_object.toPublicString())
         if include_private:
             raise Exception('this key contains only public component')
     else:
         r['public'] = str(key_object.toPublicString())
         if include_private:
-            r['private'] = str(key_object.toString())
+            r['private'] = str(key_object.toPrivateString())
     if hasattr(key_object, 'size'):
         r['size'] = str(key_object.size())
     else:
