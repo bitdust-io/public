@@ -31,7 +31,12 @@
 
 #------------------------------------------------------------------------------
 
+from __future__ import absolute_import
 import re
+
+#------------------------------------------------------------------------------
+
+from lib import strng
 
 #------------------------------------------------------------------------------
 
@@ -130,7 +135,7 @@ def ParseGlobalID(inp, detect_version=False):
             "key_id": "group_abc$alice@first-machine.com",
             "idhost": "first-machine.com",
             "customer": "alice@first-machine.com",
-            "idurl": "http://first-machine.com/alice.xml",
+            "idurl": b"http://first-machine.com/alice.xml",
             "path": "myfiles/animals/cat.png",
             "version": "F20160313043757PM",
         }
@@ -147,7 +152,7 @@ def ParseGlobalID(inp, detect_version=False):
             "key_id": "group_abc$alice@first-machine.com",
             "idhost": "first-machine.com",
             "customer": "alice@first-machine.com",
-            "idurl": "http://first-machine.com/alice.xml",
+            "idurl": b"http://first-machine.com/alice.xml",
             "path": "1/2/3/F20160313043757PM/4-5-Parity",
             "version": "F20160313043757PM",
         }
@@ -158,12 +163,13 @@ def ParseGlobalID(inp, detect_version=False):
         "key_id": "",
         "idhost": "",
         "customer": "",
-        "idurl": "",
+        "idurl": b'',
         "path": "",
         "version": "",
     }
-    if not inp or not str(inp):
+    if not inp:
         return result
+    inp = strng.to_text(inp)
     if inp.count(':'):
         user, _, path = inp.strip().rpartition(':')
     else:
@@ -199,7 +205,7 @@ def ParseGlobalID(inp, detect_version=False):
             if port >= 0:
                 result['idhost'] = "%s:%d" % (result['idhost'][:_pos], port)
         if result['user'] and result['idhost']:
-            result['idurl'] = 'http://{}/{}.xml'.format(result['idhost'], result['user'])
+            result['idurl'] = strng.to_bin('http://{}/{}.xml'.format(result['idhost'], result['user']))
             result['customer'] = '{}@{}'.format(result['user'], result['idhost'].replace(':', '_'))
     if path:
         if path.count('#'):
@@ -300,7 +306,7 @@ def GlobalUserToIDURL(inp):
             port = -1
         if port >= 0:
             idhost = "%s:%d" % (idhost[:_pos], port)
-    return 'http://{}/{}.xml'.format(idhost, user)
+    return strng.to_bin('http://{}/{}.xml'.format(idhost, user))
 
 #------------------------------------------------------------------------------
 
@@ -339,24 +345,24 @@ def MakeGlobalQueueID(queue_alias, owner_id=None, supplier_id=None):
     """
     global _FORMAT_GLOBAL_ID_QUEUE_ID
     return _FORMAT_GLOBAL_ID_QUEUE_ID.format(
-        queue_alias=queue_alias,
-        owner_id=owner_id,
-        supplier_id=supplier_id,
+        queue_alias=strng.to_text(queue_alias),
+        owner_id=strng.to_text(owner_id),
+        supplier_id=strng.to_text(supplier_id),
     )
 
 def ParseGlobalQueueID(inp):
     global _REGEX_GLOBAL_ID_QUEUE_ID
     ret = {
         'queue_alias': '',
-        'owner_id': '',
-        'supplier_id': '',
+        'owner_id': b'',
+        'supplier_id': b'',
     }
     result = re.match(_REGEX_GLOBAL_ID_QUEUE_ID, inp)
     if not result:
         return ret
-    ret['queue_alias'] = result.group('queue_alias')
-    ret['owner_id'] = result.group('owner_id')
-    ret['supplier_id'] = result.group('supplier_id')
+    ret['queue_alias'] = strng.to_text(result.group('queue_alias'))
+    ret['owner_id'] = strng.to_bin(result.group('owner_id'))
+    ret['supplier_id'] = strng.to_bin(result.group('supplier_id'))
     return ret
 
 #------------------------------------------------------------------------------

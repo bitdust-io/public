@@ -31,28 +31,44 @@
 
 #------------------------------------------------------------------------------
 
+from __future__ import absolute_import
+
 from Cryptodome.Hash import MD5
 from Cryptodome.Hash import SHA1
 from Cryptodome.Hash import SHA256
 
+from lib import strng
+
 #------------------------------------------------------------------------------
 
-def md5(inp, hexdigest=False):
+def md5(inp, hexdigest=False, return_object=False):
+    if not strng.is_bin(inp):
+        raise ValueError('input must by byte string')
     h = MD5.new(inp)
+    if return_object:
+        return h
     if hexdigest:
-        return h.hexdigest()
+        return strng.to_bin(h.hexdigest())
     return h.digest()
 
 
-def sha1(inp, hexdigest=False):
+def sha1(inp, hexdigest=False, return_object=False):
+    if not strng.is_bin(inp):
+        raise ValueError('input must by byte string')
     h = SHA1.new(inp)
+    if return_object:
+        return h
     if hexdigest:
-        return h.hexdigest()
+        return strng.to_bin(h.hexdigest())
     return h.digest()
 
 
-def sha256(inp, hexdigest=False):
+def sha256(inp, hexdigest=False, return_object=False):
+    if not strng.is_bin(inp):
+        raise ValueError('input must by byte string')
     h = SHA256.new(inp)
+    if return_object:
+        return h
     if hexdigest:
-        return h.hexdigest()
+        return strng.to_bin(h.hexdigest())
     return h.digest()

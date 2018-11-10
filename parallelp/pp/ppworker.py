@@ -1,24 +1,6 @@
 #!/usr/bin/env python
 # ppworker.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
-#
-# This file (ppworker.py) is part of BitDust Software.
-#
-# BitDust is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# BitDust Software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
-#
-# Please contact us if you have any questions at bitdust.io@gmail.com
 # Parallel Python Software: http://www.parallelpython.com
 # Copyright (c) 2005-2009, Vitalii Vanovschi
 # All rights reserved.
@@ -50,11 +32,13 @@ Parallel Python Software, PP Worker.
 http://www.parallelpython.com - updates, documentation, examples and support
 forums
 """
+from __future__ import absolute_import
+from __future__ import print_function
 import sys
 import os
-import StringIO
-import cPickle as pickle
-import pptransport
+import six.moves.cPickle as pickle
+from io import BytesIO
+from . import pptransport
 
 try:
     import msvcrt
@@ -82,7 +66,7 @@ def preprocess(msg):
         try:
             globals()[module.split('.')[0]] = __import__(module)
         except:
-            print "An error has occured during the module import"
+            print("An error has occured during the module import")
             sys.excepthook(*sys.exc_info())
     return fname, fobjs
 
@@ -92,7 +76,7 @@ class _WorkerProcess(object):
     def __init__(self):
         self.hashmap = {}
         self.e = sys.__stderr__
-        self.sout = StringIO.StringIO()
+        self.sout = BytesIO()
 #        self.sout = open("/tmp/pp.debug","a+")
         origsout = sys.stdout
         sys.stdout = self.sout
@@ -115,8 +99,8 @@ class _WorkerProcess(object):
                         eval(__fobj)
                         globals().update(locals())
                     except:
-                        print "An error has occured during the " + \
-                              "function import"
+                        print("An error has occured during the " + \
+                              "function import")
                         sys.excepthook(*sys.exc_info())
 
                 __args = pickle.loads(__sargs)
@@ -125,7 +109,7 @@ class _WorkerProcess(object):
                 try:
                     __result = __f(*__args)
                 except:
-                    print "An error has occured during the function execution"
+                    print("An error has occured during the function execution")
                     sys.excepthook(*sys.exc_info())
                     __result = None
 
@@ -134,7 +118,7 @@ class _WorkerProcess(object):
                 self.t.send(__sresult)
                 self.sout.truncate(0)
         except:
-            print "Fatal error has occured during the function execution"
+            print("Fatal error has occured during the function execution")
             sys.excepthook(*sys.exc_info())
             __result = None
             __sresult = pickle.dumps((__result, self.sout.getvalue()),

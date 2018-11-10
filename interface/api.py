@@ -32,7 +32,12 @@ Here is a bunch of methods to interact with BitDust software.
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+from six.moves import map
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -41,8 +46,14 @@ import os
 import sys
 import time
 import json
+import gc
 
 from twisted.internet.defer import Deferred
+
+#------------------------------------------------------------------------------
+
+from lib import strng
+from lib import jsn
 
 from logs import lg
 
@@ -69,7 +80,7 @@ def OK(result='', message=None, status='OK', extra_fields=None):
     o = on_api_result_prepared(o)
     api_method = sys._getframe().f_back.f_code.co_name
     if _Debug:
-        lg.out(_DebugLevel, 'api.%s return OK(%s)' % (api_method, json.dumps(o, sort_keys=True)[:150]))
+        lg.out(_DebugLevel, 'api.%s return OK(%s)' % (api_method, jsn.dumps(o, sort_keys=True)[:150]))
     return o
 
 
@@ -85,7 +96,7 @@ def RESULT(result=[], message=None, status='OK', errors=None, source=None):
     o = on_api_result_prepared(o)
     api_method = sys._getframe().f_back.f_code.co_name
     if _Debug:
-        lg.out(_DebugLevel, 'api.%s return RESULT(%s)' % (api_method, json.dumps(o, sort_keys=True)[:150]))
+        lg.out(_DebugLevel, 'api.%s return RESULT(%s)' % (api_method, jsn.dumps(o, sort_keys=True)[:150]))
     return o
 
 
@@ -99,13 +110,13 @@ def ERROR(errors=[], message=None, status='ERROR', extra_fields=None):
     o = on_api_result_prepared(o)
     api_method = sys._getframe().f_back.f_code.co_name
     if _Debug:
-        lg.out(_DebugLevel, 'api.%s return ERROR(%s)' % (api_method, json.dumps(o, sort_keys=True)[:150]))
+        lg.out(_DebugLevel, 'api.%s return ERROR(%s)' % (api_method, jsn.dumps(o, sort_keys=True)[:150]))
     return o
 
 #------------------------------------------------------------------------------
 
 
-def stop():
+def process_stop():
     """
     Stop the main process immediately.
 
@@ -113,7 +124,7 @@ def stop():
 
         {'status': 'OK', 'result': 'stopped'}
     """
-    lg.out(4, 'api.stop sending event "stop" to the shutdowner() machine')
+    lg.out(4, 'api.process_stop sending event "stop" to the shutdowner() machine')
     from twisted.internet import reactor
     from main import shutdowner
     reactor.callLater(0.1, shutdowner.A, 'stop', 'exit')
@@ -121,7 +132,7 @@ def stop():
     return OK('stopped')
 
 
-def restart(showgui=False):
+def process_restart(showgui=False):
     """
     Restart the main process, if flag show=True the GUI will be opened after
     restart.
@@ -133,29 +144,31 @@ def restart(showgui=False):
     from twisted.internet import reactor
     from main import shutdowner
     if showgui:
-        lg.out(4, 'api.restart forced for GUI, added param "show", sending event "stop" to the shutdowner() machine')
+        lg.out(4, 'api.process_restart sending event "stop" to the shutdowner() machine')
         reactor.callLater(0.1, shutdowner.A, 'stop', 'restartnshow')
         # shutdowner.A('stop', 'restartnshow')
         return OK('restarted with GUI')
-    lg.out(4, 'api.restart did not found bpgui process nor forced for GUI, just do the restart, sending event "stop" to the shutdowner() machine')
+    lg.out(4, 'api.process_restart sending event "stop" to the shutdowner() machine')
     # shutdowner.A('stop', 'restart')
     reactor.callLater(0.1, shutdowner.A, 'stop', 'restart')
     return OK('restarted')
 
 
-def show():
+def process_show():
     """
+    Deprecated.
     Opens a default web browser to show the BitDust GUI.
 
     Return:
 
         {'status': 'OK',   'result': '"show" event has been sent to the main process'}
     """
-    lg.out(4, 'api.show')
+    lg.out(4, 'api.process_show')
     # TODO: raise up electron window ?
     return OK('"show" event has been sent to the main process')
 
-def health():
+
+def process_health():
     """
     Returns true if system is running 
 
@@ -163,12 +176,19 @@ def health():
 
         {'status': 'OK' }
     """
-    lg.out(4, 'api.health')
+    lg.out(4, 'api.process_health')
+    return OK()
 
+
+def process_debug():
+    """
+    Execute a breakpoint inside main thread and start Python shell using standard `pdb.set_trace()` debugger.
+    """
+    import pdb
+    pdb.set_trace()
     return OK()
 
 #------------------------------------------------------------------------------
-
 
 def config_get(key):
     """
@@ -249,10 +269,10 @@ def config_set(key, value):
     if not typ or typ in [config_types.TYPE_STRING,
                           config_types.TYPE_TEXT,
                           config_types.TYPE_UNDEFINED, ]:
-        config.conf().setData(key, unicode(value))
+        config.conf().setData(key, strng.text_type(value))
     elif typ in [config_types.TYPE_BOOLEAN, ]:
-        if (isinstance(value, str) or isinstance(value, unicode)):
-            vl = value.strip().lower() == 'true'
+        if strng.is_string(value):
+            vl = strng.to_text(value).strip().lower() == 'true'
         else:
             vl = bool(value)
         config.conf().setBool(key, vl)
@@ -266,7 +286,7 @@ def config_set(key, value):
                  config_types.TYPE_PASSWORD, ]:
         config.conf().setString(key, value)
     else:
-        config.conf().setData(key, unicode(value))
+        config.conf().setData(key, strng.text_type(value))
     v.update({'key': key,
               'value': config.conf().getData(key),
               'type': config.conf().getTypeLabel(key)
@@ -301,10 +321,10 @@ def config_list(sort=False):
     lg.out(4, 'api.config_list')
     from main import config
     r = config.conf().cache()
-    r = map(lambda key: {
+    r = [{
         'key': key,
         'value': str(r[key]).replace('\n', '\\n'),
-        'type': config.conf().getTypeLabel(key)}, r.keys())
+        'type': config.conf().getTypeLabel(key)} for key in list(r.keys())]
     if sort:
         r = sorted(r, key=lambda i: i['key'])
     return RESULT(r)
@@ -354,8 +374,28 @@ def identity_create(username):
     my_id_registrator.A('start', (username, ))
     return ret
 
+
+def identity_backup(destination_filepath):
+    from userid import my_id
+    from crypt import key
+    from system import bpio
+    if not my_id.isLocalIdentityReady():
+        return ERROR('local identity is not ready')
+    # TextToSave = strng.to_text(my_id.getLocalIDURL()) + u"\n" + key.MyPrivateKey()
+    TextToSave = ''
+    for id_source in my_id.getLocalIdentity().getSources():
+        TextToSave += strng.to_text(id_source) + u'\n'
+    TextToSave += key.MyPrivateKey()
+    if not bpio.WriteTextFile(destination_filepath, TextToSave):
+        del TextToSave
+        gc.collect()
+        return ERROR('error writing to %s\n' % destination_filepath)
+    del TextToSave
+    gc.collect()
+    return OK(message='WARNING! keep your master key in a safe place and never ever publish it anywhere!')
+
+
 def identity_recover(private_key_source, known_idurl=None):
-    from lib import nameurl
     from userid import my_id
     from userid import id_restorer
 
@@ -364,22 +404,41 @@ def identity_recover(private_key_source, known_idurl=None):
     if len(private_key_source) > 1024 * 10:
         return ERROR('private key is too large')
 
-    idurl = ''
+    idurl_list = []
     pk_source = ''
     try:
         lines = private_key_source.split('\n')
-        idurl = lines[0]
-        pk_source = '\n'.join(lines[1:])
-        if idurl != nameurl.FilenameUrl(nameurl.UrlFilename(idurl)):
-            idurl = ''
-            pk_source = private_key_source
+        for i in range(len(lines)):
+            line = lines[i]
+            if not line.startswith('-----BEGIN RSA PRIVATE KEY-----'):
+                idurl_list.append(strng.to_bin(line.strip()))
+                continue
+            pk_source = '\n'.join(lines[i:])
+            break
     except:
-        idurl = ''
+        idurl_list = []
         pk_source = private_key_source
-    if not idurl and known_idurl:
-        idurl = known_idurl
-    if not idurl:
-        return ERROR('you must specify the global  IDURL address where your identity file was last located')
+    if not idurl_list and known_idurl:
+        idurl_list.append(known_idurl)
+    if not idurl_list:
+        return ERROR('you must provide at least one IDURL address of your identity')
+
+#     idurl = ''
+#     pk_source = ''
+#     try:
+#         lines = private_key_source.split('\n')
+#         idurl = lines[0]
+#         pk_source = '\n'.join(lines[1:])
+#         if idurl != nameurl.FilenameUrl(nameurl.UrlFilename(idurl)):
+#             idurl = ''
+#             pk_source = private_key_source
+#     except:
+#         idurl = ''
+#         pk_source = private_key_source
+#     if not idurl and known_idurl:
+#         idurl = known_idurl
+#     if not idurl:
+#         return ERROR('you must specify the global IDURL address where your identity file was last located')
 
     ret = Deferred()
     my_id_restorer = id_restorer.A()
@@ -398,7 +457,8 @@ def identity_recover(private_key_source, known_idurl=None):
             return
 
     my_id_restorer.addStateChangedCallback(_id_restorer_state_changed)
-    my_id_restorer.A('start', {'idurl': idurl, 'keysrc': pk_source, })
+    my_id_restorer.A('start', {'idurl': idurl_list[0], 'keysrc': pk_source, })
+    # TODO: iterate over idurl_list to find at least one reliable source
     return ret
 
 def identity_list():
@@ -1147,9 +1207,9 @@ def file_upload_start(local_path, remote_path, wait_result=False, open_share=Fal
         return ERROR('invalid "remote_path" format')
     path = bpio.remotePath(parts['path'])
     pathID = backup_fs.ToID(path, iter=backup_fs.fs(parts['idurl']))
-    keyID = my_keys.make_key_id(alias=parts['key_alias'], creator_glob_id=parts['customer'])
     if not pathID:
-        return ERROR('path "%s" not registered yet' % path)
+        return ERROR('path "%s" not registered yet' % remote_path)
+    keyID = my_keys.make_key_id(alias=parts['key_alias'], creator_glob_id=parts['customer'])
     customerID = global_id.MakeGlobalID(customer=parts['customer'], key_alias=parts['key_alias'])
     pathIDfull = packetid.MakeBackupID(customerID, pathID)
     if open_share and parts['key_alias'] != 'master':
@@ -1602,7 +1662,7 @@ def share_create(owner_id=None, key_size=2048):
     key_id = None
     while True:
         random_sample = os.urandom(24)
-        key_alias = 'share_%s' % key.HashMD5(random_sample, hexdigest=True)
+        key_alias = 'share_%s' % strng.to_text(key.HashMD5(random_sample, hexdigest=True))
         key_id = my_keys.make_key_id(alias=key_alias, creator_glob_id=owner_id)
         if my_keys.is_key_registered(key_id):
             continue
@@ -2013,7 +2073,7 @@ def customer_reject(idurl_or_global_id):
     space_dict = accounting.read_customers_quotas()
     consumed_by_cutomer = space_dict.pop(customer_idurl, None)
     consumed_space = accounting.count_consumed_space(space_dict)
-    space_dict['free'] = settings.getDonatedBytes() - int(consumed_space)
+    space_dict[b'free'] = settings.getDonatedBytes() - int(consumed_space)
     accounting.write_customers_quotas(space_dict)
     events.send('existing-customer-terminated', dict(idurl=customer_idurl))
     # restart local tester
@@ -2157,7 +2217,7 @@ def automats_list():
         'index': a.index,
         'name': a.name,
         'state': a.state,
-        'timers': (','.join(a.getTimers().keys())),
+        'timers': (','.join(list(a.getTimers().keys()))),
     } for a in automat.objects().values()]
     lg.out(4, 'api.automats_list responded with %d items' % len(result))
     return RESULT(result)
@@ -2198,7 +2258,7 @@ def services_list():
         'installed': svc.installed(),
         'config_path': svc.config_path,
         'depends': svc.dependent_on()
-    } for name, svc in sorted(driver.services().items(), key=lambda i: i[0])]
+    } for name, svc in sorted(list(driver.services().items()), key=lambda i: i[0])]
     lg.out(4, 'api.services_list responded with %d items' % len(result))
     return RESULT(result)
 
@@ -2381,7 +2441,7 @@ def packets_list():
             'from_to': 'to',
             'target': pkt_out.remote_idurl,
         })
-    for pkt_in in packet_in.items().values():
+    for pkt_in in list(packet_in.inbox_items().values()):
         result.append({
             'name': pkt_in.transfer_id,
             'label': pkt_in.label,
@@ -2790,6 +2850,31 @@ def nickname_set(nickname):
 
 #------------------------------------------------------------------------------
 
+def message_history(user):
+    from chat import message_db
+    from userid import my_id, global_id
+    from crypt import my_keys
+    if user is None:
+        return ERROR('User id is required')
+    if not user.count('@'):
+        from contacts import contactsdb
+        user_idurl = contactsdb.find_correspondent_by_nickname(user)
+        if not user_idurl:
+            return ERROR('user not found')
+        user = global_id.UrlToGlobalID(user_idurl)
+    glob_id = global_id.ParseGlobalID(user)
+    if not glob_id['idurl']:
+        return ERROR('wrong user')
+    target_glob_id = global_id.MakeGlobalID(**glob_id)
+    if not my_keys.is_valid_key_id(target_glob_id):
+        return ERROR('invalid key_id: %s' % target_glob_id)
+    lg.out(4, 'api.message_history with "%s"' % target_glob_id)
+    key = '{}:{}'.format(my_id.getGlobalID(key_alias='master'), target_glob_id)
+    messages = [m for m in message_db.get_many(index_name='sender_recipient_glob_id', key=key)]
+    messages.reverse()
+    return RESULT(messages)
+
+
 def message_send(recipient, json_data, timeout=5):
     """
     Sends a text message to remote peer, `recipient` is a string with nickname or global_id.
@@ -2849,10 +2934,12 @@ def message_receive(consumer_id):
          'result': [{
             'type': 'private_message',
             'dir': 'incoming',
-            'id': '123456788',
-            'sender': 'abc$alice@first-host.com',
-            'recipient': 'abc$bob@second-host.net',
-            'message': 'Hello World!',
+            'message_id': '123456788',
+            'sender': 'messages$alice@first-host.com',
+            'recipient': 'messages$bob@second-host.net',
+            'data': {
+                'message': 'Hello BitDust!'
+            },
             'time': 123456789
         }]}
     """
@@ -2922,14 +3009,13 @@ def broadcast_send_message(payload):
 #------------------------------------------------------------------------------
 
 def event_send(event_id, json_data=None):
-    import json
     from main import events
     json_payload = None
     json_length = 0
-    if json_data and (isinstance(json_data, str) or isinstance(json_data, unicode)):
+    if json_data and strng.is_string(json_data):
         json_length = len(json_data)
         try:
-            json_payload = json.loads(json_data or '{}')
+            json_payload = json.loads(strng.to_text(json_data or '{}'))
         except:
             return ERROR('json data payload is not correct')
     evt = events.send(event_id, data=json_payload)
@@ -3060,7 +3146,7 @@ def network_connected(wait_timeout=5):
         d = service_restart(service_name, wait_timeout=wait_timeout)
         d.addCallback(_on_service_restarted, service_name)
         d.addErrback(lambda err: ret.callback(dict(
-            ERROR(err.getErrorMessage()).items() + {'reason': '{}_restart_error'.format(service_name)}.items())))
+            list(ERROR(err.getErrorMessage()).items()) + list({'reason': '{}_restart_error'.format(service_name)}.items()))))
         return None
 
     def _do_service_test(service_name):
@@ -3281,12 +3367,5 @@ def network_status(show_suppliers=True, show_customers=True, show_cache=True,
                     sessions.append(i)
                 r['proxy']['sessions' ] = sessions
     return RESULT([r, ])
-
-#------------------------------------------------------------------------------
-
-
-def pdb_shell():
-    import pdb; pdb.set_trace()
-    return OK()
 
 #------------------------------------------------------------------------------

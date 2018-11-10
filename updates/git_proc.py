@@ -36,7 +36,13 @@ A code for all platforms to perform source code updates from official Git repo a
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+from __future__ import print_function
+from io import open
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 _DebugLevel = 6
 
 #------------------------------------------------------------------------------
@@ -60,6 +66,8 @@ if __name__ == '__main__':
 
 #------------------------------------------------------------------------------
 
+from lib import strng
+
 from logs import lg
 
 from system import bpio
@@ -70,22 +78,24 @@ from main import events
 #------------------------------------------------------------------------------
 
 _CurrentProcess = None
-_FirstRunDelay = 30
+_FirstRunDelay = 1200
 _LoopInterval = 3600 * 6
 _ShedulerTask = None
 
 #------------------------------------------------------------------------------
 
 def write2log(txt):
-    out_file = file(settings.UpdateLogFilename(), 'a')
-    print >>out_file, txt
+    out_file = open(settings.UpdateLogFilename(), 'a')
+    out_file.write(strng.to_text(txt))
     out_file.close()
 
 #------------------------------------------------------------------------------
 
 def init():
     lg.out(4, 'git_proc.init')
-    reactor.callLater(0, loop, True)
+    if os.environ.get('BITDUST_GIT_SYNC_SKIP', '0') == '1':
+        return
+    reactor.callLater(0, loop, first_start=True)
 
 
 def shutdown():
@@ -169,7 +179,7 @@ def sync(callback_func=None, update_method='rebase'):
         if retcode != 0:
             result = 'sync-error'
         else:
-            if response.count('Changes from') or response.count('Fast-forwarded'):
+            if response.count(b'Changes from') or response.count(b'Fast-forwarded'):
                 result = 'code-fetched'
             else:
                 result = 'up-to-date'
@@ -181,11 +191,11 @@ def sync(callback_func=None, update_method='rebase'):
                 callback_func('sync-error')
             return
         result = 'sync-error'
-        if response.count('Unpacking') or \
-            (response.count('master') and response.count('->')) or \
-            response.count('Updating') or \
-            response.count('Receiving') or \
-                response.count('Counting'):
+        if response.count(b'Unpacking') or \
+            (response.count(b'master') and response.count(b'->')) or \
+            response.count(b'Updating') or \
+            response.count(b'Receiving') or \
+                response.count(b'Counting'):
             result = 'new-code'
         if update_method == 'reset':
             run(['reset', '--hard', 'origin/master', ],
@@ -266,20 +276,20 @@ class GitProcessProtocol(protocol.ProcessProtocol):
 
     def __init__(self, callbacks=[]):
         self.callbacks = callbacks
-        self.out = ''
-        self.err = ''
+        self.out = b''
+        self.err = b''
 
     def errReceived(self, inp):
         self.err += inp
         for line in inp.splitlines():
             if _Debug:
-                lg.out(_DebugLevel, '[git:err]: %s' % line)
+                lg.out(_DebugLevel, '[git:err]: %s' % strng.to_text(line))
 
     def outReceived(self, inp):
         self.out += inp
         for line in inp.splitlines():
             if _Debug:
-                lg.out(_DebugLevel, '[git:out]: %s' % line)
+                lg.out(_DebugLevel, '[git:out]: %s' % strng.to_text(line))
 
     def processEnded(self, reason):
         if _Debug:
@@ -335,7 +345,7 @@ if __name__ == "__main__":
     lg.set_debug_level(18)
 
     def _result(res):
-        print 'RESULT:', res
+        print('RESULT:', res)
         reactor.stop()
     reactor.callWhenRunning(sync, _result)
     reactor.run()

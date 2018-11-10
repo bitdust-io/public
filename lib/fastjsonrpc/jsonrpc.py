@@ -23,6 +23,9 @@ Provides functions for encoding and decoding the JSON into functions, params
 etc. and other JSON-RPC related stuff like constants.
 """
 
+from __future__ import absolute_import
+import six
+
 cjson_loaded = False
 try:
     import cjson
@@ -63,13 +66,19 @@ def jdumps(obj):
     @rtype: str
     @return: JSON representation of obj
     """
+
+    def _to_text(v):
+        if isinstance(v, six.binary_type):
+            v = v.decode('utf-8')
+        return v
+
     if cjson_loaded:
         try:
             return cjson.encode(obj)
         except cjson.EncodeError as e:
             raise ValueError(str(e))
     else:
-        return json.dumps(obj)
+        return json.dumps(obj, default=_to_text)
 
 
 def jloads(json_string):
@@ -217,7 +226,7 @@ def verifyMethodCall(request):
         # 'jsonrpc' is only contained in V2 requests
         if 'jsonrpc' in request:
             if not isinstance(request['jsonrpc'],
-                              (types.StringTypes, types.FloatType)):
+                              ((str,), float)):
                 raise JSONRPCError('Invalid jsonrpc type', INVALID_REQUEST)
 
             request['jsonrpc'] = float(request['jsonrpc'])
@@ -228,13 +237,13 @@ def verifyMethodCall(request):
             request['id'] = None
 
         if (not 'method' in request or
-                not isinstance(request['method'], types.StringTypes)):
+                not isinstance(request['method'], (six.string_types,))):
             raise JSONRPCError('Invalid method type', INVALID_REQUEST)
 
         if ('params' in request and
                 not isinstance(request['params'],
-                               (types.ListType, types.TupleType,
-                                types.DictType))):
+                               (list, tuple,
+                                dict))):
             raise JSONRPCError('Invalid params type', INVALID_REQUEST)
 
         return request
@@ -303,7 +312,7 @@ def prepareMethodResponse(result, id_=None, version=VERSION_1):
     @rtype: str
     @return: JSON-encoded response
     """
-
+    
     if id_ is None:
         # notification
         return None

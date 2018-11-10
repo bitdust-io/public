@@ -32,11 +32,15 @@
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
 
 #------------------------------------------------------------------------------
 
-import os
+_Debug = True
+
+#------------------------------------------------------------------------------
+
+import six
 import sys
 
 try:
@@ -55,6 +59,8 @@ from logs import lg
 from main import settings
 
 from lib import misc
+from lib import strng
+from lib import net_misc
 
 from transport.http import http_node
 
@@ -81,7 +87,7 @@ class GateInterface():
             lg.out(4, 'http_interface.init')
         if not proxy():
             global _GateProxy
-            if isinstance(xml_rpc_url_or_object, str):
+            if isinstance(xml_rpc_url_or_object, six.string_types):
                 _GateProxy = xmlrpc.Proxy(xml_rpc_url_or_object, allowNone=True)
             else:
                 _GateProxy = xml_rpc_url_or_object
@@ -127,16 +133,16 @@ class GateInterface():
         """
         """
         result = []
-        nowip = misc.readExternalIP()
-        result.append('http://%s:%s' % (nowip, str(settings.getHTTPPort())))
+        nowip = strng.to_bin(misc.readExternalIP())
+        result.append(b'http://%s:%d' % (nowip, settings.getHTTPPort()))
         if _Debug:
-            lg.out(4, 'http_interface.build_contacts : %s' % str(result))
+            lg.out(4, 'http_interface.build_contacts : %s' % result)
         return result
 
     def verify_contacts(self, id_obj):
         """
         """
-        nowip = misc.readExternalIP()
+        nowip = strng.to_bin(misc.readExternalIP())
         http_contact = 'http://%s:%s' % (nowip, str(settings.getHTTPPort()))
         if id_obj.getContactIndex(contact=http_contact) < 0:
             if _Debug:
@@ -220,7 +226,7 @@ def interface_receiving_started(host, new_options={}):
     """
     """
     if proxy():
-        return proxy().callRemote('receiving_started', 'http', host, new_options)
+        return proxy().callRemote('receiving_started', 'http', net_misc.pack_address(host), new_options)
     lg.warn('transport_http is not ready')
     return fail(Exception('transport_http is not ready'))
 
@@ -247,7 +253,8 @@ def interface_register_file_sending(host, receiver_idurl, filename, size=0, desc
     """
     """
     if proxy():
-        return proxy().callRemote('register_file_sending', 'http', '%s:%d' % host, receiver_idurl, filename, size, description)
+        return proxy().callRemote(
+            'register_file_sending', 'http', net_misc.pack_address(host), receiver_idurl, filename, size, description)
     lg.warn('transport_http is not ready')
     return fail(Exception('transport_http is not ready'))
 
@@ -256,7 +263,8 @@ def interface_register_file_receiving(host, sender_idurl, filename, size=0):
     """
     """
     if proxy():
-        return proxy().callRemote('register_file_receiving', 'http', '%s:%d' % host, sender_idurl, filename, size)
+        return proxy().callRemote(
+            'register_file_receiving', 'http', net_misc.pack_address(host), sender_idurl, filename, size)
     lg.warn('transport_http is not ready')
     return fail(Exception('transport_http is not ready'))
 
@@ -283,6 +291,7 @@ def interface_cancelled_file_sending(host, filename, size=0, description=None, e
     """
     """
     if proxy():
-        return proxy().callRemote('cancelled_file_sending', 'http', '%s:%d' % host, filename, size, description, error_message)
+        return proxy().callRemote(
+            'cancelled_file_sending', 'http', net_misc.pack_address(host), filename, size, description, error_message)
     lg.warn('transport_http is not ready')
     return fail(Exception('transport_http is not ready'))

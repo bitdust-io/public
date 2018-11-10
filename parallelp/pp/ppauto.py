@@ -1,24 +1,6 @@
 #!/usr/bin/env python
 # ppauto.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
-#
-# This file (ppauto.py) is part of BitDust Software.
-#
-# BitDust is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# BitDust Software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
-#
-# Please contact us if you have any questions at bitdust.io@gmail.com
 # Parallel Python Software: http://www.parallelpython.com
 # Copyright (c) 2005-2009, Vitalii Vanovschi
 # All rights reserved.
@@ -51,11 +33,12 @@ http://www.parallelpython.com - updates, documentation, examples and support
 forums
 """
 
+from __future__ import absolute_import
 import socket
 import sys
 import time
 import logging
-import thread
+import six.moves._thread
 
 copyright = "Copyright (c) 2005-2009 Vitalii Vanovschi. All rights reserved"
 version = "1.5.7"
@@ -114,7 +97,7 @@ class Discover(object):
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         s.bind(self.interface_addr)
 
-        thread.start_new_thread(self.broadcast, ())
+        six.moves._thread.start_new_thread(self.broadcast, ())
 
         while True:
             try:
@@ -126,7 +109,7 @@ class Discover(object):
                 if not self.base.autopp_list.get(hostid, 0) and self.isclient \
                         and message[0] == 'S':
                     logging.debug("Connecting to host %s" % (hostid, ))
-                    thread.start_new_thread(self.base.connect1,
+                    six.moves._thread.start_new_thread(self.base.connect1,
                                             remote_address + (False, ))
                 if not self.isclient and message[0] == 'C':
                     logging.debug("Replying to host %s" % (hostid, ))
