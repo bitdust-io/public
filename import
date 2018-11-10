@@ -1,0 +1,18 @@
+#!/bin/bash
+tmppath="$1.tmp"
+curpath=`pwd`
+git pull upstream master
+cd "$1"
+sourcepath=`pwd`
+mkdir "$tmppath"
+git checkout-index -a -f --prefix="$tmppath/"
+cd "$tmppath"
+rm -rf release/
+rm -rf screenshots/
+rm -rf scripts/
+rm -rf deploy/
+cp -r * "$curpath"
+diff --brief -r "$curpath" "$sourcepath" | grep -v ".git" | grep -v "__pycache__" | grep -v ".pyc" | grep -v ".DS_Store" | grep "Only in"
+cd "$curpath"
+rm -rf "$tmppath"
+git status

@@ -1,0 +1,13 @@
+#!/bin/bash
+
+git pull upstream master
+git pull upstream_glab master
+git pull upstream_dev master
+git pull upstream_bb master
+
+git pull fork master
+git pull fork_glab master
+git pull fork_bb master
+git pull fork_dev master
+
+git status
