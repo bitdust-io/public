@@ -62,7 +62,12 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+from six.moves import range
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 _DebugLevel = 4
 
 #------------------------------------------------------------------------------
@@ -412,6 +417,7 @@ class BackupRebuilder(automat.Automat):
         """
         Action method.
         """
+        # TODO: make sure to not kill workers for backup jobs....
         raid_worker.A('shutdown')
 
     def doClearStoppedFlag(self, arg):
@@ -567,7 +573,7 @@ class BackupRebuilder(automat.Automat):
             except:
                 lg.out(2, "backup_rebuilder._file_received ERROR can not create sub dir: " + dirname)
                 return
-        if not bpio.WriteFile(filename, newpacket.Payload):
+        if not bpio.WriteBinaryFile(filename, newpacket.Payload):
             lg.out(2, "backup_rebuilder._file_received ERROR writing " + filename)
             return
         from storage import backup_matrix
@@ -615,7 +621,7 @@ class BackupRebuilder(automat.Automat):
             from customer import data_sender
             count = 0
             customer_idurl = packetid.CustomerIDURL(_backupID)
-            for supplierNum in xrange(contactsdb.num_suppliers(customer_idurl=customer_idurl)):
+            for supplierNum in range(contactsdb.num_suppliers(customer_idurl=customer_idurl)):
                 if localData[supplierNum] == 1 and reconstructedData[
                         supplierNum] == 1:
                     backup_matrix.LocalFileReport(

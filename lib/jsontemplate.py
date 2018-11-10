@@ -1,24 +1,6 @@
 #!/usr/bin/env python
 # jsontemplate.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
-#
-# This file (jsontemplate.py) is part of BitDust Software.
-#
-# BitDust is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# BitDust Software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
-#
-# Please contact us if you have any questions at bitdust.io@gmail.com
 # Copyright (C) 2009 Andy Chu
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -47,6 +29,9 @@ string itself.
 Other functions are exposed for tools which may want to process templates.
 """
 
+from __future__ import absolute_import
+import six
+from six.moves import range
 __author__ = 'Andy Chu'
 
 __all__ = [
@@ -55,14 +40,14 @@ __all__ = [
     'TemplateSyntaxError', 'UndefinedVariable', 'CompileTemplate', 'FromString',
     'FromFile', 'Template', 'expand']
 
-import StringIO
+from io import StringIO
 import pprint
 import re
 
 # For formatters
 import cgi  # cgi.escape
-import urllib  # for urllib.encode
-import urlparse  # for urljoin
+import six.moves.urllib.request, six.moves.urllib.parse, six.moves.urllib.error  # for urllib.encode
+import six.moves.urllib.parse  # for urljoin
 
 
 class Error(Exception):
@@ -194,10 +179,10 @@ class DictRegistry(FunctionRegistry):
     """
 
     def __init__(self, func_dict):
-        self.func_dict = func_dict
+        self.__dict__ = func_dict
 
     def LookupWithType(self, user_str):
-        return self.func_dict.get(user_str), None, _DecideFuncType(user_str)
+        return self.__dict__.get(user_str), None, _DecideFuncType(user_str)
 
 
 class CallableRegistry(FunctionRegistry):
@@ -608,7 +593,7 @@ def _ToString(x):
     # Some cross-language values for primitives
     if x is None:
         return 'null'
-    if isinstance(x, basestring):
+    if isinstance(x, six.string_types):
         return x
     return pprint.pformat(x)
 
@@ -629,7 +614,7 @@ def _AbsUrl(relative_url, context, unused_args):
     """
     # urljoin is flexible about trailing/leading slashes -- it will add or de-dupe
     # them
-    return urlparse.urljoin(context.Lookup('base-url'), relative_url)
+    return six.moves.urllib.parse.urljoin(context.Lookup('base-url'), relative_url)
 
 
 # See http://google-ctemplate.googlecode.com/svn/trunk/doc/howto.html for more
@@ -655,10 +640,10 @@ _DEFAULT_FORMATTERS = {
     'size': lambda value: str(len(value)),
 
     # The argument is a dictionary, and we get a a=1&b=2 string back.
-    'url-params': urllib.urlencode,
+    'url-params': six.moves.urllib.parse.urlencode,
 
     # The argument is an atom, and it takes 'Search query?' -> 'Search+query%3F'
-    'url-param-value': urllib.quote_plus,  # param is an atom
+    'url-param-value': six.moves.urllib.parse.quote_plus,  # param is an atom
 
     # The default formatter, when no other default is specifier.  For debugging,
     # this could be lambda x: json.dumps(x, indent=2), but here we want to be
@@ -740,7 +725,7 @@ def SplitMeta(meta):
     if n % 2 == 1:
         raise ConfigurationError(
             '%r has an odd number of metacharacters' % meta)
-    return meta[:n / 2], meta[n / 2:]
+    return meta[:int(n/2)], meta[int(n/2):]
 
 
 _token_re_cache = {}
@@ -780,7 +765,7 @@ def MakeTokenRegex(meta_left, meta_right):
  ALTERNATES_TOKEN,  # {.or}
  OR_TOKEN,  # {.or}
  END_TOKEN,  # {.end}
- ) = range(8)
+ ) = list(range(8))
 
 
 def _MatchDirective(token):
@@ -1020,7 +1005,7 @@ def FromString(s, more_formatters=lambda x: None, _constructor=None):
     Like FromFile, but takes a string.
     """
 
-    f = StringIO.StringIO(s)
+    f = StringIO(s)
     return FromFile(f, more_formatters=more_formatters, _constructor=_constructor)
 
 
@@ -1303,7 +1288,7 @@ def _Execute(statements, context, callback):
     """
 
     for i, statement in enumerate(statements):
-        if isinstance(statement, basestring):
+        if isinstance(statement, six.string_types):
             callback(statement)
         else:
             # In the case of a substitution, args is a pair (name, formatters).

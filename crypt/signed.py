@@ -44,14 +44,17 @@ Packet Fields are all strings (no integers, objects, etc)
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+from __future__ import absolute_import
+from __future__ import print_function
+
+#------------------------------------------------------------------------------
+
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
 import sys
-
-import types
 
 from twisted.internet import threads
 
@@ -63,10 +66,11 @@ from system import bpio
 
 from p2p import commands
 
-from lib import misc
 from lib import packetid
 from lib import nameurl
 from lib import utime
+from lib import strng
+from lib import serialization
 
 from contacts import contactsdb
 
@@ -78,7 +82,7 @@ from userid import my_id
 #------------------------------------------------------------------------------
 
 
-class Packet:
+class Packet(object):
     """
     Init with: Command, OwnerID, CreatorID, PacketID, Payload, RemoteID The
     core class.
@@ -93,35 +97,36 @@ class Packet:
     make all network working.
     """
 
-    def __init__(self, Command, OwnerID, CreatorID, PacketID, Payload, RemoteID, KeyID=None, ):
+    def __init__(self, Command, OwnerID, CreatorID, PacketID, Payload, RemoteID, KeyID=None, Date=None, Signature=None, ):
         """
-        Init all fields and sign the packet .
+        Init all fields and sign the packet.
         """
         # Legal Commands are in commands.py
-        self.Command = Command
+        self.Command = strng.to_text(Command)
         # who owns this data and pays bills - http://cate.com/id1.xml
-        self.OwnerID = OwnerID
+        self.OwnerID = strng.to_bin(OwnerID)
         # signer - http://cate.com/id1.xml - might be an authorized scrubber
-        self.CreatorID = CreatorID
+        self.CreatorID = strng.to_bin(CreatorID)
         # string of the above 4 "Number"s with "-" separator to uniquely identify a packet
         # on the local machine.  Can be used for filenames, and to prevent duplicates.
-        self.PacketID = PacketID
+        self.PacketID = strng.to_text(PacketID)
         # create a string to remember current world time
-        self.Date = utime.sec1970_to_datetime_utc().strftime("%Y/%m/%d %I:%M:%S %p")
+        self.Date = strng.to_text(Date or utime.sec1970_to_datetime_utc().strftime("%Y/%m/%d %I:%M:%S %p"))
         # datetime.datetime.now().strftime("%Y/%m/%d %I:%M:%S %p")
         # main body of binary data
-        self.Payload = Payload
+        self.Payload = strng.to_bin(Payload)
         # want full IDURL for other party so troublemaker could not
         # use his packets to mess up other nodes by sending it to them
-        self.RemoteID = RemoteID
+        self.RemoteID = strng.to_bin(RemoteID)
         # which private key to use to generate signature
-        self.KeyID = KeyID
-        if not self.KeyID:
-            self.KeyID = my_id.getGlobalID(key_alias='master')
-        # signature on Hash is always by CreatorID
-        self.Signature = None
-        # must be signed to be valid
-        self.Sign()
+        self.KeyID = strng.to_text(KeyID or my_id.getGlobalID(key_alias='master'))
+        if Signature:
+            self.Signature = Signature
+        else:
+            # signature on Hash is always by CreatorID
+            self.Signature = None
+            # must be signed to be valid
+            self.Sign()
         # stores list of related objects packet_in() or packet_out()
         self.Packets = []
 
@@ -138,7 +143,6 @@ class Packet:
     def Sign(self):
         """
         Call ``GenerateSignature`` and save the result.
-
         Usually just done at packet creation.
         """
         self.Signature = self.GenerateSignature()
@@ -148,28 +152,27 @@ class Packet:
         """
         This make a long string containing all needed fields of ``packet``
         (without Signature).
-
         Just to be able to generate a hash of the whole packet .
         """
-        sep = "-"
-        stufftosum = ""
+        sep = b"-"
+        stufftosum = b""
         try:
-            stufftosum += str(self.Command)
+            stufftosum += strng.to_bin(self.Command)
             stufftosum += sep
-            stufftosum += str(self.OwnerID)
+            stufftosum += strng.to_bin(self.OwnerID)
             stufftosum += sep
-            stufftosum += str(self.CreatorID)
+            stufftosum += strng.to_bin(self.CreatorID)
             stufftosum += sep
-            stufftosum += str(self.PacketID)
+            stufftosum += strng.to_bin(self.PacketID)
             stufftosum += sep
-            stufftosum += str(self.Date)
+            stufftosum += strng.to_bin(self.Date)
             stufftosum += sep
-            stufftosum += self.Payload
+            stufftosum += strng.to_bin(self.Payload)
             stufftosum += sep
-            stufftosum += str(self.RemoteID)
+            stufftosum += strng.to_bin(self.RemoteID)
             if self.KeyID:
                 stufftosum += sep
-                stufftosum += str(self.KeyID)
+                stufftosum += strng.to_bin(self.KeyID)
         except Exception as exc:
             lg.exc()
             raise exc
@@ -259,18 +262,22 @@ class Packet:
 
     def Serialize(self):
         """
-        Create a string from packet object using ``lib.misc.ObjectToString``.
-
-        This is useful when need to save the packet on disk.
+        Create a string from packet object.
+        This is useful when need to save the packet on disk or send via network.
         """
-        if hasattr(self, 'Packets'):
-            currentPackets = getattr(self, 'Packets')
-            delattr(self, 'Packets')
-        else:
-            currentPackets = []
-        src = misc.ObjectToString(self)
-        setattr(self, 'Packets', currentPackets)
-        # lg.out(10, 'signed.Serialize %d bytes, type is %s' % (len(src), str(type(src))))
+        src = serialization.DictToBytes({
+            'm': self.Command,
+            'o': self.OwnerID,
+            'c': self.CreatorID,
+            'i': self.PacketID,
+            'd': self.Date,
+            'p': self.Payload,
+            'r': self.RemoteID,
+            'k': self.KeyID,
+            's': self.Signature,
+        })
+        if _Debug:
+            lg.out(_DebugLevel, 'signed.Serialize %d bytes, type is %s' % (len(src), str(type(src))))
         return src
 
     def __len__(self):
@@ -291,30 +298,37 @@ class PacketZeroSigned(Packet):
 
 def Unserialize(data):
     """
-    We expect here a string containing a whole packet object in text form. Here
-    is used a special libraries in ``twisted.spread``: ``banana`` and ``jelly``
-    to do that work. This stuff is placed in the ``lib.misc.StringToObject``.
-    So return a real object in the memory from given string.
-
-    All class fields are loaded, signature can be verified to be sure - it was  truly original string.
+    We expect here a string containing a whole packet object in text form.
+    Will return a real object in the memory from given string.
+    All class fields are loaded, signature can be verified to be sure - it was truly original string.
     """
     if data is None:
         return None
-    # lg.out(10, 'signed.Unserialize %d bytes, type is %s' % (len(data), str(type(data))))
-    newobject = misc.StringToObject(data)
+
+    if _Debug:
+        lg.out(_DebugLevel, 'signed.Unserialize %d bytes, type is %s' % (len(data), str(type(data))))
+
+    try:
+        json_data = serialization.BytesToDict(data)
+        newobject = Packet(
+            Command=strng.to_text(json_data['m']),
+            OwnerID=json_data['o'],
+            CreatorID=json_data['c'],
+            PacketID=strng.to_text(json_data['i']),
+            Date=strng.to_text(json_data['d']),
+            Payload=json_data['p'],
+            RemoteID=json_data['r'],
+            KeyID=strng.to_text(json_data['k']),
+            Signature=json_data['s'],
+        )
+    except:
+        lg.exc()
+        newobject = None
+    
     if newobject is None:
         lg.warn("result is None")
         return None
-    if not isinstance(newobject, types.InstanceType):
-        lg.warn("not an instance: " + str(newobject))
-        return None
-    if not str(newobject.__class__).count('signed.Packet'):
-        lg.warn("not a packet: " + str(newobject.__class__))
-        return None
-    if not hasattr(newobject, 'KeyID'):
-        setattr(newobject, 'KeyID', None)
-    if not hasattr(newobject, 'Packets'):
-        setattr(newobject, 'Packets', [])
+
     return newobject
 
 
@@ -351,4 +365,4 @@ if __name__ == '__main__':
     settings.init()
     key.InitMyKey()
     p = Unserialize(bpio.ReadBinaryFile(sys.argv[1]))
-    print p
+    print(p)

@@ -35,6 +35,7 @@ BitDust executes periodically several slaves:
 They are started as a separated processes and managed from the main process: bpmain
 """
 
+from __future__ import absolute_import
 import os
 import sys
 import subprocess
@@ -50,8 +51,8 @@ from twisted.internet import protocol
 
 from logs import lg
 
-import bpio
-import nonblocking
+from . import bpio
+from . import nonblocking
 
 #------------------------------------------------------------------------------
 
@@ -169,7 +170,8 @@ def pipe(cmdargs):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=False,
-                creationflags=win32process.CREATE_NO_WINDOW,)
+                creationflags=win32process.CREATE_NO_WINDOW,
+            )
         else:
             p = nonblocking.Popen(
                 cmdargs,
@@ -177,7 +179,8 @@ def pipe(cmdargs):
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                universal_newlines=False,)
+                universal_newlines=False,
+            )
     except:
         lg.out(1, 'child_process.pipe ERROR executing: %s' + str(cmdargs))
         lg.exc()
@@ -200,7 +203,8 @@ def detach(cmdargs):
                 # stderr=subprocess.PIPE,
                 universal_newlines=False,
                 creationflags=win32process.CREATE_NO_WINDOW | win32process.DETACHED_PROCESS,
-                close_fds=True,)
+                close_fds=True,
+            )
         else:
             p = nonblocking.Popen(
                 cmdargs,

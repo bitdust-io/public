@@ -33,22 +33,31 @@ TODO:
     Really need to do some refactoring here - too many things in one place.
 """
 
-import os
-import sys
-import random
-import time
-import math
-import hmac
-import hashlib
-import base64
-import string
-import subprocess
-import re
-import tempfile
-import urllib
+#------------------------------------------------------------------------------
+
+from __future__ import absolute_import
+from __future__ import print_function
+import six.moves.urllib.request, six.moves.urllib.parse, six.moves.urllib.error
 import locale
 import textwrap
-import cPickle
+import six.moves.cPickle
+from six.moves import range
+from io import open
+
+#------------------------------------------------------------------------------
+
+import os
+import re
+import sys
+import time
+import math
+import random
+import base64
+import string
+import hashlib
+import tempfile
+import functools
+import subprocess
 
 #------------------------------------------------------------------------------
 
@@ -61,11 +70,13 @@ if __name__ == '__main__':
 from logs import lg
 
 from system import bpio
+from system import local_fs
 
 from main import settings
 
 from lib import net_misc
 from lib import packetid
+from lib import strng
 
 #------------------------------------------------------------------------------
 
@@ -100,14 +111,14 @@ def readLocalIP():
     """
     Read local IP stored in the file [BitDust data dir]/metadata/localip.
     """
-    return bpio.ReadBinaryFile(settings.LocalIPFilename())
+    return bpio.ReadTextFile(settings.LocalIPFilename())
 
 
 def readExternalIP():
     """
     Read external IP stored in the file [BitDust data dir]/metadata/externalip.
     """
-    return bpio.ReadBinaryFile(settings.ExternalIPFilename())
+    return bpio.ReadTextFile(settings.ExternalIPFilename())
 
 
 def readSupplierData(supplier_idurl, filename, customer_idurl):
@@ -131,9 +142,12 @@ def writeSupplierData(supplier_idurl, filename, data, customer_idurl):
     if not os.path.isdir(dirPath):
         os.makedirs(dirPath)
     path = settings.SupplierPath(supplier_idurl, customer_idurl, filename)
-    return bpio.WriteFile(path, data)
+    return bpio.WriteTextFile(path, data)
 
 #-------------------------------------------------------------------------------
+
+def cmp(a, b):
+    return (a > b) - (a < b)
 
 
 def NewBackupID(time_st=None):
@@ -146,7 +160,7 @@ def NewBackupID(time_st=None):
     if time_st is None:
         time_st = time.localtime()
     ampm = time.strftime("%p", time_st)
-    if ampm == '':
+    if not ampm:
         lg.warn('time.strftime("%p") returns empty string')
         ampm = 'AM' if time.time() % 86400 < 43200 else 'PM'
     result = "F" + time.strftime("%Y%m%d%I%M%S", time_st) + ampm
@@ -236,13 +250,13 @@ def backup_id_compare(backupID1, backupID2):
     if customerGlobalID1 != customerGlobalID2:
         return cmp(customerGlobalID1, customerGlobalID2)
     return version_compare(version1, version2)
-
+    
 
 def sorted_backup_ids(backupIds, reverse=False):
     """
     Sort a list of backupID's.
     """
-    sorted_ids = sorted(backupIds, backup_id_compare, reverse=reverse)
+    sorted_ids = sorted(backupIds, key=functools.cmp_to_key(backup_id_compare), reverse=reverse)
     return sorted_ids
 
 
@@ -250,7 +264,7 @@ def sorted_versions(versions, reverse=False):
     """
     Sort a list of versions.
     """
-    sorted_versions_list = sorted(versions, version_compare, reverse=reverse)
+    sorted_versions_list = sorted(versions, key=functools.cmp_to_key(version_compare), reverse=reverse)
     return sorted_versions_list
 
 #------------------------------------------------------------------------------
@@ -475,23 +489,7 @@ def ValidateBitCoinAddress(strAddr):
 
 
 def RoundupFile(filename, stepsize):
-    """
-    For some things we need to have files which are round sizes, for example
-    some encryption needs files that are multiples of 8 bytes.
-
-    This function rounds file up to the next multiple of step size.
-    """
-    try:
-        size = os.path.getsize(filename)
-    except:
-        return
-    mod = size % stepsize
-    increase = 0
-    if mod > 0:
-        increase = stepsize - mod
-        fil = open(filename, 'a')
-        fil.write(' ' * increase)
-        fil.close()
+    return local_fs.RoundupFile(filename=filename, stepsize=stepsize)
 
 
 def RoundupString(data, stepsize):
@@ -527,75 +525,17 @@ def Parity():
     """
     return "Parity"
 
-
-def BinaryToAscii(inpt):
-    """
-    Not used right now.
-
-    Have had some troubles with jelly/banana. Plan to move to my own
-    serialization of objects but leaving this here for now.
-    """
-    return base64.encodestring(inpt)
-
-
-def AsciiToBinary(inpt):
-    """
-    Uses built-in method ``base64.decodestring``.
-    """
-    return base64.decodestring(inpt)
-
-
-def ObjectToString_old(obj):
-    """
-    """
-    return cPickle.dumps(obj, protocol=cPickle.HIGHEST_PROTOCOL)
-
-
-def StringToObject_old(inp):
-    """
-    """
-    return cPickle.loads(inp)
-
-
-def ObjectToString(obj):
-    """
-    """
-    import serialization
-    return serialization.ObjectToString(obj)
-
-
-def StringToObject(inp):
-    """
-    """
-    import serialization
-    return serialization.StringToObject(inp)
-
-
-def ObjectToAscii(input):
-    """
-    Not used.
-    """
-    return BinaryToAscii(ObjectToString(input))
-
-
-def AsciiToObject(input):
-    """
-    Not used.
-    """
-    return StringToObject(AsciiToBinary(input))              # works for 384 bit RSA keys
-
 #------------------------------------------------------------------------------
-
 
 def pack_url_param(s):
     """
     A wrapper for built-in ``urllib.quote`` method.
     """
     try:
-        return urllib.quote(s)
+        return six.moves.urllib.parse.quote(s)
     except:
         try:
-            return str(urllib.quote(str(s)))
+            return str(six.moves.urllib.parse.quote(str(s)))
         except:
             lg.exc()
     return s
@@ -605,16 +545,17 @@ def unpack_url_param(s, default=None):
     """
     A wrapper for built-in ``urllib.unquote`` method.
     """
-    if s is None or s == '':
+    if s is None or not s:
         if default is not None:
             return default
         return s
     try:
-        return urllib.unquote(str(s))
+        return six.moves.urllib.parse.unquote(str(s))
     except:
         lg.exc()
         return default
 
+#------------------------------------------------------------------------------
 
 def rndstr(length):
     """
@@ -627,7 +568,7 @@ def stringToLong(s):
     """
     Not used.
     """
-    return long('\0' + s, 256)
+    return int('\0' + s, 256)
 
 
 def longToString(n):
@@ -732,7 +673,7 @@ def getRealHost(host, port=None):
     """
     Some tricks to get a 'host' from contact method (see ``lib.identity``).
     """
-    if isinstance(host, str):
+    if isinstance(host, six.string_types):
         if port is not None:
             host += ':' + str(port)
     elif isinstance(host, tuple) and len(host) == 2:
@@ -866,13 +807,13 @@ def unicode_to_str_safe(unicode_string, encodings=None):
         return str(unicode_string)  # .decode('utf-8')
     except:
         try:
-            return unicode(unicode_string).encode(locale.getpreferredencoding(), errors='ignore')
+            return six.text_type(unicode_string).encode(locale.getpreferredencoding(), errors='ignore')
         except:
             pass
     if encodings is None:
         encodings = [locale.getpreferredencoding(), ]  # 'utf-8'
     output = ''
-    for i in xrange(len(unicode_string)):
+    for i in range(len(unicode_string)):
         unicode_char = unicode_string[i]
         char = '?'
         try:
@@ -1087,8 +1028,8 @@ def ReadRepoLocation():
                 except:
                     lg.exc()
         return 'sources', 'https://bitdust.io/download/'
-    src = bpio.ReadTextFile(settings.RepoFile()).strip()
-    if src == '':
+    src = strng.to_bin(bpio.ReadTextFile(settings.RepoFile())).strip()
+    if not src:
         return settings.DefaultRepo(), settings.DefaultRepoURL(settings.DefaultRepo())
     l = src.split('\n')
     if len(l) < 2:
@@ -1520,7 +1461,6 @@ def SendDevReportOld(subject, body, includelogs):
         filesList = []
         if includelogs:
             filesList.append(settings.LocalIdentityFilename())
-            filesList.append(settings.UserConfigFilename())
             filesList.append(os.path.join(bpio.getExecutableDir(), 'bpmain.exe.log'))
             filesList.append(os.path.join(bpio.getExecutableDir(), 'bpmain.log'))
             for filename in os.listdir(settings.LogsDir()):
@@ -1569,7 +1509,6 @@ def SendDevReport(subject, body, includelogs, progress=None):
         filesList = []
         if includelogs:
             filesList.append(settings.LocalIdentityFilename())
-            filesList.append(settings.UserConfigFilename())
             filesList.append(os.path.join(bpio.getExecutableDir(), 'bpmain.exe.log'))
             filesList.append(os.path.join(bpio.getExecutableDir(), 'bpmain.log'))
             lst = os.listdir(settings.LogsDir())
@@ -1654,7 +1593,7 @@ def UpdateRegistryUninstall(uninstall=False):
     inside it.
     """
     try:
-        import _winreg
+        import six.moves.winreg
     except:
         return False
     unistallpath = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
@@ -1670,10 +1609,10 @@ def UpdateRegistryUninstall(uninstall=False):
         'URLInfoAbout': 'https://bitdust.io', }
     # open
     try:
-        reg = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, regpath, 0, _winreg.KEY_ALL_ACCESS)
+        reg = six.moves.winreg.OpenKey(six.moves.winreg.HKEY_LOCAL_MACHINE, regpath, 0, six.moves.winreg.KEY_ALL_ACCESS)
     except:
         try:
-            reg = _winreg.CreateKey(_winreg.HKEY_LOCAL_MACHINE, regpath)
+            reg = six.moves.winreg.CreateKey(six.moves.winreg.HKEY_LOCAL_MACHINE, regpath)
         except:
             lg.exc()
             return False
@@ -1681,45 +1620,45 @@ def UpdateRegistryUninstall(uninstall=False):
     i = 0
     while True:
         try:
-            name, value, typ = _winreg.EnumValue(reg, i)
+            name, value, typ = six.moves.winreg.EnumValue(reg, i)
         except:
             break
         i += 1
         if uninstall:
             try:
-                _winreg.DeleteKey(reg, name)
+                six.moves.winreg.DeleteKey(reg, name)
             except:
                 try:
-                    _winreg.DeleteValue(reg, name)
+                    six.moves.winreg.DeleteValue(reg, name)
                 except:
                     lg.exc()
         else:
             if name == 'DisplayName' and value == 'BitDust':
-                _winreg.CloseKey(reg)
+                six.moves.winreg.CloseKey(reg)
                 return True
     # delete
     if uninstall:
-        _winreg.CloseKey(reg)
+        six.moves.winreg.CloseKey(reg)
         try:
-            reg = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, unistallpath, 0, _winreg.KEY_ALL_ACCESS)
+            reg = six.moves.winreg.OpenKey(six.moves.winreg.HKEY_LOCAL_MACHINE, unistallpath, 0, six.moves.winreg.KEY_ALL_ACCESS)
         except:
             lg.exc()
             return False
         try:
-            _winreg.DeleteKey(reg, 'BitDust')
+            six.moves.winreg.DeleteKey(reg, 'BitDust')
         except:
             lg.exc()
-            _winreg.CloseKey(reg)
+            six.moves.winreg.CloseKey(reg)
             return False
-        _winreg.CloseKey(reg)
+        six.moves.winreg.CloseKey(reg)
         return True
     # write
     for key, value in values.items():
-        typ = _winreg.REG_SZ
+        typ = six.moves.winreg.REG_SZ
         if isinstance(value, int):
-            typ = _winreg.REG_DWORD
-        _winreg.SetValueEx(reg, key, 0, typ, value)
-    _winreg.CloseKey(reg)
+            typ = six.moves.winreg.REG_DWORD
+        six.moves.winreg.SetValueEx(reg, key, 0, typ, value)
+    six.moves.winreg.CloseKey(reg)
     return True
 
 
@@ -1786,15 +1725,15 @@ if __name__ == '__main__':
         from twisted.internet.defer import Deferred
 
         def _progress(x, y):
-            print '%d/%d' % (x, y)
+            print('%d/%d' % (x, y))
 
         def _done(x):
-            print 'DONE', x
+            print('DONE', x)
             reactor.stop()
             return x
 
         def _fail(x):
-            print 'FAIL', x
+            print('FAIL', x)
             reactor.stop()
             return x
         d = SendDevReport('subject ', 'some body112', True, _progress)

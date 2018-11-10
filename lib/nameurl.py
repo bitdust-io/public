@@ -40,9 +40,24 @@ argument if you have "http" vs "ssh" or "tcp".
 This seems like trouble.
 """
 
+#------------------------------------------------------------------------------
+
+from __future__ import absolute_import
+from __future__ import print_function
+
+#------------------------------------------------------------------------------
+
+import six.moves.urllib.request, six.moves.urllib.parse, six.moves.urllib.error
+import six.moves.urllib.parse
+from six.moves import range
+
+#------------------------------------------------------------------------------
+
 import re
-import urllib
-import urlparse
+
+#------------------------------------------------------------------------------
+
+from lib import strng
 
 #------------------------------------------------------------------------------
 
@@ -59,31 +74,37 @@ def UrlParse(url):
         nameurl.UrlParse('http://id.bitdust.io/veselin.xml')
         ('http', 'id.bitdust.io', '', 'veselin.xml')
     """
-    o = urlparse.urlparse(url)
-    proto = o.scheme.strip()
-    base = o.netloc.lstrip(' /')
-    filename = o.path.lstrip(' /')
-    if base == '':
-        base = o.path.lstrip(' /')
-        filename = ''
+    url = strng.to_bin(url)
+    o = six.moves.urllib.parse.urlparse(url)
+    proto = strng.to_bin(o.scheme.strip())
+    base = strng.to_bin(o.netloc).lstrip(b' /')
+    filename = strng.to_bin(o.path).lstrip(b' /')
+    if not base:
+        base = strng.to_bin(o.path).lstrip(b' /')
+        filename = b''
 
-    if base.find('/') < 0:
-        if base.find(':') < 0:
+    if base.find(b'/') < 0:
+        if base.find(b':') < 0:
             host = base
-            port = ''
+            port = b''
         else:
-            host, port = base.split(':', 1)
+            host, port = base.split(b':', 1)
     else:
-        host, tail = base.split('/', 1)
-        if host.find(':') < 0:
-            port = ''
+        host, tail = base.split(b'/', 1)
+        if host.find(b':') < 0:
+            port = b''
         else:
-            host, port = host.split(':', 1)
+            host, port = host.split(b':', 1)
 
-        if filename == '':
+        if not filename:
             filename = tail
 
-    return proto.strip(), host.strip(), port.strip(), filename.strip()
+    return (
+        strng.to_text(proto).strip(),
+        strng.to_text(host).strip(),
+        strng.to_text(port).strip(),
+        strng.to_text(filename).strip(),
+    )
 
 
 def UrlMake(protocol='', machine='', port='', filename='', parts=None):
@@ -97,7 +118,7 @@ def UrlMake(protocol='', machine='', port='', filename='', parts=None):
         url += ':' + str(port)
     if filename != '':
         url += '/' + filename
-    return url
+    return strng.to_bin(url)
 
 
 def UrlFilename(url):
@@ -108,9 +129,10 @@ def UrlFilename(url):
     nameurl.UrlFilename('http://id.bitdust.io/veselin.xml')
     'http###id.bitdust.io#veselin.xml'
     """
-    if url is None:
+    if not url:
         return None
-    result = url.replace("://", "###")
+    result = strng.to_text(url)
+    result = result.replace("://", "###")
     result = result.replace("/", "#")
     result = re.sub('(\:)(\d+)', '(#\g<2>#)', result)
     result = result.lower()
@@ -131,7 +153,7 @@ def FilenameUrl(filename):
         return None
     src = re.sub('\(#(\d+)#\)', ':\g<1>', src)
     src = 'http://' + src[7:].replace('#', '/')
-    return str(src)
+    return strng.to_bin(src)
 
 
 def UrlFilenameHTML(url):
@@ -143,6 +165,7 @@ def UrlFilenameHTML(url):
     'id_bitdust_net_veselin_xml'
     """
     global legalset
+    url = strng.to_text(url)
     s = url.replace('http://', '')
     o = ''
     for x in s:
@@ -158,7 +181,7 @@ def IdContactSplit(contact):
     """
     """
     try:
-        return contact.split('://')
+        return strng.to_text(contact).split('://')
     except:
         return '', ''
 
@@ -170,8 +193,9 @@ def GetName(url):
 
     nameurl.GetName('http://id.bitdust.io/kinggeorge.xml') 'kinggeorge'
     """
-    if url in [None, 'None', '', ]:
+    if url in [None, 'None', '', b'None', b'', ]:
         return ''
+    url = strng.to_text(url)
     if not url.endswith('.xml'):
         return url
     return url[url.rfind("/") + 1:-4]  # return url[url.rfind("/")+1:url.rfind(".")]
@@ -181,9 +205,11 @@ def GetFileName(url):
     """
     Almost the same, but keeps the file extension.
     """
-    if url in [None, 'None', ]:
+    if url in [None, 'None', '', b'None', b'', ]:
         return ''
+    url = strng.to_text(url)
     return url[url.rfind("/") + 1:]
+
 
 def GetHost(url):
     """
@@ -197,14 +223,14 @@ def Quote(s):
     """
     A wrapper for built-in method ``urllib.quote()``.
     """
-    return urllib.quote(s, '')
+    return six.moves.urllib.parse.quote(s, '')
 
 
 def UnQuote(s):
     """
     A wrapper for built-in method ``urllib.unquote()``.
     """
-    return urllib.unquote(s)
+    return six.moves.urllib.parse.unquote(s)
 
 
 #------------------------------------------------------------------------------
@@ -234,11 +260,11 @@ def DjangoUnQuote(s):
     """
     mychr = chr
     myatoi = int
-    list = s.split('_')
-    res = [list[0]]
+    lst = s.split('_')
+    res = [lst[0]]
     myappend = res.append
-    del list[0]
-    for item in list:
+    del lst[0]
+    for item in lst:
         if item[1:2]:
             try:
                 myappend(mychr(myatoi(item[:2], 16)) + item[2:])
@@ -255,25 +281,7 @@ def main():
     """
     I used this place for tests.
     """
-#    url = 'http://id.bitdust.io:565/sdfsdfsdf/veselin2.xml'
-##    url = 'ssh://34.67.22.5: 5654 /gfgfg.sdfsdf/sdfsd'
-##    url = 'q2q://d5wJMQRBYD72V6Zb5aZ1@work.offshore.ai'
-# print UrlParse(url)
-#    print url
-#    fn =  UrlFilename(url)
-#    print fn
-#    ur = FilenameUrl(fn)
-#    print ur
-# print filenameurl
-# print FilenameUrl(filenameurl)
-##    proto, machine, port, name = UrlParse(url)
-##    url2 = UrlMake(proto, machine, 1234, name)
-# print url2
-##    filenameurl2 = UrlFilename(url2)
-# print filenameurl2
-# print FilenameUrl(filenameurl2)
-# print UrlParse('q2q://d5wJMQRBYD72V6Zb5aZ1@work.offshore.ai')
-    print GetName(str(None))
+    print(GetName(str(None)))
 
 if __name__ == '__main__':
     main()

@@ -33,7 +33,12 @@
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+from __future__ import print_function
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -69,6 +74,7 @@ from logs import lg
 
 from lib import nameurl
 from lib import net_misc
+from lib import strng
 
 from system import bpio
 from system import tmpfile
@@ -174,7 +180,7 @@ class SenderServer(resource.Resource):
         if idurl is None:
             return ''
         lg.out(14, 'http_node.SenderServer.render connection from ' + idurl)
-        if idurl not in _Outbox.keys():
+        if idurl not in list(_Outbox.keys()):
             return ''
         r = ''
         for filename in _Outbox[idurl]:
@@ -272,7 +278,7 @@ class Receiver(object):
 
     def do_ping(self, idurl, host, port):
         lg.out(14, 'http_node.receive.ping     %s (%s:%s)' % (idurl, host, port))
-        url = 'http://' + str(host) + ':' + str(port)
+        url = b'http://' + host + b':' + strng.to_bin(str(port))
 
         if net_misc.proxy_is_on():
             f = TransportHTTPProxyClientFactory(url, method='POST', headers={
@@ -387,10 +393,10 @@ def on_contacts_changed(oldlist, newlist):
 #------------------------------------------------------------------------------
 
 def usage():
-    print '''usage:
+    print('''usage:
 http_node.py send [server_port] [to idurl] [filename]
 http_node.py receive
-'''
+''')
 
 def main():
     import logging

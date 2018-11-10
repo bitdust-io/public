@@ -30,6 +30,7 @@
 module:: my_id
 """
 
+from __future__ import absolute_import
 import os
 import sys
 import string
@@ -52,6 +53,7 @@ from main import events
 
 from lib import misc
 from lib import nameurl
+from lib import strng
 
 from crypt import key
 
@@ -82,6 +84,13 @@ def shutdown():
     forgetLocalIdentity()
 
 #-------------------------------------------------------------------------------
+
+
+def isLocalIdentityExists():
+    """
+    Return True if local file `~/.bitdust/metadata/localidentity` exists.
+    """
+    return os.path.isfile(settings.LocalIdentityFilename())
 
 
 def isLocalIdentityReady():
@@ -194,23 +203,24 @@ def loadLocalIdentity():
     filename = bpio.portablePath(settings.LocalIdentityFilename())
     if os.path.exists(filename):
         xmlid = bpio.ReadTextFile(filename)
-        lg.out(6, 'my_id.loadLocalIdentity %d bytes read from\n        %s' % (len(xmlid), filename))
-    if xmlid == '':
+        lg.out(6, 'my_id.loadLocalIdentity %d bytes read from %s' % (len(xmlid), filename))
+    if not xmlid:
         lg.out(2, "my_id.loadLocalIdentity SKIPPED, local identity in %s is EMPTY !!!" % filename)
-        return
+        return False
     lid = identity.identity(xmlsrc=xmlid)
     if not lid.isCorrect():
         lg.out(2, "my_id.loadLocalIdentity ERROR loaded identity is not Correct")
-        return
+        return False
     if not lid.Valid():
         lg.out(2, "my_id.loadLocalIdentity ERROR loaded identity is not Valid")
-        return
+        return False
     setLocalIdentity(lid)
 #     _LocalIdentity = lid
 #     _LocalIDURL = lid.getIDURL()
 #     _LocalName = lid.getIDName()
     setTransportOrder(getOrderFromContacts(_LocalIdentity))
     lg.out(6, "my_id.loadLocalIdentity my name is [%s]" % lid.getIDName())
+    return True
 
 
 def saveLocalIdentity():
@@ -227,9 +237,12 @@ def saveLocalIdentity():
         lg.warn('local identity is not correct')
         return
     _LocalIdentity.sign()
+    if not _LocalIdentity.Valid():
+        lg.err('local identity is not valid')
+        return
     xmlid = _LocalIdentity.serialize()
     filename = bpio.portablePath(settings.LocalIdentityFilename())
-    bpio.WriteFile(filename, xmlid)
+    bpio.WriteTextFile(filename, xmlid)
     lg.out(6, "my_id.saveLocalIdentity %d bytes wrote to %s" % (len(xmlid), filename))
 
 
@@ -312,9 +325,9 @@ def setTransportOrder(orderL):
     """
     orderl = orderL
     orderL = validateTransports(orderL)
-    orderTxt = string.join(orderl, ' ')
+    orderTxt = ' '.join(orderl)
     lg.out(8, 'my_id.setTransportOrder: ' + str(orderTxt))
-    bpio.WriteFile(settings.DefaultTransportOrderFilename(), orderTxt)
+    bpio.WriteTextFile(settings.DefaultTransportOrderFilename(), orderTxt)
 
 
 def getTransportOrder():
@@ -387,7 +400,7 @@ def buildProtoContacts(id_obj, skip_transports=[]):
             cdict = {}
             corder = []
             for contact in clist:
-                cproto, cdata = contact.split('://')
+                cproto, _ = contact.split(b'://')
                 cdict[cproto] = contact
                 corder.append(cproto)
             new_contacts.update(cdict)
@@ -396,7 +409,7 @@ def buildProtoContacts(id_obj, skip_transports=[]):
                     new_order.append(cproto)
         new_order_correct = list(new_order)
         for nproto in new_order:
-            if nproto not in new_contacts.keys():
+            if nproto not in list(new_contacts.keys()):
                 new_order_correct.remove(nproto)
 
 #            cset = set(corder)
@@ -449,12 +462,11 @@ def buildDefaultIdentity(name='', ip='', idurls=[]):
     """
     Use some local settings and config files to create some new identity.
 
-    Nice to provide a user name or it will have a form like: [ip
-    address]_[date].
+    Nice to provide a user name or it will have a form like: [ip_address]_[date].
     """
-    if ip == '':
-        ip = misc.readExternalIP()  # bpio.ReadTextFile(settings.ExternalIPFilename())
-    if name == '':
+    if not ip:
+        ip = misc.readExternalIP()
+    if not name:
         name = ip.replace('.', '-') + '_' + time.strftime('%M%S')
     lg.out(4, 'my_id.buildDefaultIdentity: %s %s' % (name, ip))
     # create a new identity object
@@ -465,22 +477,22 @@ def buildDefaultIdentity(name='', ip='', idurls=[]):
     # just need to keep all them synchronized
     # this is identity propagate procedure, see p2p/propagate.py
     if len(idurls) == 0:
-        idurls.append('http://localhost/' + name.lower() + '.xml')
+        idurls.append(b'http://127.0.0.1/%s.xml' % strng.to_bin(name.lower()))
     for idurl in idurls:
-        ident.sources.append(idurl.encode("ascii").strip())
+        ident.sources.append(strng.to_bin(idurl.strip()))
     # create a full list of needed transport methods
     # to be able to accept incoming traffic from other nodes
     new_contacts, new_order = buildProtoContacts(ident)
     if len(new_contacts) == 0:
         if settings.enableTCP() and settings.enableTCPreceiving():
-            new_contacts['tcp'] = 'tcp://' + ip + ':' + str(settings.getTCPPort())
+            new_contacts['tcp'] = b'tcp://' + strng.to_bin(ip) + b':' + strng.to_bin(str(settings.getTCPPort()))
             new_order.append('tcp')
         if settings.enableUDP() and settings.enableUDPreceiving():
-            x, servername, x, x = nameurl.UrlParse(ident.sources[0])
-            new_contacts['udp'] = 'udp://%s@%s' % (name.lower(), servername)
+            _, servername, _, _ = nameurl.UrlParse(ident.sources[0])
+            new_contacts['udp'] = b'udp://' + strng.to_bin(name.lower()) + b'@' + strng.to_bin(servername)
             new_order.append('udp')
         if settings.enableHTTP() and settings.enableHTTPreceiving():
-            new_contacts['http'] = 'http://' + ip + ':' + str(settings.getHTTPPort())
+            new_contacts['http'] = b'http://' + strng.to_bin(ip) + b':' + strng.to_bin(str(settings.getHTTPPort()))
             new_order.append('http')
     # erase current contacts from my identity
     ident.clearContacts()
@@ -492,11 +504,11 @@ def buildDefaultIdentity(name='', ip='', idurls=[]):
             continue
         ident.setProtoContact(proto, contact)
     # set other info
-    ident.certificates = []
-    ident.date = time.strftime('%b %d, %Y')
-    ident.postage = "1"
-    ident.revision = "0"
-    ident.version = ""  # TODO: put latest git commit hash here
+    # ident.certificates = []
+    ident.setDate(time.strftime('%b %d, %Y'))
+    ident.setPostage(1)
+    ident.setRevision(0)
+    ident.setVersion('')  # TODO: put latest git commit hash here
     # update software version number
     # version_number = bpio.ReadTextFile(settings.VersionNumberFile()).strip()
     # repo, location = misc.ReadRepoLocation()
@@ -506,7 +518,7 @@ def buildDefaultIdentity(name='', ip='', idurls=[]):
     # repo, location = misc.ReadRepoLocation()
     # ident.version = (vernum.strip() + ' ' + repo.strip() + ' ' + bpio.osinfo().strip()).strip()
     # put my public key in my identity
-    ident.publickey = key.MyPublicKey()
+    ident.setPublicKey(key.MyPublicKey())
     # generate signature
     ident.sign()
     # validate new identity
@@ -515,7 +527,7 @@ def buildDefaultIdentity(name='', ip='', idurls=[]):
     return ident
 
 
-def rebuildLocalIdentity(skip_transports=[]):
+def rebuildLocalIdentity(identity_object=None, skip_transports=[], revision_up=False, save_identity=True):
     """
     If some transports was enabled or disabled we want to update identity
     contacts. Just empty all of the contacts and create it again in the same
@@ -524,7 +536,7 @@ def rebuildLocalIdentity(skip_transports=[]):
     Also increase revision number by one - others may keep track of my modifications.
     """
     # getting current copy of local identity
-    lid = getLocalIdentity()
+    lid = identity_object or getLocalIdentity()
     # remember the current identity - full XML source code
     current_identity_xmlsrc = lid.serialize()
     lg.out(4, 'my_id.rebuildLocalIdentity current identity is %d bytes long' % len(current_identity_xmlsrc))
@@ -542,35 +554,42 @@ def rebuildLocalIdentity(skip_transports=[]):
 #            continue
 #        lid.setProtoContact(proto, contact)
     # update software version number
-    vernum = bpio.ReadTextFile(settings.VersionNumberFile())
+    vernum = strng.to_bin(bpio.ReadTextFile(settings.VersionNumberFile())).strip()
     repo, _ = misc.ReadRepoLocation()
-    lid.version = (vernum.strip() + ' ' + repo.strip() + ' ' + bpio.osinfo().strip()).strip()
+    lid.setVersion((vernum + b' ' + strng.to_bin(repo.strip()) + b' ' + strng.to_bin(bpio.osinfo().strip()).strip()))
     # generate signature with changed content
     lid.sign()
     new_xmlsrc = lid.serialize()
     changed = False
-    if new_xmlsrc == current_identity_xmlsrc:
-        # no modifications in my identity - cool !!!
-        lg.out(4, '    same revision: %s' % lid.revision)
-    else:
+    if new_xmlsrc != current_identity_xmlsrc or revision_up:
         try:
-            lid.revision = str(int(lid.revision) + 1)
+            lid.setRevision(int(strng.to_text(lid.revision)) + 1)
         except:
             lg.exc()
             return False
         # generate signature again because revision were changed !!!
         lid.sign()
-        lg.out(4, '    add revision: %s' % lid.revision)
+        lg.out(4, '    incremented revision: %s' % lid.revision)
         changed = True
         # remember the new identity
-        setLocalIdentity(lid)
-    lg.out(4, '    version: %s' % str(lid.version))
-    lg.out(4, '    contacts: %s' % str(lid.contacts))
-    lg.out(4, '    sources: %s' % str(lid.sources))
+        if save_identity:
+            setLocalIdentity(lid)
+    else:
+        # no modifications in my identity - cool !!!
+        lg.out(4, '    same revision: %r' % lid.revision)
+    lg.out(4, '    version: %r' % lid.version)
+    lg.out(4, '    contacts: %r' % lid.contacts)
+    lg.out(4, '    sources: %r' % lid.sources)
     if changed:
         lg.out(4, '    SAVING new identity #%s' % lid.revision)
         # finally saving modified local identity
-        saveLocalIdentity()
-    lg.out(4, '    my identity HAS %sBEEN changed !!!' % (('' if changed else 'NOT ')))
-    lg.out(4, '\n' + new_xmlsrc + '\n')
+        if save_identity:
+            saveLocalIdentity()
+            # NOW TEST IT!
+            forgetLocalIdentity()
+            loadLocalIdentity()
+            lg.out(4, '    LOCAL IDENTITY CORRECT: %r' % getLocalIdentity().isCorrect())
+            lg.out(4, '    LOCAL IDENTITY VALID: %r' % getLocalIdentity().Valid())
+    lg.info('my identity HAS %sBEEN changed' % (('' if changed else 'NOT ')))
+    lg.out(4, '\n' + strng.to_text(lid.serialize()) + '\n')
     return changed

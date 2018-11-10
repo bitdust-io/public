@@ -1,24 +1,11 @@
 #!/usr/bin/env python
 # node.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
-#
-# This file (node.py) is part of BitDust Software.
-#
-# BitDust is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# BitDust Software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
-#
-# Please contact us if you have any questions at bitdust.io@gmail.com
+# Copyright (C) 2007-2008 Francois Aucamp, Meraka Institute, CSIR
+# See AUTHORS for all authors and contact information. 
+# 
+# License: GNU Lesser General Public License, version 3 or later; see COPYING
+#          included in this archive for details.
 #
 # This library is free software, distributed under the terms of
 # the GNU Lesser General Public License Version 3, or any later version.
@@ -27,15 +14,19 @@
 # The docstrings in this module contain epytext markup; API documentation
 # may be created by processing this file with epydoc: http://epydoc.sf.net
 
+from __future__ import absolute_import
+from __future__ import print_function
+import six
 import hashlib
 
 from twisted.internet import defer
 
-import kademlia.node
-from kademlia.node import rpcmethod
+from .kademlia.node import Node
+from .kademlia.node import rpcmethod
+from io import open
 
 
-class EntangledNode(kademlia.node.Node):
+class EntangledNode(Node):
     """
     Entangled DHT node.
 
@@ -44,7 +35,7 @@ class EntangledNode(kademlia.node.Node):
     """
 
     def __init__(self, udpPort=4000, dataStore=None, routingTable=None, networkProtocol=None):
-        kademlia.node.Node.__init__(self, udpPort, dataStore, routingTable, networkProtocol)
+        Node.__init__(self, udpPort, dataStore, routingTable, networkProtocol)
         self.invalidKeywords = []
         self.keywordSplitters = ['_', '.', '/']
 
@@ -55,7 +46,7 @@ class EntangledNode(kademlia.node.Node):
         Call this to find keys in the DHT which contain the specified
         keyword(s).
         """
-        if isinstance(keywords, str):
+        if isinstance(keywords, six.string_types):
             for splitter in self.keywordSplitters:
                 keywords = keywords.replace(splitter, ' ')
             keywords = keywords.lower().split()
@@ -306,21 +297,21 @@ class EntangledNode(kademlia.node.Node):
 
 if __name__ == '__main__':
     import twisted.internet.reactor
-    from kademlia.datastore import SQLiteDataStore
+    from .kademlia.datastore import SQLiteDataStore
     import sys
     import os
     if len(sys.argv) < 2:
-        print 'Usage:\n%s UDP_PORT  [KNOWN_NODE_IP  KNOWN_NODE_PORT]' % sys.argv[0]
-        print 'or:\n%s UDP_PORT  [FILE_WITH_KNOWN_NODES]' % sys.argv[0]
-        print '\nIf a file is specified, it should containg one IP address and UDP port\nper line, seperated by a space.'
+        print('Usage:\n%s UDP_PORT  [KNOWN_NODE_IP  KNOWN_NODE_PORT]' % sys.argv[0])
+        print('or:\n%s UDP_PORT  [FILE_WITH_KNOWN_NODES]' % sys.argv[0])
+        print('\nIf a file is specified, it should containg one IP address and UDP port\nper line, seperated by a space.')
         sys.exit(1)
     try:
         int(sys.argv[1])
     except ValueError:
-        print '\nUDP_PORT must be an integer value.\n'
-        print 'Usage:\n%s UDP_PORT  [KNOWN_NODE_IP  KNOWN_NODE_PORT]' % sys.argv[0]
-        print 'or:\n%s UDP_PORT  [FILE_WITH_KNOWN_NODES]' % sys.argv[0]
-        print '\nIf a file is specified, it should contain one IP address and UDP port\nper line, seperated by a space.'
+        print('\nUDP_PORT must be an integer value.\n')
+        print('Usage:\n%s UDP_PORT  [KNOWN_NODE_IP  KNOWN_NODE_PORT]' % sys.argv[0])
+        print('or:\n%s UDP_PORT  [FILE_WITH_KNOWN_NODES]' % sys.argv[0])
+        print('\nIf a file is specified, it should contain one IP address and UDP port\nper line, seperated by a space.')
         sys.exit(1)
 
     if len(sys.argv) == 4:

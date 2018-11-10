@@ -32,12 +32,25 @@ some extended functionality. Can read/write from pipe without blocking
 the main thread.
 """
 
+#------------------------------------------------------------------------------
+
+from __future__ import absolute_import
+
+#------------------------------------------------------------------------------
+
 import os
 import sys
 import errno
 import time
 import subprocess
 import traceback
+
+#------------------------------------------------------------------------------
+
+_Debug = True
+_DebugLevel = 10
+
+#------------------------------------------------------------------------------
 
 PIPE = subprocess.PIPE
 
@@ -46,7 +59,9 @@ PIPE_EMPTY = 0
 PIPE_READY2READ = 1
 PIPE_CLOSED = 2
 
-if subprocess.mswindows:
+#------------------------------------------------------------------------------
+
+if getattr(subprocess, 'mswindows', None):
     from win32file import ReadFile, WriteFile
     from win32pipe import PeekNamedPipe
     from win32api import TerminateProcess, OpenProcess, CloseHandle
@@ -55,6 +70,12 @@ else:
     import select
     import fcntl  # @UnresolvedImport
     import signal
+
+#------------------------------------------------------------------------------
+
+from logs import lg
+
+#------------------------------------------------------------------------------
 
 
 class Popen(subprocess.Popen):
@@ -79,12 +100,19 @@ class Popen(subprocess.Popen):
                                   preexec_fn, close_fds, shell,
                                   cwd, env, universal_newlines,
                                   startupinfo, creationflags)
+        if _Debug:
+            lg.out(_DebugLevel, 'nonblocking.Popen created')
+            lg.out(_DebugLevel, '    stdin=%r' % self.stdin)
+            lg.out(_DebugLevel, '    stdout=%r' % self.stdout)
+            lg.out(_DebugLevel, '    stderr=%r' % self.stderr)
 
     def __del__(self):
         try:
             subprocess.Popen.__del__(self)
         except:
             pass
+        if _Debug:
+            lg.out(_DebugLevel, 'nonblocking.Popen closed')
 
     def returncode(self):
         return self.returncode
@@ -120,7 +148,7 @@ class Popen(subprocess.Popen):
         Under Linux use built-in method ``fcntl.fcntl`` to make the pipe
         read/write non blocking.
         """
-        if subprocess.mswindows:
+        if getattr(subprocess, 'mswindows', None):
             return
         conn, maxsize = self.get_conn_maxsize('stdout', None)
         if conn is None:
@@ -129,7 +157,7 @@ class Popen(subprocess.Popen):
         if not conn.closed:
             fcntl.fcntl(conn, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
-    if subprocess.mswindows:
+    if getattr(subprocess, 'mswindows', None):
         def send(self, input):
             if not self.stdin:
                 return None

@@ -1,24 +1,11 @@
 #!/usr/bin/env python
 # dtuple.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
-#
-# This file (dtuple.py) is part of BitDust Software.
-#
-# BitDust is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# BitDust Software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
-#
-# Please contact us if you have any questions at bitdust.io@gmail.com
+# Copyright (C) 2007-2008 Francois Aucamp, Meraka Institute, CSIR
+# See AUTHORS for all authors and contact information. 
+# 
+# License: GNU Lesser General Public License, version 3 or later; see COPYING
+#          included in this archive for details.
 #
 # This library is free software, distributed under the terms of
 # the GNU Lesser General Public License Version 3, or any later version.
@@ -27,13 +14,16 @@
 # The docstrings in this module contain epytext markup; API documentation
 # may be created by processing this file with epydoc: http://epydoc.sf.net
 
-import cPickle
+from __future__ import absolute_import
+from __future__ import print_function
+import six.moves.cPickle
 import hashlib
 
 from twisted.internet import defer
 
-from kademlia.node import rpcmethod
-from node import EntangledNode
+from .kademlia.node import rpcmethod
+from .node import EntangledNode
+from io import open
 
 
 class DistributedTupleSpacePeer(EntangledNode):
@@ -73,7 +63,7 @@ class DistributedTupleSpacePeer(EntangledNode):
                 subtupleKeys = self._keywordHashesFromTuple(dTuple)
                 # Write the tuple to the DHT Tuple Space...
                 h = hashlib.sha1()
-                tupleValue = cPickle.dumps(dTuple)
+                tupleValue = six.moves.cPickle.dumps(dTuple)
                 h.update('tuple:' + tupleValue)
                 mainKey = h.digest()
                 self.iterativeStore(mainKey, tupleValue, originalPublisherID=originalPublisherID)
@@ -84,7 +74,7 @@ class DistributedTupleSpacePeer(EntangledNode):
         def sendTupleToNode(nodes):
             if listenerNodeID[0] in nodes:
                 contact = nodes[nodes.index(listenerNodeID[0])]
-                df = contact.receiveTuple(listenerKey[0], cPickle.dumps(dTuple))
+                df = contact.receiveTuple(listenerKey[0], six.moves.cPickle.dumps(dTuple))
                 return df
 
         def checkIfListenerExists(result):
@@ -108,14 +98,14 @@ class DistributedTupleSpacePeer(EntangledNode):
                     df.addCallback(publishToTupleSpace)
                 else:
                     # TODO: add a callback to this to determine if it was a read/get
-                    df = contact.receiveTuple(listenerKey[0], cPickle.dumps(dTuple))
+                    df = contact.receiveTuple(listenerKey[0], six.moves.cPickle.dumps(dTuple))
                     df.addCallback(publishToTupleSpace)
             else:
                 # Extract "keywords" from the tuple
                 subtupleKeys = self._keywordHashesFromTuple(dTuple)
                 # Write the tuple to the DHT Tuple Space...
                 h = hashlib.sha1()
-                tupleValue = cPickle.dumps(dTuple)
+                tupleValue = six.moves.cPickle.dumps(dTuple)
                 h.update('tuple:' + tupleValue)
                 mainKey = h.digest()
 
@@ -149,7 +139,7 @@ class DistributedTupleSpacePeer(EntangledNode):
             if result is None:
                 # The tuple does not exist (yet) - add a listener for it
                 h = hashlib.sha1()
-                listenerKey = 'listener:' + cPickle.dumps(template)
+                listenerKey = 'listener:' + six.moves.cPickle.dumps(template)
                 h.update(listenerKey)
                 listenerKey = h.digest()
                 # Extract "listener keywords" from the template
@@ -272,7 +262,7 @@ class DistributedTupleSpacePeer(EntangledNode):
                 # Remove the tuple itself from the DHT
                 self.iterativeDelete(mainTupleKey[0])
                 # Un-serialize the tuple...
-                dTuple = cPickle.loads(tupleValue)
+                dTuple = six.moves.cPickle.loads(tupleValue)
                 # ...now remove all inverted index entries of the tuple, and return
                 subtupleKeys = self._keywordHashesFromTuple(dTuple)
                 self._removeFromInvertedIndexes(subtupleKeys, mainTupleKey[0])
@@ -303,7 +293,7 @@ class DistributedTupleSpacePeer(EntangledNode):
             if result is None:
                 # The tuple does not exist (yet) - add a listener for it
                 h = hashlib.sha1()
-                listenerKey = 'listener:' + cPickle.dumps(template)
+                listenerKey = 'listener:' + six.moves.cPickle.dumps(template)
                 h.update(listenerKey)
                 listenerKey = h.digest()
                 # Extract "listener keywords" from the template
@@ -350,7 +340,7 @@ class DistributedTupleSpacePeer(EntangledNode):
                 # tuple was found
                 tupleValue = value[mainTupleKey[0]]
                 # Un-serialize the tuple
-                dTuple = cPickle.loads(tupleValue)
+                dTuple = six.moves.cPickle.loads(tupleValue)
                 outerDf.callback(dTuple)
             else:
                 # tuple was not found
@@ -477,7 +467,7 @@ class DistributedTupleSpacePeer(EntangledNode):
         if subtupleKeys is None:
             # The template is deterministic; thus we can retrieve the corresponding tuple directly
             h = hashlib.sha1()
-            tupleValue = cPickle.dumps(template)
+            tupleValue = six.moves.cPickle.dumps(template)
             h.update(prependStr + tupleValue)
             mainKey = h.digest()
             outerDf.callback(mainKey)
@@ -485,7 +475,7 @@ class DistributedTupleSpacePeer(EntangledNode):
             if listener:
                 # First look for an exact match if we are looking for listener tuples
                 h = hashlib.sha1()
-                tupleValue = cPickle.dumps(template)
+                tupleValue = six.moves.cPickle.dumps(template)
                 h.update(prependStr + tupleValue)
                 mainKey = h.digest()
                 df = self.iterativeFindValue(mainKey)
@@ -513,15 +503,15 @@ class DistributedTupleSpacePeer(EntangledNode):
             # TODO: with the current scheme, it is possible (but unlikely) that an ACTUAL tuple may clash with one of these subtuples
             typeSubtuple = (tupleLength, i, type(element))
             h = hashlib.sha1()
-            h.update(prependStr + cPickle.dumps(typeSubtuple))
+            h.update(prependStr + six.moves.cPickle.dumps(typeSubtuple))
             subtupleKeys.append(h.digest())
             valueSubtuple = (tupleLength, i, element)
             h = hashlib.sha1()
-            h.update(prependStr + cPickle.dumps(valueSubtuple))
+            h.update(prependStr + six.moves.cPickle.dumps(valueSubtuple))
             subtupleKeys.append(h.digest())
             wildcardSubtuple = (tupleLength, i, None)
             h = hashlib.sha1()
-            h.update(prependStr + cPickle.dumps(wildcardSubtuple))
+            h.update(prependStr + six.moves.cPickle.dumps(wildcardSubtuple))
             subtupleKeys.append(h.digest())
             i += 1
         return subtupleKeys
@@ -543,7 +533,7 @@ class DistributedTupleSpacePeer(EntangledNode):
                 deterministicElementCount += 1
             subtuple = (tupleLength, i, element)
             h = hashlib.sha1()
-            h.update(prependStr + cPickle.dumps(subtuple))
+            h.update(prependStr + six.moves.cPickle.dumps(subtuple))
             subtupleKeys.append(h.digest())
             # else:
             # The element is None; treat it as a wildcard
@@ -558,12 +548,12 @@ class DistributedTupleSpacePeer(EntangledNode):
     @rpcmethod
     def receiveTuple(self, listenerKey, pickledTuple):
         if listenerKey in self._blockingGetRequests:
-            dTuple = cPickle.loads(pickledTuple)
+            dTuple = six.moves.cPickle.loads(pickledTuple)
             df = self._blockingGetRequests[listenerKey]
             df.callback(dTuple)
             return 'get'
         elif listenerKey in self._blockingReadRequests:
-            dTuple = cPickle.loads(pickledTuple)
+            dTuple = six.moves.cPickle.loads(pickledTuple)
             df = self._blockingReadRequests[listenerKey]
             df.callback(dTuple)
             return 'read'
@@ -572,17 +562,17 @@ class DistributedTupleSpacePeer(EntangledNode):
 if __name__ == '__main__':
     import sys
     if len(sys.argv) < 2:
-        print 'Usage:\n%s UDP_PORT  [KNOWN_NODE_IP  KNOWN_NODE_PORT]' % sys.argv[0]
-        print 'or:\n%s UDP_PORT  [FILE_WITH_KNOWN_NODES]' % sys.argv[0]
-        print '\nIf a file is specified, it should containg one IP address and UDP port\nper line, seperated by a space.'
+        print('Usage:\n%s UDP_PORT  [KNOWN_NODE_IP  KNOWN_NODE_PORT]' % sys.argv[0])
+        print('or:\n%s UDP_PORT  [FILE_WITH_KNOWN_NODES]' % sys.argv[0])
+        print('\nIf a file is specified, it should containg one IP address and UDP port\nper line, seperated by a space.')
         sys.exit(1)
     try:
         int(sys.argv[1])
     except ValueError:
-        print '\nUDP_PORT must be an integer value.\n'
-        print 'Usage:\n%s UDP_PORT  [KNOWN_NODE_IP  KNOWN_NODE_PORT]' % sys.argv[0]
-        print 'or:\n%s UDP_PORT  [FILE_WITH_KNOWN_NODES]' % sys.argv[0]
-        print '\nIf a file is specified, it should contain one IP address and UDP port\nper line, seperated by a space.'
+        print('\nUDP_PORT must be an integer value.\n')
+        print('Usage:\n%s UDP_PORT  [KNOWN_NODE_IP  KNOWN_NODE_PORT]' % sys.argv[0])
+        print('or:\n%s UDP_PORT  [FILE_WITH_KNOWN_NODES]' % sys.argv[0])
+        print('\nIf a file is specified, it should contain one IP address and UDP port\nper line, seperated by a space.')
         sys.exit(1)
 
     if len(sys.argv) == 4:

@@ -32,16 +32,18 @@ module:: coins_index
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+import six
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 
 #------------------------------------------------------------------------------
 
 import os
 
 from hashlib import md5
-
-from CodernityDB.hash_index import HashIndex
-from CodernityDB.tree_index import TreeBasedIndex
 
 #------------------------------------------------------------------------------
 
@@ -53,6 +55,15 @@ if __name__ == '__main__':
 #------------------------------------------------------------------------------
 
 from logs import lg
+
+#------------------------------------------------------------------------------
+
+if six.PY2:
+    from CodernityDB.hash_index import HashIndex
+    from CodernityDB.tree_index import TreeBasedIndex
+else:
+    from CodernityDB3.hash_index import HashIndex
+    from CodernityDB3.tree_index import TreeBasedIndex    
 
 #------------------------------------------------------------------------------
 

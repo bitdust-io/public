@@ -66,9 +66,13 @@ of Information Technologies, Mechanics and Optics, Programming Technologies Depa
 `Page <http://is.ifmo.ru/english>`_.
 """
 
+#------------------------------------------------------------------------------
+
+from __future__ import absolute_import
 import sys
 import time
 import traceback
+from io import open
 
 from twisted.internet import reactor
 from twisted.internet.task import LoopingCall
@@ -477,7 +481,7 @@ class Automat(object):
         Use ``fast = True`` flag to skip call to reactor.callLater(0, self.event, ...).
         """
         global _StateChangedCallback
-        if _LogEvents and self.log_events and _Debug:
+        if _LogEvents and getattr(self, 'log_events', False) and _Debug:
             if self.log_events or not event_string.startswith('timer-'):
                 self.log(
                     max(self.debug_level, _DebugLevel),
@@ -491,6 +495,7 @@ class Automat(object):
                 if _Debug:
                     self.exc('Exception in {}:{} automat, state is {}, event="{}", arg={}'.format(
                         self.id, self.name, self.state, event_string, arg))
+                return self
             self.state = new_state
         else:
             try:
@@ -499,6 +504,7 @@ class Automat(object):
                 if _Debug:
                     self.exc('Exception in {}:{} automat, state is {}, event="{}", arg={}'.format(
                         self.id, self.name, self.state, event_string, arg))
+                return self
             new_state = self.state
         if old_state != new_state:
             if _Debug and self.log_transitions:
@@ -600,6 +606,7 @@ class Automat(object):
             text = '%s(): %s' % (self.name, text, )
         if _LogFile is not None:
             if _LogsCount > 100000 and _LogFilename:
+                # very simple log rotation
                 _LogFile.close()
                 _LogFile = open(_LogFilename, 'w')
                 _LogsCount = 0
@@ -612,7 +619,12 @@ class Automat(object):
                 s = ('%02d:%02d.%02d' % (mn, sc, (sc - int(sc)) * 100)) + s
             else:
                 s = time.strftime('%H:%M:%S') + s
-
+            if sys.version_info[0] == 3:
+                if not isinstance(s, str):
+                    s = s.decode('utf-8')
+            else:
+                if not isinstance(s, unicode):
+                    s = s.decode('utf-8')
             _LogFile.write(s)
             _LogFile.flush()
             _LogsCount += 1
@@ -651,7 +663,8 @@ class Automat(object):
         Remove given callback from the state machine.
         """
         removed_count = 0
-        for key, cb_list in self._state_callbacks.items():
+        for key in list(self._state_callbacks.keys()):
+            cb_list = self._state_callbacks[key]
             for cb_tupl in cb_list:
                 cb_id_, cb_ = cb_tupl
                 if cb and cb == cb_:
@@ -671,7 +684,7 @@ class Automat(object):
         This is useful if you use ``lambda x: do_somethig()`` to catch
         the moment when state gets changed.
         """
-        for key in self._state_callbacks.keys():
+        for key in list(self._state_callbacks.keys()):
             if key == (oldstate, newstate):
                 self._state_callbacks.pop(key)
                 break

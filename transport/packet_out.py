@@ -52,7 +52,14 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+from __future__ import absolute_import
+import six
+from six.moves import map
+from six.moves import range
+
+#------------------------------------------------------------------------------
+
+_Debug = True
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -70,6 +77,8 @@ from p2p import commands
 from p2p import p2p_stats
 
 from lib import nameurl
+from lib import strng
+from lib import net_misc
 
 from system import tmpfile
 
@@ -114,9 +123,9 @@ def create(outpacket, wide, callbacks, target=None, route=None, response_timeout
     """
     """
     if _Debug:
-        lg.out(_DebugLevel, 'packet_out.create [%s/%s/%s]:%s(%s) target=%s route=%s' % (
+        lg.out(_DebugLevel, 'packet_out.create [%s/%s/%s]:%s(%s) target=%r route=%r callbacks=%s' % (
             nameurl.GetName(outpacket.OwnerID), nameurl.GetName(outpacket.CreatorID), nameurl.GetName(outpacket.RemoteID),
-            outpacket.Command, outpacket.PacketID, target, route, ))
+            outpacket.Command, outpacket.PacketID, target, route, list(callbacks.keys())))
     p = PacketOut(outpacket, wide, callbacks, target, route, response_timeout, keep_alive)
     queue().append(p)
     p.automat('run')
@@ -142,7 +151,7 @@ def search(proto, host, filename, remote_idurl=None):
         for p in queue():
             if p.filename:
                 lg.out(_DebugLevel, '%s [%s]' % (os.path.basename(p.filename),
-                                                 ('|'.join(map(lambda i: '%s:%s' % (i.proto, i.host), p.items)))))
+                                                 ('|'.join(['%s:%s' % (i.proto, i.host) for i in p.items]))))
             else:
                 lg.warn('%s was not initialized yet' % str(p))
     return None, None
@@ -206,11 +215,15 @@ def search_by_response_packet(newpacket, proto=None, host=None):
         lg.out(_DebugLevel, 'packet_out.search_by_response_packet for incoming [%s/%s/%s]:%s(%s) from [%s://%s]' % (
             nameurl.GetName(incoming_owner_idurl), nameurl.GetName(incoming_creator_idurl), nameurl.GetName(incoming_remote_idurl),
             newpacket.Command, newpacket.PacketID, proto, host, ))
-        lg.out(_DebugLevel, '    [%s]' % (','.join(map(lambda p: str(p.outpacket), queue()))))
+        lg.out(_DebugLevel, '    [%s]' % (','.join([str(p.outpacket) for p in queue()])))
     for p in queue():
-        if p.outpacket.PacketID != newpacket.PacketID:
+        # TODO: investigate 
+        if p.outpacket.PacketID.lower() != newpacket.PacketID.lower():
             # PacketID of incoming packet not matching with that outgoing packet
             continue
+        if p.outpacket.PacketID != newpacket.PacketID:
+            lg.warn('packet ID in queue "almost" matching with incoming: %s ~ %s' % (
+                p.outpacket.PacketID, newpacket.PacketID, ))
         if not commands.IsCommandAck(p.outpacket.Command, newpacket.Command):
             # this command must not be in the reply
             continue
@@ -237,7 +250,7 @@ def search_by_response_packet(newpacket, proto=None, host=None):
                 lg.out(_DebugLevel, '        found pending outbox [%s/%s/%s]:%s(%s) cb:%s' % (
                     nameurl.GetName(p.outpacket.OwnerID), nameurl.GetName(p.outpacket.CreatorID),
                     nameurl.GetName(p.outpacket.RemoteID), p.outpacket.Command, p.outpacket.PacketID,
-                    p.callbacks.keys()))
+                    list(p.callbacks.keys())))
     if len(result) == 0:
         if _Debug:
             lg.out(_DebugLevel, '        NOT FOUND pending packets in outbox queue matching incoming %s' % newpacket)
@@ -279,7 +292,7 @@ class WorkItem(object):
 
     def __init__(self, proto, host, size=0):
         self.proto = proto
-        self.host = host
+        self.host = net_misc.pack_address(host)
         self.time = time.time()
         self.transfer_id = None
         self.status = None
@@ -374,12 +387,12 @@ class PacketOut(automat.Automat):
         return time.time() - self.time > self.timeout
 
     def set_callback(self, command, cb):
-        if command not in self.callbacks.keys():
+        if command not in list(self.callbacks.keys()):
             self.callbacks[command] = []
         self.callbacks[command].append(cb)
         if _Debug:
             lg.out(_DebugLevel, '%s : new callback for [%s] added, expecting: %r' % (
-                self, command, self.callbacks.keys()))
+                self, command, list(self.callbacks.keys())))
 
     def A(self, event, arg):
         #---SENDING---
@@ -525,7 +538,7 @@ class PacketOut(automat.Automat):
         """
         Condition method.
         """
-        return commands.Ack() in self.callbacks.keys() or commands.Fail() in self.callbacks.keys()
+        return commands.Ack() in list(self.callbacks.keys()) or commands.Fail() in list(self.callbacks.keys())
 
     def isMoreItems(self, arg):
         """
@@ -538,13 +551,13 @@ class PacketOut(automat.Automat):
         Condition method.
         """
         newpacket, _ = arg
-        return newpacket.Command in self.callbacks.keys()
+        return newpacket.Command in list(self.callbacks.keys())
 
     def isDataExpected(self, arg):
         """
         Condition method.
         """
-        return commands.Data() in self.callbacks.keys()
+        return commands.Data() in list(self.callbacks.keys())
 
     def doInit(self, arg):
         """
@@ -616,7 +629,7 @@ class PacketOut(automat.Automat):
         """
         ok = False
         proto, host, filename, transfer_id = arg
-        for i in xrange(len(self.items)):
+        for i in range(len(self.items)):
             if self.items[i].proto == proto:  # and self.items[i].host == host:
                 self.items[i].transfer_id = transfer_id
                 if _Debug:
@@ -655,7 +668,8 @@ class PacketOut(automat.Automat):
         """
         Action method.
         """
-        assert self.popped_item
+        if not self.popped_item:
+            raise Exception('Current outgoing item not exist')
         p2p_stats.count_outbox(
             self.remote_idurl, self.popped_item.proto,
             self.popped_item.status, self.popped_item.bytes_sent)
@@ -719,7 +733,7 @@ class PacketOut(automat.Automat):
         Action method.
         """
         msg = arg
-        if not isinstance(msg, str):
+        if not isinstance(msg, six.string_types):
             msg = 'cancelled'
         callback.run_queue_item_status_callbacks(self, 'cancelled', msg)
 
@@ -839,7 +853,7 @@ class PacketOut(automat.Automat):
                 proto, host, port, fn = nameurl.UrlParse(tcp_contact)
                 if port:
                     host = localIP + ':' + str(port)
-                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
+                gateway.send_file(self.remote_idurl, proto, strng.to_bin(host), self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 self.automat('items-sent')
                 return
@@ -849,7 +863,7 @@ class PacketOut(automat.Automat):
             if host.strip() and gateway.is_installed(proto) and gateway.can_send(proto):
                 if port:
                     host = host + ':' + str(port)
-                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description)
+                gateway.send_file(self.remote_idurl, proto, strng.to_bin(host), self.filename, self.description)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 self.automat('items-sent')
                 return
@@ -857,17 +871,17 @@ class PacketOut(automat.Automat):
         if udp_contact and 'udp' in working_protos:
             proto, host = nameurl.IdContactSplit(udp_contact)
             if host.strip() and gateway.is_installed('udp') and gateway.can_send(proto):
-                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
+                gateway.send_file(self.remote_idurl, proto, strng.to_bin(host), self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 self.automat('items-sent')
                 return
         # http contact
         if http_contact and 'http' in working_protos:
-            proto, host, port, fn = nameurl.UrlParse(http_contact)
+            proto, host, port, _ = nameurl.UrlParse(http_contact)
             if host.strip() and gateway.is_installed(proto) and gateway.can_send(proto):
                 if port:
                     host = host + ':' + str(port)
-                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
+                gateway.send_file(self.remote_idurl, proto, strng.to_bin(host), self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 self.automat('items-sent')
                 return
@@ -875,7 +889,7 @@ class PacketOut(automat.Automat):
         if proxy_contact and 'proxy' in working_protos:
             proto, host = nameurl.IdContactSplit(proxy_contact)
             if host.strip() and gateway.is_installed('proxy') and gateway.can_send(proto):
-                gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
+                gateway.send_file(self.remote_idurl, proto, strng.to_bin(host), self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 self.automat('items-sent')
                 return
@@ -889,7 +903,7 @@ class PacketOut(automat.Automat):
                 # try sending with tcp even if it is switched off in the settings
                 if gateway.is_installed(proto) and gateway.can_send(proto):
                     if settings.enableTransport(proto) and settings.transportSendingIsEnabled(proto):
-                        gateway.send_file(self.remote_idurl, proto, host, self.filename, self.description, self)
+                        gateway.send_file(self.remote_idurl, proto, strng.to_bin(host), self.filename, self.description, self)
                         self.items.append(WorkItem(proto, host, self.filesize))
                         self.automat('items-sent')
                         return
@@ -921,7 +935,7 @@ class PacketOut(automat.Automat):
                     self.results.append(i)
                     self.popped_item = i
                     break
-        else:
-            raise Exception('Wrong argument!')
+        if not self.popped_item:
+            raise Exception('Failed to populate active item')
 
 #------------------------------------------------------------------------------

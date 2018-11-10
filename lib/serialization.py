@@ -20,82 +20,46 @@
 #
 # Please contact us if you have any questions at bitdust.io@gmail.com
 
+#------------------------------------------------------------------------------
 
-"""
-A possible methods:
-
-    * pickle
-    * cPickle
-    * msgpack
-    * jsonpickle
-
-Some methods are faster, but libraries needs to be pre-compiled and redistributed.
-So I decide to use standard pickle module and upgrade that in future.
-"""
+from __future__ import absolute_import
 
 #------------------------------------------------------------------------------
 
-SERIALIZATION_METHOD = 'pickle'
-
+from lib import jsn
+from lib import strng
+    
 #------------------------------------------------------------------------------
 
-
-if SERIALIZATION_METHOD == 'pickle':
-
-    import pickle
-
-    def ObjectToString(obj):
-        """
-        """
-        return pickle.dumps(obj, protocol=2)
-
-    def StringToObject(inp):
-        """
-        """
-        return pickle.loads(inp)
-
-
-elif SERIALIZATION_METHOD == 'cPickle':
-
-    import cPickle
-
-    def ObjectToString(obj):
-        """
-        """
-        return cPickle.dumps(obj, protocol=0)
-
-    def StringToObject(inp):
-        """
-        """
-        return cPickle.loads(inp)
+def DictToBytes(dct, encoding='latin1'):
+    """
+    Calls `json.dupms()` method for input dict to build bytes output.
+    Uses encoding to translate every byte string to text and ensure ascii output.
+    """
+    return strng.to_bin(
+        jsn.dumps(
+            dct,
+            separators=(',', ':'),
+            indent=None,
+            sort_keys=True,
+            ensure_ascii=True,
+            encoding=encoding,
+        ),
+        encoding=encoding,
+        errors='strict',
+    )
 
 
-elif SERIALIZATION_METHOD == 'msgpack':
-
-    import msgpack
-
-    def ObjectToString(obj):
-        """
-        """
-        return msgpack.dumps(obj)
-
-    def StringToObject(inp):
-        """
-        """
-        return msgpack.loads(inp, use_list=False)
-
-
-elif SERIALIZATION_METHOD == 'jsonpickle':
-
-    import json
-    import jsonpickle
-
-    def ObjectToString(obj):
-        """
-        """
-        return json.dumps(jsonpickle.encode(obj), ensure_ascii=False)
-
-    def StringToObject(inp):
-        """
-        """
-        return jsonpickle.decode(json.loads(inp))
+def BytesToDict(inp, encoding='latin1'):
+    """
+    A smart way to extract input bytes into python dictionary object.
+    bytes will be encoded into text and then loaded via `json.loads()` method.
+    Finally every text value in result dict will be encoded back to bytes.
+    """
+    return jsn.loads(
+        strng.to_text(
+            inp,
+            encoding=encoding,
+        ),
+        encoding=encoding,
+    )

@@ -87,10 +87,12 @@ EVENTS:
 
 #------------------------------------------------------------------------------
 
+from __future__ import absolute_import
 import sys
 import random
 
 from twisted.internet.defer import DeferredList
+from six.moves import range
 
 #------------------------------------------------------------------------------
 
@@ -109,6 +111,7 @@ from system import bpio
 from lib import nameurl
 from lib import net_misc
 from lib import misc
+from lib import strng
 
 from main import settings
 from main import config
@@ -182,9 +185,9 @@ class IdRegistrator(automat.Automat):
     def msg(self, msgid, arg=None):
         msg = self.MESSAGES.get(msgid, ['', 'black'])
         text = msg[0] % {
-            'login': bpio.ReadTextFile(settings.UserNameFilename()),
-            'externalip': misc.readExternalIP(),
-            'localip': bpio.ReadTextFile(settings.LocalIPFilename()),
+            'login': strng.to_bin(bpio.ReadTextFile(settings.UserNameFilename())),
+            'externalip': strng.to_bin(misc.readExternalIP()),
+            'localip': strng.to_bin(bpio.ReadTextFile(settings.LocalIPFilename())),
         }
         color = 'black'
         if len(msg) == 2:
@@ -346,7 +349,7 @@ class IdRegistrator(automat.Automat):
         except:
             login = arg[0]
             if len(arg) > 1:
-                self.preferred_servers = map(lambda s: s.strip(), arg[1].split(','))
+                self.preferred_servers = [s.strip() for s in arg[1].split(',')]
         if not self.known_servers:
             self.known_servers = known_servers.by_host()
         if not self.preferred_servers:
@@ -367,7 +370,7 @@ class IdRegistrator(automat.Automat):
         lg.out(4, '    preferred_servers=%s' % self.preferred_servers)
         lg.out(4, '    min_servers=%s' % self.min_servers)
         lg.out(4, '    max_servers=%s' % self.max_servers)
-        bpio.WriteFile(settings.UserNameFilename(), login)
+        bpio.WriteTextFile(settings.UserNameFilename(), login)
 
     def doSelectRandomServers(self, arg):
         """
@@ -404,7 +407,7 @@ class IdRegistrator(automat.Automat):
             self.automat('id-server-response', (id_server_host, htmlsrc))
 
         def _eb(err, id_server_host):
-            lg.out(4, '               FAILED: %s' % id_server_host)
+            lg.out(4, '               FAILED: %s : %s' % (id_server_host, err))
             self.discovered_servers.remove(id_server_host)
             self.automat('id-server-failed', (id_server_host, err))
 
@@ -416,8 +419,8 @@ class IdRegistrator(automat.Automat):
             if webport == 80:
                 webport = ''
             server_url = nameurl.UrlMake('http', host, webport, '')
-            lg.out(4, '               connecting to %s   known tcp port is %d' % (
-                server_url, tcpport, ))
+            lg.out(4, '               connecting to %s:%s   known tcp port is %d' % (
+                server_url, webport, tcpport, ))
             d = net_misc.getPageTwisted(server_url, timeout=10)
             d.addCallback(_cb, host)
             d.addErrback(_eb, host)
@@ -468,7 +471,7 @@ class IdRegistrator(automat.Automat):
         Action method.
         """
         localip = net_misc.getLocalIp()
-        bpio.WriteFile(settings.LocalIPFilename(), localip)
+        bpio.WriteTextFile(settings.LocalIPFilename(), localip)
         lg.out(4, 'id_registrator.doDetectLocalIP [%s]' % localip)
         self.automat('local-ip-detected')
 
@@ -478,7 +481,7 @@ class IdRegistrator(automat.Automat):
         """
         lg.out(4, 'id_registrator.doStunExternalIP')
         if len(self.free_idurls) == 1:
-            if self.free_idurls[0].count('localhost:') or self.free_idurls[0].count('127.0.0.1:'):
+            if self.free_idurls[0].count(b'localhost:') or self.free_idurls[0].count(b'127.0.0.1:'):
                 # if you wish to create a local identity you do not need to stun external IP at all
                 self.automat('stun-success', '127.0.0.1')
 
@@ -488,7 +491,7 @@ class IdRegistrator(automat.Automat):
                 self.automat('stun-failed')
                 return
             ip = result['ip']
-            bpio.WriteFile(settings.ExternalIPFilename(), ip)
+            bpio.WriteTextFile(settings.ExternalIPFilename(), ip)
             self.automat('stun-success', ip)
 
         rnd_udp_port = random.randint(
@@ -581,31 +584,31 @@ class IdRegistrator(automat.Automat):
     def _create_new_identity(self):
         """
         Generate new Private key and new identity file.
-
         Reads some extra info from config files.
         """
-        login = bpio.ReadTextFile(settings.UserNameFilename())
-        externalIP = misc.readExternalIP() or '127.0.0.1'
-
+        login = strng.to_bin(bpio.ReadTextFile(settings.UserNameFilename()))
+        externalIP = strng.to_bin(misc.readExternalIP()) or b'127.0.0.1'
+        if self.free_idurls[0].count(b'127.0.0.1'):
+            externalIP = b'127.0.0.1'
         lg.out(4, 'id_registrator._create_new_identity %s %s ' % (login, externalIP))
-
         key.InitMyKey()
-
+        if not key.isMyKeyReady():
+            key.GenerateNewKey()
         lg.out(4, '    my key is ready')
-
         ident = my_id.buildDefaultIdentity(
             name=login, ip=externalIP, idurls=self.free_idurls)
+        # my_id.rebuildLocalIdentity(
+        #     identity_object=ident, revision_up=True, save_identity=False)
         # localIP = bpio.ReadTextFile(settings.LocalIPFilename())
         my_identity_xmlsrc = ident.serialize()
         newfilename = settings.LocalIdentityFilename() + '.new'
-        bpio.WriteFile(newfilename, my_identity_xmlsrc)
+        bpio.WriteTextFile(newfilename, my_identity_xmlsrc)
         self.new_identity = ident
         lg.out(4, '    wrote %d bytes to %s' % (len(my_identity_xmlsrc), newfilename))
 
     def _send_new_identity(self):
         """
         Send created identity to the identity server to register it.
-
         TODO: need to close transport and gateway after that
         """
         lg.out(4, 'id_registrator._send_new_identity ')
@@ -621,14 +624,14 @@ class IdRegistrator(automat.Automat):
         sendfilename = settings.LocalIdentityFilename() + '.new'
         dlist = []
         for idurl in self.new_identity.sources:
-            self.free_idurls.remove(idurl)
+            self.free_idurls.remove(strng.to_bin(idurl))
             _, host, _, _ = nameurl.UrlParse(idurl)
             _, tcpport = known_servers.by_host().get(
                 host, (settings.IdentityWebPort(), settings.IdentityServerPort()))
-            srvhost = '%s:%d' % (host, tcpport)
+            srvhost = net_misc.pack_address((host, tcpport, ))
             dlist.append(gateway.send_file_single(idurl, 'tcp', srvhost, sendfilename, 'Identity'))
-        assert len(self.free_idurls) == 0
-        return DeferredList(dlist)
+        # assert len(self.free_idurls) == 0
+        return DeferredList(dlist, fireOnOneCallback=True)
 
 #------------------------------------------------------------------------------
 

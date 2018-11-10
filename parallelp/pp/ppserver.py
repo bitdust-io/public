@@ -1,24 +1,6 @@
 #!/usr/bin/env python
 # ppserver.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
-#
-# This file (ppserver.py) is part of BitDust Software.
-#
-# BitDust is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# BitDust Software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with BitDust Software.  If not, see <http://www.gnu.org/licenses/>.
-#
-# Please contact us if you have any questions at bitdust.io@gmail.com
 # Parallel Python Software: http://www.parallelpython.com
 # Copyright (c) 2005-2009, Vitalii Vanovschi
 # All rights reserved.
@@ -51,19 +33,22 @@ http://www.parallelpython.com - updates, documentation, examples and support
 forums
 """
 
+from __future__ import absolute_import
+from __future__ import print_function
 import logging
 import getopt
 import sys
 import socket
-import thread
+import six.moves._thread
 import random
 import string
 import time
 import os
 
-import pptransport
-import ppauto
+from . import pptransport
+from . import ppauto
 from pp import Server
+from six.moves import range
 
 
 copyright = "Copyright (c) 2005-2009 Vitalii Vanovschi. All rights reserved"
@@ -98,14 +83,14 @@ class _NetworkServer(Server):
         self.timeout = timeout
         self.ncon = 0
         self.last_con_time = time.time()
-        self.ncon_lock = thread.allocate_lock()
+        self.ncon_lock = six.moves._thread.allocate_lock()
 
         logging.debug("Strarting network server interface=%s port=%i"
                       % (self.host, self.port))
         if self.timeout is not None:
             logging.debug("ppserver will exit in %i seconds if no "
                           "connections with clients exist" % (self.timeout))
-            thread.start_new_thread(self.check_timeout, ())
+            six.moves._thread.start_new_thread(self.check_timeout, ())
 
     def ncon_add(self, val):
         """
@@ -152,7 +137,7 @@ class _NetworkServer(Server):
                 (csocket, address) = ssocket.accept()
                 # now do something with the clientsocket
                 # in this case, we'll pretend this is a threaded server
-                thread.start_new_thread(self.crun, (csocket, ))
+                six.moves._thread.start_new_thread(self.crun, (csocket, ))
         except:
             logging.debug("Closing server socket")
             ssocket.close()
@@ -166,7 +151,7 @@ class _NetworkServer(Server):
         mysocket.send(version)
         # generate a random string
         srandom = "".join([random.choice(string.ascii_letters)
-                           for i in xrange(16)])
+                           for i in range(16)])
         mysocket.send(srandom)
         answer = sha_new(srandom + self.secret).hexdigest()
         cleintanswer = mysocket.receive()
@@ -208,7 +193,7 @@ class _NetworkServer(Server):
         Initiaates auto-discovery mechanism.
         """
         discover = ppauto.Discover(self)
-        thread.start_new_thread(discover.run,
+        six.moves._thread.start_new_thread(discover.run,
                                 ((self.host, self.port),
                                  (self.bcast, self.port)),
                                 )
@@ -222,12 +207,12 @@ def parse_config(file_loc):
     try:
         from configobj import ConfigObj
     except ImportError as ie:
-        print >> sys.stderr, "ERROR: You must have configobj installed to use \
-configuration files. You can still use command line switches."
+        print("ERROR: You must have configobj installed to use \
+configuration files. You can still use command line switches.", file=sys.stderr)
         sys.exit(1)
 
     if not os.access(file_loc, os.F_OK):
-        print >> sys.stderr, "ERROR: Can not access %s." % arg
+        print("ERROR: Can not access %s." % arg, file=sys.stderr)
         sys.exit(1)
 
     # Load the configuration file
@@ -292,33 +277,33 @@ def print_usage():
     """
     Prints help.
     """
-    print "Parallel Python Network Server (pp-" + version + ")"
-    print "Usage: ppserver.py [-hdar] [-n proto] [-c config_path]"\
+    print("Parallel Python Network Server (pp-" + version + ")")
+    print("Usage: ppserver.py [-hdar] [-n proto] [-c config_path]"\
         " [-i interface] [-b broadcast] [-p port] [-w nworkers]"\
-        " [-s secret] [-t seconds]"
-    print
-    print "Options: "
-    print "-h                 : this help message"
-    print "-d                 : debug"
-    print "-a                 : enable auto-discovery service"
-    print "-r                 : restart worker process after each"\
-        " task completion"
-    print "-n proto           : protocol number for pickle module"
-    print "-c path            : path to config file"
-    print "-i interface       : interface to listen"
-    print "-b broadcast       : broadcast address for auto-discovery service"
-    print "-p port            : port to listen"
-    print "-w nworkers        : number of workers to start"
-    print "-s secret          : secret for authentication"
-    print "-t seconds         : timeout to exit if no connections with "\
-        "clients exist"
-    print
-    print "Due to the security concerns always use a non-trivial secret key."
-    print "Secret key set by -s switch will override secret key assigned by"
-    print "pp_secret variable in .pythonrc.py"
-    print
-    print "Please visit http://www.parallelpython.com for extended up-to-date"
-    print "documentation, examples and support forums"
+        " [-s secret] [-t seconds]")
+    print()
+    print("Options: ")
+    print("-h                 : this help message")
+    print("-d                 : debug")
+    print("-a                 : enable auto-discovery service")
+    print("-r                 : restart worker process after each"\
+        " task completion")
+    print("-n proto           : protocol number for pickle module")
+    print("-c path            : path to config file")
+    print("-i interface       : interface to listen")
+    print("-b broadcast       : broadcast address for auto-discovery service")
+    print("-p port            : port to listen")
+    print("-w nworkers        : number of workers to start")
+    print("-s secret          : secret for authentication")
+    print("-t seconds         : timeout to exit if no connections with "\
+        "clients exist")
+    print()
+    print("Due to the security concerns always use a non-trivial secret key.")
+    print("Secret key set by -s switch will override secret key assigned by")
+    print("pp_secret variable in .pythonrc.py")
+    print()
+    print("Please visit http://www.parallelpython.com for extended up-to-date")
+    print("documentation, examples and support forums")
 
 
 if __name__ == "__main__":

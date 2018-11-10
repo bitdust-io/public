@@ -31,15 +31,27 @@
 
 #------------------------------------------------------------------------------
 
+from __future__ import absolute_import
 import gc
 
 #------------------------------------------------------------------------------
 
+_Debug = True
+
+#------------------------------------------------------------------------------
+
 from Cryptodome.PublicKey import RSA
-from Cryptodome.Hash import SHA1
 from Cryptodome.Signature import pkcs1_15
 from Cryptodome.Cipher import PKCS1_OAEP
 from Cryptodome.Util import number
+
+#------------------------------------------------------------------------------
+
+from lib import strng
+
+from system import local_fs
+
+from crypt import hashes
 
 #------------------------------------------------------------------------------
 
@@ -51,6 +63,11 @@ class RSAKey(object):
     def isReady(self):
         return self.keyObject is not None
 
+    def forget(self):
+        self.keyObject = None
+        gc.collect()
+        return True
+
     def generate(self, bits):
         if self.keyObject:
             raise ValueError('key object already exist')
@@ -60,9 +77,16 @@ class RSAKey(object):
     def isPublic(self):
         if not self.keyObject:
             raise ValueError('key object is not exist')
+        if self.keyObject.has_private():
+            return False
+        return True
+
+    def isPrivate(self):
+        if not self.keyObject:
+            raise ValueError('key object is not exist')
         if not self.keyObject.has_private():
-            return True
-        return False
+            return False
+        return True
 
     def public(self):
         if self.isPublic():
@@ -78,41 +102,57 @@ class RSAKey(object):
     def fromFile(self, keyfilename):
         if self.keyObject:
             raise ValueError('key object already exist')
-        fin = open(keyfilename, 'r')
-        key_src = fin.read()
-        fin.close()
+        key_src = local_fs.ReadTextFile(keyfilename)
         self.keyObject = RSA.import_key(key_src)
         del key_src
         gc.collect()
         return True
 
-    def toString(self, output_format='PEM'):
+    def toPrivateString(self, output_format='PEM'):
         if not self.keyObject:
             raise ValueError('key object is not exist')
-        return self.keyObject.exportKey(format=output_format)
+        if not self.keyObject.has_private():
+            raise ValueError('this key contains only public component')
+        return strng.to_text(self.keyObject.exportKey(format=output_format))
 
     def toPublicString(self, output_format='OpenSSH'):
         if not self.keyObject:
             raise ValueError('key object is not exist')
-        return self.keyObject.publickey().exportKey(format=output_format)
+        return strng.to_text(self.keyObject.publickey().exportKey(format=output_format))
 
-    def sign(self, message):
+    def sign(self, message, as_digits=True):
         if not self.keyObject:
             raise ValueError('key object is not exist')
-        h = SHA1.new(message)
+        if not strng.is_bin(message):
+            raise ValueError('message must be byte string')
+        h = hashes.sha1(message, return_object=True)
         signature_bytes = pkcs1_15.new(self.keyObject).sign(h)
-        signature_int = number.bytes_to_long(signature_bytes)
-        signature = str(signature_int)
-        return signature
+        if not as_digits:
+            return signature_bytes
+        signature_raw = strng.to_bin(number.bytes_to_long(signature_bytes))
+        if signature_bytes[0:1] == b'\x00':
+            signature_raw = b'0' + signature_raw
+        return signature_raw
 
-    def verify(self, signature, message):
-        h = SHA1.new(message)
-        try:
-            signature_int = long(signature)
+    def verify(self, signature, message, signature_as_digits=True):
+        if signature_as_digits:
+            signature_text = strng.to_text(signature)
+            signature_int = int(signature_text)
             signature_bytes = number.long_to_bytes(signature_int)
+            if signature[0:1] == b'0':
+                signature_bytes = b'\x00' + signature_bytes
+        if not strng.is_bin(signature_bytes):
+            raise ValueError('signature must be byte string')
+        if not strng.is_bin(message):
+            raise ValueError('message must be byte string')
+        h = hashes.sha1(message, return_object=True)
+        try:
             pkcs1_15.new(self.keyObject).verify(h, signature_bytes)
             result = True
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, ):
+            if _Debug:
+                from logs import lg
+                lg.exc()
             result = False
         return result
 
@@ -129,4 +169,3 @@ class RSAKey(object):
         cipher = PKCS1_OAEP.new(self.keyObject)
         private_message = cipher.decrypt(encrypted_payload)
         return private_message
-
