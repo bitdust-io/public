@@ -48,7 +48,7 @@ import os
 import sys
 import time
 
-from twisted.internet import reactor
+from twisted.internet import reactor  # @UnresolvedImport
 
 #------------------------------------------------------------------------------
 
@@ -62,7 +62,7 @@ from automats import automat
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 14
 
 #------------------------------------------------------------------------------

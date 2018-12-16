@@ -37,7 +37,7 @@ from six.moves import map
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -125,7 +125,7 @@ def process_stop():
         {'status': 'OK', 'result': 'stopped'}
     """
     lg.out(4, 'api.process_stop sending event "stop" to the shutdowner() machine')
-    from twisted.internet import reactor
+    from twisted.internet import reactor  # @UnresolvedImport
     from main import shutdowner
     reactor.callLater(0.1, shutdowner.A, 'stop', 'exit')
     # shutdowner.A('stop', 'exit')
@@ -141,7 +141,7 @@ def process_restart(showgui=False):
 
         {'status': 'OK', 'result': 'restarted'}
     """
-    from twisted.internet import reactor
+    from twisted.internet import reactor  # @UnresolvedImport
     from main import shutdowner
     if showgui:
         lg.out(4, 'api.process_restart sending event "stop" to the shutdowner() machine')
@@ -551,7 +551,7 @@ def keys_list(sort=False, include_private=False):
     return RESULT(r)
 
 
-def key_create(key_alias, key_size=2048, include_private=False):
+def key_create(key_alias, key_size=None, include_private=False):
     """
     Generate new Private Key and add it to the list of known keys with given `key_id`.
 
@@ -572,6 +572,7 @@ def key_create(key_alias, key_size=2048, include_private=False):
         }]}
     """
     from crypt import my_keys
+    from main import settings
     from userid import my_id
     key_alias = str(key_alias)
     key_alias = key_alias.strip().lower()
@@ -580,6 +581,8 @@ def key_create(key_alias, key_size=2048, include_private=False):
         return ERROR('key "%s" is not valid' % key_id)
     if my_keys.is_key_registered(key_id):
         return ERROR('key "%s" already exist' % key_id)
+    if not key_size:
+        key_size = settings.getPrivateKeySize()
     lg.out(4, 'api.key_create id=%s, size=%s' % (key_id, key_size))
     key_object = my_keys.generate_key(key_id, key_size=key_size)
     if key_object is None:
@@ -1870,6 +1873,18 @@ def suppliers_list(customer_idurl_or_global_id=None, verbose=False):
             customer_idurl = global_id.GlobalUserToIDURL(customer_idurl)
     results = []
     for (pos, supplier_idurl, ) in enumerate(contactsdb.suppliers(customer_idurl)):
+        if not supplier_idurl:
+            r = {
+                'position': pos,
+                'idurl': '',
+                'global_id': '',
+                'supplier_state': None,
+                'connected': None,
+                'contact_status': None,
+                'contact_state': None,
+            }
+            results.append(r)
+            continue
         r = {
             'position': pos,
             'idurl': supplier_idurl,
@@ -1914,7 +1929,7 @@ def supplier_replace(index_or_idurl_or_global_id):
     from userid import my_id
     from userid import global_id
     customer_idurl = my_id.getLocalID()
-    supplier_idurl = index_or_idurl_or_global_id
+    supplier_idurl = strng.to_text(index_or_idurl_or_global_id)
     if supplier_idurl.isdigit():
         supplier_idurl = contactsdb.supplier(int(supplier_idurl), customer_idurl=customer_idurl)
     else:
@@ -1942,7 +1957,7 @@ def supplier_change(index_or_idurl_or_global_id, new_supplier_idurl_or_global_id
     from userid import my_id
     from userid import global_id
     customer_idurl = my_id.getLocalID()
-    supplier_idurl = index_or_idurl_or_global_id
+    supplier_idurl = strng.to_text(index_or_idurl_or_global_id)
     if supplier_idurl.isdigit():
         supplier_idurl = contactsdb.supplier(int(supplier_idurl), customer_idurl=customer_idurl)
     else:
@@ -1983,8 +1998,8 @@ def suppliers_dht_lookup(customer_idurl_or_global_id):
     Scans DHT network for key-value pairs related to given customer and
     returns a list of his "possible" suppliers.
     """
-    if not driver.is_on('service_supplier_relations'):
-        return ERROR('service_supplier_relations() is not started')
+    if not driver.is_on('service_entangled_dht'):
+        return ERROR('service_entangled_dht() is not started')
     from dht import dht_relations
     from userid import my_id
     from userid import global_id
@@ -1995,8 +2010,8 @@ def suppliers_dht_lookup(customer_idurl_or_global_id):
         if global_id.IsValidGlobalUser(customer_idurl):
             customer_idurl = global_id.GlobalUserToIDURL(customer_idurl)
     ret = Deferred()
-    d = dht_relations.scan_customer_supplier_relations(customer_idurl)
-    d.addCallback(lambda result_list: ret.callback(RESULT(result_list)))
+    d = dht_relations.read_customer_suppliers(customer_idurl)
+    d.addCallback(lambda result: ret.callback(RESULT(result)))
     d.addErrback(lambda err: ret.callback(ERROR([err, ])))
     return ret
 
@@ -2022,6 +2037,16 @@ def customers_list(verbose=False):
     from userid import global_id
     results = []
     for pos, customer_idurl in enumerate(contactsdb.customers()):
+        if not customer_idurl:
+            r = {
+                'position': pos,
+                'global_id': '',
+                'idurl': '',
+                'contact_status': None,
+                'contact_state': None,
+            }
+            results.append(r)
+            continue
         r = {
             'position': pos,
             'global_id': global_id.UrlToGlobalID(customer_idurl),
@@ -2639,7 +2664,7 @@ def queue_list():
 
 #------------------------------------------------------------------------------
 
-def user_ping(idurl_or_global_id, timeout=10):
+def user_ping(idurl_or_global_id, timeout=10, retries=2):
     """
     Sends Identity packet to remote peer and wait for Ack packet to check connection status.
     The "ping" command performs following actions:
@@ -2659,7 +2684,7 @@ def user_ping(idurl_or_global_id, timeout=10):
     if global_id.IsValidGlobalUser(idurl):
         idurl = global_id.GlobalUserToIDURL(idurl)
     ret = Deferred()
-    d = propagate.PingContact(idurl, int(timeout))
+    d = propagate.PingContact(idurl, timeout=int(timeout), retries=int(retries))
     d.addCallback(
         lambda resp: ret.callback(
             OK(str(resp))))
@@ -2798,7 +2823,7 @@ def user_observe(nickname, attempts=3):
         ret.callback(RESULT(results, ))
         return None
 
-    from twisted.internet import reactor
+    from twisted.internet import reactor  # @UnresolvedImport
     reactor.callLater(0.05, nickname_observer.observe_many,
         nickname,
         attempts=attempts,
@@ -3083,7 +3108,7 @@ def network_connected(wait_timeout=5):
     """
     if not driver.is_on('service_network'):
         return ERROR('service_network() is not started')
-    from twisted.internet import reactor
+    from twisted.internet import reactor  # @UnresolvedImport
     from userid import my_id
     from automats import automat
     ret = Deferred()
@@ -3092,10 +3117,31 @@ def network_connected(wait_timeout=5):
     if p2p_connector_lookup:
         p2p_connector_machine = automat.objects().get(p2p_connector_lookup[0])
         if p2p_connector_machine and p2p_connector_machine.state == 'CONNECTED':
-            wait_timeout_defer = Deferred()
-            wait_timeout_defer.addTimeout(wait_timeout, clock=reactor)
-            wait_timeout_defer.addBoth(lambda _: ret.callback(OK('connected')))
-            return ret
+            proxy_receiver_lookup = automat.find('proxy_receiver')
+            if proxy_receiver_lookup:
+                proxy_receiver_machine = automat.objects().get(proxy_receiver_lookup[0])
+                if proxy_receiver_machine and proxy_receiver_machine.state == 'LISTEN':
+                    wait_timeout_defer = Deferred()
+                    wait_timeout_defer.addTimeout(wait_timeout, clock=reactor)
+                    wait_timeout_defer.addBoth(lambda _: ret.callback(OK({
+                        'service_network': 'started',
+                        'service_gateway': 'started',
+                        'service_p2p_hookups': 'started',
+                        'service_proxy_transport': 'started',
+                        'proxy_receiver_state': proxy_receiver_machine.state,
+                    })))
+                    return ret
+            else:
+                wait_timeout_defer = Deferred()
+                wait_timeout_defer.addTimeout(wait_timeout, clock=reactor)
+                wait_timeout_defer.addBoth(lambda _: ret.callback(OK({
+                    'service_network': 'started',
+                    'service_gateway': 'started',
+                    'service_p2p_hookups': 'started',
+                    'service_proxy_transport': 'disabled',
+                    'p2p_connector_state': p2p_connector_machine.state,
+                })))
+                return ret
 
     if not my_id.isLocalIdentityReady():
         lg.warn('local identity is not valid or not exist')
@@ -3127,10 +3173,48 @@ def network_connected(wait_timeout=5):
                 p2p_connector_machine.automat('check-synchronize')
                 ret.callback(ERROR('disconnected', extra_fields={'reason': 'p2p_connector_disconnected'}))
                 return None
-            ret.callback(OK('connected'))
+            # ret.callback(OK('connected'))
+            _do_service_proxy_transport_test()
         except:
             lg.exc()
             ret.callback(ERROR('disconnected', extra_fields={'reason': 'p2p_connector_error'}))
+        return None
+
+    def _do_service_proxy_transport_test():
+        if not driver.is_enabled('service_proxy_transport'):
+            ret.callback(OK({
+                'service_network': 'started',
+                'service_gateway': 'started',
+                'service_p2p_hookups': 'started',
+                'service_proxy_transport': 'disabled',
+            }))
+            return None
+        try:
+            proxy_receiver_lookup = automat.find('proxy_receiver')
+            if not proxy_receiver_lookup:
+                lg.warn('disconnected, reason is "proxy_receiver_not_found"')
+                ret.callback(ERROR('disconnected', extra_fields={'reason': 'proxy_receiver_not_found'}))
+                return None
+            proxy_receiver_machine = automat.objects().get(proxy_receiver_lookup[0])
+            if not proxy_receiver_machine:
+                lg.warn('disconnected, reason is "proxy_receiver_not_exist"')
+                ret.callback(ERROR('disconnected', extra_fields={'reason': 'proxy_receiver_not_exist'}))
+                return None
+            if proxy_receiver_machine.state != 'LISTEN':
+                lg.warn('disconnected, reason is "proxy_receiver_disconnected", sending "start" event to proxy_receiver()')
+                proxy_receiver_machine.automat('start')
+                ret.callback(ERROR('disconnected', extra_fields={'reason': 'proxy_receiver_disconnected'}))
+                return None
+            ret.callback(OK({
+                'service_network': 'started',
+                'service_gateway': 'started',
+                'service_p2p_hookups': 'started',
+                'service_proxy_transport': 'started',
+                'proxy_receiver_state': proxy_receiver_machine.state,
+            }))
+        except:
+            lg.exc()
+            ret.callback(ERROR('disconnected', extra_fields={'reason': 'proxy_receiver_error'}))
         return None
 
     def _on_service_restarted(resp, service_name):
@@ -3164,8 +3248,12 @@ def network_connected(wait_timeout=5):
             reactor.callLater(0, _do_service_test, 'service_gateway')
         elif service_name == 'service_gateway':
             reactor.callLater(0, _do_service_test, 'service_p2p_hookups')
-        else:
+        elif service_name == 'service_p2p_hookups':
             reactor.callLater(0, _do_p2p_connector_test)
+        elif service_name == 'service_proxy_transport':
+            reactor.callLater(0, _do_service_proxy_transport_test)
+        else:
+            raise Exception('unknown service to test %s' % service_name)
         return None
 
     _do_service_test('service_network')
