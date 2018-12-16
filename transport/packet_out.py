@@ -59,7 +59,7 @@ from six.moves import range
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -254,7 +254,7 @@ def search_by_response_packet(newpacket, proto=None, host=None):
     if len(result) == 0:
         if _Debug:
             lg.out(_DebugLevel, '        NOT FOUND pending packets in outbox queue matching incoming %s' % newpacket)
-        if newpacket.Command == commands.Ack() and newpacket.PacketID != commands.Identity():
+        if newpacket.Command == commands.Ack() and newpacket.PacketID not in [commands.Identity(), commands.Identity().lower()]:
             lg.warn('received %s was not a "good reply" from %s://%s' % (newpacket, proto, host, ))
     return result
 
@@ -347,6 +347,15 @@ class PacketOut(automat.Automat):
         increment_packets_counter()
         for command, cb in callbacks.items():
             self.set_callback(command, cb)
+
+    def __repr__(self):
+        """
+        Will print something like: "out_123_alice[Data(9999999999)](SENDING)".
+        """
+        packet_label = '?'
+        if self.outpacket:
+            packet_label = '%s:%s' % (self.outpacket.Command, self.outpacket.PacketID[:10], )
+        return '%s[%s](%s)' % (self.id, packet_label, self.state)
 
     def init(self):
         """
