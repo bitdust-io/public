@@ -35,7 +35,7 @@ from io import BytesIO
 import sys
 import time
 
-from twisted.internet import reactor
+from twisted.internet import reactor  # @UnresolvedImport
 from twisted.internet import protocol
 from twisted.internet import task
 from twisted.internet.defer import DeferredList
@@ -50,7 +50,7 @@ from system import bpio
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 12
 
 #------------------------------------------------------------------------------
