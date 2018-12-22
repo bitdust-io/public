@@ -36,7 +36,7 @@ from __future__ import absolute_import
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 24
 
 #------------------------------------------------------------------------------
@@ -45,7 +45,7 @@ import time
 import pprint
 import traceback
 
-from twisted.internet import reactor
+from twisted.internet import reactor  # @UnresolvedImport
 from twisted.internet.defer import Deferred, succeed
 from twisted.web import server
 

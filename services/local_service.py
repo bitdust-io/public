@@ -55,7 +55,7 @@ from __future__ import absolute_import
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -112,10 +112,13 @@ class LocalService(automat.Automat):
     def stop(self):
         raise RequireSubclass()
 
-    def request(self, newpacket, info):
+    def request(self, json_payload, newpacket, info):
         raise RequireSubclass()
 
-    def cancel(self, newpacket, info):
+    def cancel(self, json_payload, newpacket, info):
+        raise RequireSubclass()
+
+    def health_check(self):
         raise RequireSubclass()
 
     def add_callback(self, cb):
