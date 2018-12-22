@@ -59,7 +59,7 @@ from io import BytesIO
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -115,7 +115,13 @@ def A(event=None, arg=None):
         return _ProxyRouter
     if _ProxyRouter is None:
         # set automat name and starting state here
-        _ProxyRouter = ProxyRouter('proxy_router', 'AT_STARTUP', _DebugLevel, _Debug)
+        _ProxyRouter = ProxyRouter(
+            name='proxy_router',
+            state='AT_STARTUP',
+            debug_level=_DebugLevel,
+            log_events=_Debug,
+            log_transitions=_Debug,
+        )
     if event is not None:
         _ProxyRouter.automat(event, arg)
     return _ProxyRouter
