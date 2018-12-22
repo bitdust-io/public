@@ -34,7 +34,7 @@ from __future__ import print_function
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -791,5 +791,5 @@ if __name__ == '__main__':
     bpio.init()
     settings.init()
     lg.set_debug_level(settings.getDebugLevel())
-    dht_service._Debug = True
+    dht_service._Debug = False
     dht_service.main()
