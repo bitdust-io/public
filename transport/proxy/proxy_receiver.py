@@ -62,11 +62,12 @@ from io import BytesIO
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
+import re
 import json
 import time
 import random
@@ -687,10 +688,11 @@ class ProxyReceiver(automat.Automat):
         # self.automat('found-one-node', 'http://datahaven.net/seed2_916e.xml')
         # self.automat('found-one-node', 'http://bitdust.ai/seed1_c2c2.xml')
         # return
-        preferred_routers_raw = config.conf().getData('services/proxy-transport/preferred-routers').strip()
         preferred_routers = []
+        preferred_routers_raw = config.conf().getData('services/proxy-transport/preferred-routers').strip()
         if preferred_routers_raw:
-            preferred_routers.extend(preferred_routers_raw.split('\n'))
+            preferred_routers_list = re.split('\n|,|;| ', preferred_routers_raw)
+            preferred_routers.extend(preferred_routers_list)
         if preferred_routers:
             known_router = random.choice(preferred_routers)
             if _Debug:
@@ -802,14 +804,14 @@ class ProxyReceiver(automat.Automat):
         # self.automat('router-disconnected')
 
     def _on_router_session_disconnected(self, oldstate, newstate, event_string, args):
-        lg.warn('router session disconnected: %s->%s' % (oldstate, newstate))
+        lg.warn('router session disconnected: %s->%s' % (oldstate, newstate, ))
         self.automat('router-disconnected')
 
 #------------------------------------------------------------------------------
 
 
 def main():
-    from twisted.internet import reactor
+    from twisted.internet import reactor  # @UnresolvedImport
     reactor.callWhenRunning(A, 'init')
     reactor.run()
 

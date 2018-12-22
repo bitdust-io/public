@@ -58,7 +58,7 @@ from io import BytesIO
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 14
 
 #------------------------------------------------------------------------------
@@ -67,7 +67,7 @@ import os
 import sys
 
 try:
-    from twisted.internet import reactor
+    from twisted.internet import reactor  # @UnresolvedImport
 except:
     sys.exit('Error initializing twisted.internet.reactor in backup_matrix.py')
 

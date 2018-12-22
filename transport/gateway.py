@@ -70,7 +70,7 @@ from io import open
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 16
 
 #------------------------------------------------------------------------------
@@ -80,7 +80,7 @@ import time
 import optparse
 
 from twisted.web import xmlrpc
-from twisted.internet import reactor
+from twisted.internet import reactor  # @UnresolvedImport
 from twisted.internet.defer import Deferred, succeed
 from twisted.internet.defer import maybeDeferred
 from twisted.internet.defer import fail

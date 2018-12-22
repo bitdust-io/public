@@ -89,7 +89,7 @@ import time
 import struct
 import bisect
 
-from twisted.internet import reactor
+from twisted.internet import reactor  # @UnresolvedImport
 
 #------------------------------------------------------------------------------
 
@@ -99,7 +99,7 @@ from automats import automat
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 16
 
 #------------------------------------------------------------------------------

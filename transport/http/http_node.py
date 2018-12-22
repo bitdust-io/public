@@ -38,7 +38,7 @@ from __future__ import print_function
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -51,7 +51,7 @@ import base64
 #------------------------------------------------------------------------------
 
 try:
-    from twisted.internet import reactor
+    from twisted.internet import reactor  # @UnresolvedImport
 except:
     sys.exit('Error initializing twisted.internet.reactor in tcp_node.py')
 

@@ -11,6 +11,10 @@ rm -rf release/
 rm -rf screenshots/
 rm -rf scripts/
 rm -rf deploy/
+rm -rf dht/entangled_orig/
+rm -rf tests/dht/
+rm -rf tests/e2e/
+rm -rf tests/experiments/
 cp -r * "$curpath"
 diff --brief -r "$curpath" "$sourcepath" | grep -v ".git" | grep -v "__pycache__" | grep -v ".pyc" | grep -v ".DS_Store" | grep "Only in"
 cd "$curpath"
