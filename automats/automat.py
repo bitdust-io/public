@@ -81,7 +81,7 @@ from twisted.python.failure import Failure  #@UnresolvedImport
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 10
 
 _LogEvents = True
