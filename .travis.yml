@@ -8,7 +8,10 @@ matrix:
   include:
   - name: "2.7"
     python: "2.7"
-    env: PYTHON_VERSION=2.7
+    env: REGRESSION_PY_VER=2.7.15
+  - name: "3.6"
+    python: "3.6"
+    env: REGRESSION_PY_VER=3.6
 
 before_install:
   - set -e
@@ -24,6 +27,3 @@ before_install:
 script:
   - make test
   - make regression_test
-
-after_failure:
-  - make regression_logs
