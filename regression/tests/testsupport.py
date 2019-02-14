@@ -21,7 +21,11 @@
 # Please contact us if you have any questions at bitdust.io@gmail.com
 
 
+import time
 import subprocess
+import asyncio
+import json
+
 
 #------------------------------------------------------------------------------
 
@@ -31,17 +35,65 @@ _NextSSHTunnelPort = 10000
 
 #------------------------------------------------------------------------------
 
-def run_ssh_command_and_wait(host, cmd):
+
+async def run_ssh_command_and_wait_async(host, cmd, loop):
     if host in [None, '', b'', 'localhost', ]:
         cmd_args = cmd
     else:
         cmd_args = ['ssh', '-o', 'StrictHostKeyChecking=no', '-p', '22', 'root@%s' % host, cmd, ]
-    ssh_proc = subprocess.Popen(cmd_args, stdout=subprocess.PIPE, shell=False)
+    create = asyncio.create_subprocess_exec(
+        *cmd_args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        loop=loop,
+    )
+    ssh_proc = await create
+    stdout, stderr = await ssh_proc.communicate()
+    if stderr:
+        print('STDERR: %r' % stderr.decode())
+    # assert not stderr
+    return stdout.decode(), stderr.decode()
+
+
+def run_ssh_command_and_wait(host, cmd):
+    if host in [None, '', b'', 'localhost', ]:
+        cmd_args = cmd
+    else:
+        cmd_args = ['ssh', '-o', 'StrictHostKeyChecking=no', '-p', '22', f'root@{host}', cmd, ]
+    ssh_proc = subprocess.Popen(
+        cmd_args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=False,
+    )
     output, err = ssh_proc.communicate()
     if err:
-        print('STDERR: %r' % err)
-    assert not err
-    return output.decode(), err
+        print('STDERR: %r' % err.decode())
+    # assert not err
+    return output.decode(), err.decode()
+
+
+async def open_tunnel_async(node, local_port, loop):
+    global _SSHTunnels
+    global _NodeTunnelPort
+    # global _NextSSHTunnelPort
+    if node == 'is':
+        node = 'identity-server'
+    # local_port = int(str(_NextSSHTunnelPort))
+    cmd_args = ['ssh', '-4', '-o', 'StrictHostKeyChecking=no', '-p', '22', '-N', '-L', '%d:localhost:%d' % (local_port, 8180, ), 'root@%s' % node, ]
+    print('\n[%s]:%s %s' % (node, time.time(), ' '.join(cmd_args), ))
+    tunnel = asyncio.create_subprocess_exec(
+        *cmd_args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        loop=loop,
+    )
+    ssh_proc = await tunnel
+    _SSHTunnels[node] = ssh_proc
+    _NodeTunnelPort[node] = local_port
+    # _NextSSHTunnelPort += 1
+    print(f'open_tunnel [{node}] on port {local_port} with {ssh_proc}\n')
+    return ssh_proc
 
 
 def open_tunnel(node):
@@ -55,7 +107,7 @@ def open_tunnel(node):
     _SSHTunnels[node] = ssh_proc
     _NodeTunnelPort[node] = local_port
     _NextSSHTunnelPort += 1
-    print('open_tunnel [%s] on port %d with %s\n' % (node, local_port, ssh_proc, ))
+    print(f'open_tunnel [{node}] on port {local_port} with {ssh_proc}\n')
 
 
 def close_tunnel(node):
@@ -66,7 +118,17 @@ def close_tunnel(node):
         assert False, 'ssh tunnel process for that node was not found'
     close_ssh_port_forwarding(node, _SSHTunnels[node])
     _SSHTunnels.pop(node)
-    print('close_tunnel [%s] OK\n' % node)
+    print(f'close_tunnel [{node}] OK\n')
+
+
+def save_tunnels_ports():
+    global _NodeTunnelPort
+    open('/tunnels_ports.json', 'w').write(json.dumps(_NodeTunnelPort))
+
+
+def load_tunnels_ports():
+    global _NodeTunnelPort
+    _NodeTunnelPort = json.loads(open('/tunnels_ports.json', 'r').read())
 
 
 def open_ssh_port_forwarding(node, port1, port2):
@@ -74,14 +136,19 @@ def open_ssh_port_forwarding(node, port1, port2):
         node = 'identity-server'
     cmd_args = ['ssh', '-4', '-o', 'StrictHostKeyChecking=no', '-p', '22', '-N', '-L', '%d:localhost:%d' % (port1, port2, ), 'root@%s' % node, ]
     print('\n[%s] %s' % (node, ' '.join(cmd_args), ))
-    ssh_proc = subprocess.Popen(cmd_args, stdout=subprocess.PIPE, shell=False)
+    ssh_proc = subprocess.Popen(
+        cmd_args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=False,
+    )
     return ssh_proc
 
 
 def close_ssh_port_forwarding(node, ssh_proc):
     if node == 'is':
         node = 'identity-server'
-    print('\n[%s] closing %s' % (node, ssh_proc))
+    print(f'\n[{node}] closing {ssh_proc}')
     ssh_proc.kill()
     return True
 
@@ -89,6 +156,7 @@ def close_ssh_port_forwarding(node, ssh_proc):
 def open_all_tunnels(nodes):
     for node in nodes:
         open_tunnel(node)
+
 
 def close_all_tunnels():
     global _SSHTunnels
@@ -104,5 +172,7 @@ def tunnel_port(node):
         node = 'identity-server'
     return _NodeTunnelPort[node]
 
+
 def tunnel_url(node, endpoint):
-    return 'http://127.0.0.1:%d/%s' % (tunnel_port(node), endpoint.lstrip('/'))
+    print('\n[%s]: %s' % (node, endpoint, ))
+    return f'http://127.0.0.1:{tunnel_port(node)}/{endpoint.lstrip("/")}'

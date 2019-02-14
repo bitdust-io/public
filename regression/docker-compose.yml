@@ -27,6 +27,7 @@ x-common: &common
   context: ./../
 
 
+
 services:
 
   identity-server:
@@ -47,8 +48,11 @@ services:
     ports:
       - "22211:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
 
   stun_2:
     build:
@@ -58,10 +62,21 @@ services:
     ports:
       - "22212:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
 
 
+
+  dht_seed_0:
+    build:
+      <<: *common
+      dockerfile: regression/Dockerfiles/bitdust_install/Dockerfile
+    image: bitdust/dht_seed
+    ports:
+      - "22220:22"
 
   dht_seed_1:
     build:
@@ -70,6 +85,8 @@ services:
     image: bitdust/dht_seed
     ports:
       - "22221:22"
+    links:
+      - "dht_seed_0"
 
   dht_seed_2:
     build:
@@ -79,7 +96,33 @@ services:
     ports:
       - "22222:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
+
+  dht_seed_3:
+    build:
+      <<: *common
+      dockerfile: regression/Dockerfiles/bitdust_install/Dockerfile
+    image: bitdust/dht_seed
+    ports:
+      - "22223:22"
+    links:
+      - "dht_seed_0"
+      - "dht_seed_1"
+      - "dht_seed_2"
+
+  dht_seed_4:
+    build:
+      <<: *common
+      dockerfile: regression/Dockerfiles/bitdust_install/Dockerfile
+    image: bitdust/dht_seed
+    ports:
+      - "22224:22"
+    links:
+      - "dht_seed_0"
+      - "dht_seed_1"
+      - "dht_seed_2"
+      - "dht_seed_3"
 
 
 
@@ -91,8 +134,11 @@ services:
     ports:
       - "22231:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -105,8 +151,11 @@ services:
     ports:
       - "22232:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -121,8 +170,11 @@ services:
     ports:
       - "22241:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -135,8 +187,11 @@ services:
     ports:
       - "22242:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -149,8 +204,11 @@ services:
     ports:
       - "22243:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -163,8 +221,11 @@ services:
     ports:
       - "22244:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -177,8 +238,11 @@ services:
     ports:
       - "22245:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -191,8 +255,11 @@ services:
     ports:
       - "22246:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -205,8 +272,11 @@ services:
     ports:
       - "22247:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -219,8 +289,11 @@ services:
     ports:
       - "22248:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -235,8 +308,11 @@ services:
     ports:
       - "22251:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -251,8 +327,11 @@ services:
     ports:
       - "22252:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -267,8 +346,11 @@ services:
     ports:
       - "22253:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -283,8 +365,11 @@ services:
     ports:
       - "22254:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
@@ -299,15 +384,54 @@ services:
     ports:
       - "22255:22"
     links:
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "stun_1"
       - "stun_2"
       - "identity-server:is"
     volumes:
       - customer_5:/customer_5
 
+  customer_backup:
+    build:
+      <<: *common
+      dockerfile: regression/Dockerfiles/bitdust_install/Dockerfile
+    image: bitdust/customer
+    ports:
+      - "22256:22"
+    links:
+      - "dht_seed_0"
+      - "dht_seed_1"
+      - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
+      - "stun_1"
+      - "stun_2"
+      - "identity-server:is"
+    volumes:
+      - customer_backup:/customer_backup
 
+  customer_restore:
+    build:
+      <<: *common
+      dockerfile: regression/Dockerfiles/bitdust_install/Dockerfile
+    image: bitdust/customer
+    ports:
+      - "22257:22"
+    links:
+      - "dht_seed_0"
+      - "dht_seed_1"
+      - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
+      - "stun_1"
+      - "stun_2"
+      - "identity-server:is"
+    volumes:
+      - customer_restore:/customer_restore
 
   tester:
     build:
@@ -317,8 +441,11 @@ services:
       - "identity-server:is"
       - "stun_1"
       - "stun_2"
+      - "dht_seed_0"
       - "dht_seed_1"
       - "dht_seed_2"
+      - "dht_seed_3"
+      - "dht_seed_4"
       - "supplier_1"
       - "supplier_2"
       - "supplier_3"
@@ -332,6 +459,8 @@ services:
       - "customer_3"
       - "customer_4"
       - "customer_5"
+      - "customer_backup"
+      - "customer_restore"
     image: bitdust/tester
     cap_add:
       - SYS_PTRACE
@@ -342,10 +471,11 @@ services:
       - customer_3:/customer_3
       - customer_4:/customer_4
       - customer_5:/customer_5
+      - customer_backup:/customer_backup
+      - customer_restore:/customer_restore
 
     stdin_open: true
     tty: true
-
 
 
 
@@ -355,4 +485,5 @@ volumes:
   customer_3:
   customer_4:
   customer_5:
-
+  customer_backup:
+  customer_restore:
