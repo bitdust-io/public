@@ -44,9 +44,10 @@ class SupplierRelationsService(LocalService):
     config_path = 'services/customer-family/enabled'
 
     def dependent_on(self):
-        return ['service_supplier',
-                'service_entangled_dht',
-                ]
+        return [
+            'service_supplier',
+            'service_entangled_dht',
+        ]
 
     def start(self):
         from logs import lg
@@ -156,7 +157,7 @@ class SupplierRelationsService(LocalService):
         from supplier import family_member
         from userid import my_id
         try:
-            json_payload = serialization.BytesToDict(newpacket.Payload)
+            json_payload = serialization.BytesToDict(newpacket.Payload, keys_to_text=True)
             contacts_type = strng.to_text(json_payload['type'])
             contacts_space = strng.to_text(json_payload['space'])
         except:

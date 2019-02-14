@@ -44,8 +44,9 @@ class EntangledDHTService(LocalService):
     config_path = 'services/entangled-dht/enabled'
 
     def dependent_on(self):
-        return ['service_udp_datagrams',
-                ]
+        return [
+            'service_udp_datagrams',
+        ]
 
     def start(self):
         from dht import dht_service
@@ -54,7 +55,7 @@ class EntangledDHTService(LocalService):
         from main.config import conf
         conf().addCallback('services/entangled-dht/udp-port', self._on_udp_port_modified)
         dht_service.init(udp_port=settings.getDHTPort(), db_file_path=settings.DHTDBFile())
-        known_seeds = known_nodes.default_nodes()
+        known_seeds = known_nodes.nodes()
         d = dht_service.connect(seed_nodes=known_seeds)
         d.addCallback(self._on_connected)
         d.addErrback(self._on_connect_failed)
@@ -75,10 +76,9 @@ class EntangledDHTService(LocalService):
 
     def _on_connected(self, nodes):
         from dht import dht_service
-        import base64
         from logs import lg
         lg.out(self.debug_level, 'service_entangled_dht._on_connected    nodes: %r' % nodes)
-        lg.out(self.debug_level, '        DHT node is active, ID=[%s]' % base64.b64encode(dht_service.node().id))
+        lg.out(self.debug_level, '        DHT node is active, ID=[%s]' % dht_service.node().id)
         dht_service.node().add_rpc_callback('store', self._on_dht_rpc_store)
         dht_service.node().add_rpc_callback('request', self._on_dht_rpc_request)
         return nodes
