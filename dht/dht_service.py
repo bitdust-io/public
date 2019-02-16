@@ -36,7 +36,7 @@ import six
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 12
+_DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
@@ -832,7 +832,7 @@ def get_node_data(key):
             lg.out(_DebugLevel, 'dht_service.get_node_data local node is not ready')
         return None
     count('get_node_data')
-    key = strng.to_bin(key)
+    key = strng.to_text(key)
     if key not in node().data:
         if _Debug:
             lg.out(_DebugLevel, 'dht_service.get_node_data key=[%s] not exist' % key)
@@ -850,7 +850,7 @@ def set_node_data(key, value):
             lg.out(_DebugLevel, 'dht_service.set_node_data local node is not ready')
         return False
     count('set_node_data')
-    key = strng.to_bin(key)
+    key = strng.to_text(key)
     node().data[key] = value
     if _Debug:
         lg.out(_DebugLevel, 'dht_service.set_node_data key=[%s] wrote %d bytes, counter=%d' % (
@@ -864,7 +864,7 @@ def delete_node_data(key):
             lg.out(_DebugLevel, 'dht_service.delete_node_data local node is not ready')
         return False
     count('delete_node_data')
-    key = strng.to_bin(key)
+    key = strng.to_text(key)
     if key not in node().data:
         if _Debug:
             lg.out(_DebugLevel, 'dht_service.delete_node_data key=[%s] not exist' % key)
@@ -891,7 +891,10 @@ def dump_local_db(value_as_json=False):
                     itm['value'] = jsn.loads_text(itm['value'], errors='ignore')
                 except:
                     itm['value'] = strng.to_text(itm['value'])
+        itm['scope'] = 'global'
         l.append(itm)
+    for k, v in node().data.items():
+        l.append({'key': k, 'value': v, 'scope': 'node', })
     return l
 
 #------------------------------------------------------------------------------
@@ -915,11 +918,9 @@ class DHTNode(EntangledNode):
     def expire(self):
         now = utime.get_sec1970()
         expired_keys = []
-
         h = hashlib.sha1()
         h.update(b'nodeState')
         nodeStateKey = h.hexdigest()
-
         for key in self._dataStore.keys():
             if key == nodeStateKey:
                 continue
@@ -933,10 +934,8 @@ class DHTNode(EntangledNode):
                         expired_keys.append(key)
         for key in expired_keys:
             if _Debug:
-                lg.out(_DebugLevel, 'dht_service.expire   [%s] removed' % base64.b32encode(key))
+                lg.out(_DebugLevel, 'dht_service.expire   [%s] removed' % key)
             del self._dataStore[key]
-        # if _DebugLevel <= 10:
-        #     lg.out(_DebugLevel, 'DHT counters last %d sec: %s' % (int(KEY_EXPIRE_MIN_SECONDS / 2), drop_counters()))
 
     @rpcmethod
     def store(self, key, value, originalPublisherID=None,
@@ -970,23 +969,21 @@ class DHTNode(EntangledNode):
     def request(self, key):
         count('request')
         if _Debug:
-            lg.out(_DebugLevel, 'dht_service.DHTNode.request key=[%s]' % strng.to_text(key, errors='ignore')[:10])
-
+            lg.out(_DebugLevel, 'dht_service.DHTNode.request key=[%r]' % key)
         if 'request' in self.rpc_callbacks:
             self.rpc_callbacks['request'](
                 key=key,
             )
-
         value = get_node_data(key)
         if value is None:
             value = 0
         if _Debug:
-            lg.out(_DebugLevel, '    read internal value, counter=%d' % counter('request'))
+            lg.out(_DebugLevel, '    read internal value: %r' % value)
         return {key: value, }
 
     @rpcmethod
     def verify_update(self, key, value, originalPublisherID=None,
-                      age=0, expireSeconds=KEY_EXPIRE_MAX_SECONDS, **kwargs):
+                            age=0, expireSeconds=KEY_EXPIRE_MAX_SECONDS, **kwargs):
         count('request')
         if _Debug:
             lg.out(_DebugLevel, 'dht_service.DHTNode.verify_update key=[%s]' % strng.to_text(key, errors='ignore')[:10])
@@ -1129,6 +1126,18 @@ def main(options=None, args=None):
                     find_node(key_to_hash(args[1])).addBoth(_r)
                 elif cmd == 'ping':
                     find_node(random_key()).addBoth(_r)
+                elif cmd == 'get_node_data':
+                    pprint.pprint(get_node_data(args[1]))
+                elif cmd == 'observe_data':
+                    def _p(val, n):
+                        print('observed', n, val)
+                    def _o(result):
+                        for n in result:
+                            d = n.request(args[2])
+                            d.addCallback(_p, n)
+                    d = find_node(key_to_hash(args[1]))
+                    d.addErrback(_r)
+                    d.addCallback(_o)
                 elif cmd == 'discover':
                     def _l(x):
                         lg.info(x)
