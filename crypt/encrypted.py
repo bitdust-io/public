@@ -114,7 +114,7 @@ class Block(object):
             SessionKey='',
             SessionKeyType=None,
             LastBlock=True,
-            Data='',
+            Data=b'',
             EncryptKey=None,
             DecryptKey=None,
             EncryptedSessionKey=None,
@@ -143,7 +143,7 @@ class Block(object):
                 self.EncryptedSessionKey = my_keys.encrypt(strng.to_text(EncryptKey), SessionKey)
             else:
                 self.EncryptedSessionKey = key.EncryptLocalPublicKey(SessionKey)
-        if EncryptedData and Length:
+        if EncryptedData and Length is not None:
             self.Length = Length
             self.EncryptedData = EncryptedData
         else:
@@ -261,7 +261,7 @@ class Block(object):
             's': self.Signature,
         }
         if _Debug:
-            lg.out(_DebugLevel, 'encrypted.Serialize %r' % dct)
+            lg.out(_DebugLevel, 'encrypted.Serialize %s' % repr(dct)[:500])
         return serialization.DictToBytes(dct, encoding='utf-8')
 
 #------------------------------------------------------------------------------
@@ -273,7 +273,7 @@ def Unserialize(data, decrypt_key=None):
     """
     dct = serialization.BytesToDict(data, keys_to_text=True, encoding='utf-8')
     if _Debug:
-        lg.out(_DebugLevel, 'encrypted.Unserialize %r' % dct)
+        lg.out(_DebugLevel, 'encrypted.Unserialize %s' % repr(dct)[:500])
     try:
         newobject = Block(
             CreatorID=dct['c'],
