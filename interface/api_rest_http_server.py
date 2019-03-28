@@ -36,7 +36,7 @@ from __future__ import absolute_import
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 6
 
 #------------------------------------------------------------------------------
@@ -178,8 +178,15 @@ class BitDustRESTHTTPServer(JsonAPIResource):
                 func_name = callback.im_func.func_name
             except:
                 func_name = callback.__name__
-            lg.out(_DebugLevel, '*** %s:%s   will execute   api.%s(%r)' % (
-                request.method.decode(), request.uri.decode(), func_name, _args))
+            if _Debug:
+                uri = request.uri.decode()
+                if uri not in [
+                    '/event/listen/electron/v1',
+                    '/network/connected/v1',
+                    '/process/health/v1',
+                ] or _DebugLevel > 10: 
+                    lg.out(_DebugLevel, '*** %s:%s   will execute   api.%s(%r)' % (
+                        request.method.decode(), uri, func_name, _args))
         return None
 
     #------------------------------------------------------------------------------
@@ -380,12 +387,14 @@ class BitDustRESTHTTPServer(JsonAPIResource):
             key_id=_request_arg(request, 'key_id', None),
             recursive=bool(_request_arg(request, 'recursive', '0') in ['1', 'true', ]),
             all_customers=bool(_request_arg(request, 'all_customers', '0') in ['1', 'true', ]),
+            include_uploads=bool(_request_arg(request, 'include_uploads', '0') in ['1', 'true', ]),
+            include_downloads=bool(_request_arg(request, 'include_downloads', '0') in ['1', 'true', ]),
         )
 
     @GET('^/f/l/a$')
     @GET('^/file/list/all/v1$')
     def file_list_all_v1(self, request):
-        return api.files_list(all_customers=True)
+        return api.files_list(all_customers=True, include_uploads=True, include_downloads=True)
 
     @GET('^/f/i$')
     @GET('^/file/info/v1$')
@@ -457,7 +466,7 @@ class BitDustRESTHTTPServer(JsonAPIResource):
             remote_path=data['remote_path'],
             destination_path=data.get('destination_folder', None),
             wait_result=bool(data.get('wait_result', '0') in ['1', 'true', ]),
-            open_share=bool(data.get('open_share', '0') in ['1', 'true', ]),
+            open_share=bool(data.get('open_share', '1') in ['1', 'true', ]),
         )
 
     @POST('^/f/d/c$')

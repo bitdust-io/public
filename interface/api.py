@@ -37,7 +37,7 @@ from six.moves import map
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -82,7 +82,11 @@ def OK(result='', message=None, status='OK', extra_fields=None):
     if api_method.count('lambda') or api_method.startswith('_'):
         api_method = sys._getframe(1).f_back.f_code.co_name
     if _Debug:
-        lg.out(_DebugLevel, 'api.%s return OK(%s)' % (api_method, jsn.dumps(o, sort_keys=True)[:150]))
+        if api_method not in [
+            'process_health',
+            'network_connected',
+        ] or _DebugLevel > 10:
+            lg.out(_DebugLevel, 'api.%s return OK(%s)' % (api_method, jsn.dumps(o, sort_keys=True)[:150]))
     return o
 
 
@@ -201,7 +205,7 @@ def process_health():
         {'status': 'OK' }
     """
     if _Debug:
-        lg.out(_DebugLevel, 'api.process_health')
+        lg.out(_DebugLevel + 10, 'api.process_health')
     return OK()
 
 
@@ -352,7 +356,10 @@ def config_list(sort=False):
     r = [{
         'key': key,
         'value': str(r[key]).replace('\n', '\\n'),
-        'type': config.conf().getTypeLabel(key)} for key in list(r.keys())]
+        'type': config.conf().getTypeLabel(key),
+        'label': config.conf().getLabel(key),
+        'info': config.conf().getInfo(key),
+    } for key in list(r.keys())]
     if sort:
         r = sorted(r, key=lambda i: i['key'])
     return RESULT(r)
@@ -798,7 +805,8 @@ def files_sync():
     return OK('the main files sync loop has been restarted')
 
 
-def files_list(remote_path=None, key_id=None, recursive=True, all_customers=False):
+def files_list(remote_path=None, key_id=None, recursive=True, all_customers=False,
+               include_uploads=False, include_downloads=False, ):
     """
     Returns list of known files registered in the catalog under given `remote_path` folder.
     By default returns items from root of the catalog.
@@ -841,10 +849,11 @@ def files_list(remote_path=None, key_id=None, recursive=True, all_customers=Fals
     if not driver.is_on('service_backups'):
         return ERROR('service_backups() is not started')
     if _Debug:
-        lg.out(_DebugLevel, 'api.files_list remote_path=%s key_id=%s recursive=%s all_customers=%s' % (
-            remote_path, key_id, recursive, all_customers))
+        lg.out(_DebugLevel, 'api.files_list remote_path=%s key_id=%s recursive=%s all_customers=%s include_uploads=%s include_downloads=%s' % (
+            remote_path, key_id, recursive, all_customers, include_uploads, include_downloads, ))
     from storage import backup_fs
     from system import bpio
+    from lib import misc
     from userid import global_id
     from crypt import my_keys
     result = []
@@ -897,7 +906,7 @@ def files_list(remote_path=None, key_id=None, recursive=True, all_customers=Fals
             real_customer_id = global_id.UrlToGlobalID(customer_idurl)
         full_glob_id = global_id.MakeGlobalID(path=i['path_id'], customer=real_customer_id, key_alias=key_alias, )
         full_remote_path = global_id.MakeGlobalID(path=i['path'], customer=real_customer_id, key_alias=key_alias, )
-        result.append({
+        r = {
             'remote_path': full_remote_path,
             'global_id': full_glob_id,
             'customer': real_customer_id,
@@ -913,7 +922,68 @@ def files_list(remote_path=None, key_id=None, recursive=True, all_customers=Fals
             'key_alias': key_alias,
             'childs': i['childs'],
             'versions': i['versions'],
-        })
+            'uploads': {
+                'running': [],
+                'pending': [],
+            },
+            'downloads': [],
+        }
+        if include_uploads:
+            from storage import backup_control
+            backup_control.tasks()
+            running = []
+            for backupID in backup_control.FindRunningBackup(pathID=full_glob_id):
+                j = backup_control.jobs().get(backupID)
+                if j:
+                    running.append({
+                        'backup_id': j.backupID,
+                        'key_id': j.keyID,
+                        'source_path': j.sourcePath,
+                        'eccmap': j.eccmap.name,
+                        'pipe': 'closed' if not j.pipe else j.pipe.state(),
+                        'block_size': j.blockSize,
+                        'aborting': j.ask4abort,
+                        'terminating': j.terminating,
+                        'eof_state': j.stateEOF,
+                        'reading': j.stateReading,
+                        'closed': j.closed,
+                        'work_blocks': len(j.workBlocks),
+                        'block_number': j.blockNumber,
+                        'bytes_processed': j.dataSent,
+                        'progress': misc.percent2string(j.progress()),
+                        'total_size': j.totalSize,
+                    })
+            pending = []
+            t = backup_control.GetPendingTask(full_glob_id)
+            if t:
+                pending.append({
+                    'task_id': t.number,
+                    'path_id': t.pathID,
+                    'source_path': t.localPath,
+                    'created': time.asctime(time.localtime(t.created)),
+                })
+            r['uploads']['running'] = running
+            r['uploads']['pending'] = pending
+        if include_downloads:
+            from storage import restore_monitor
+            downloads = []
+            for backupID in restore_monitor.FindWorking(pathID=full_glob_id):
+                d = restore_monitor.GetWorkingRestoreObject(backupID)
+                if d:
+                    downloads.append({
+                        'backup_id': d.backup_id,
+                        'creator_id': d.creator_id,
+                        'path_id': d.path_id,
+                        'version': d.version,
+                        'block_number': d.block_number,
+                        'bytes_processed': d.bytes_written,
+                        'created': time.asctime(time.localtime(d.Started)),
+                        'aborted': d.abort_flag,
+                        'done': d.done_flag,
+                        'eccmap': '' if not d.EccMap else d.EccMap.name,
+                    })
+            r['downloads'] = downloads
+        result.append(r)        
     if _Debug:
         lg.out(_DebugLevel, '    %d items returned' % len(result))
     return RESULT(result)
@@ -1014,16 +1084,16 @@ def file_info(remote_path, include_uploads=True, include_downloads=True):
             d = restore_monitor.GetWorkingRestoreObject(backupID)
             if d:
                 downloads.append({
-                    'backup_id': r.backup_id,
-                    'creator_id': r.creator_id,
-                    'path_id': r.path_id,
-                    'version': r.version,
-                    'block_number': r.block_number,
-                    'bytes_processed': r.bytes_written,
-                    'created': time.asctime(time.localtime(r.Started)),
-                    'aborted': r.abort_flag,
-                    'done': r.done_flag,
-                    'eccmap': '' if not r.EccMap else r.EccMap.name,
+                    'backup_id': d.backup_id,
+                    'creator_id': d.creator_id,
+                    'path_id': d.path_id,
+                    'version': d.version,
+                    'block_number': d.block_number,
+                    'bytes_processed': d.bytes_written,
+                    'created': time.asctime(time.localtime(d.Started)),
+                    'aborted': d.abort_flag,
+                    'done': d.done_flag,
+                    'eccmap': '' if not d.EccMap else d.EccMap.name,
                 })
         r['downloads'] = downloads
     if _Debug:
@@ -1851,11 +1921,14 @@ def friend_list():
         contact_status_label = None
         contact_state = None
         if driver.is_on('service_identity_propagate'):
-            from p2p import contact_status
-            state_machine_inst = contact_status.getInstance(idurl)
-            if state_machine_inst:
-                contact_status_label = contact_status.stateToLabel(state_machine_inst.state)
-                contact_state = state_machine_inst.state
+            from p2p import online_status
+            if online_status.isKnown(idurl):
+                contact_state = online_status.getCurrentState(idurl)
+                contact_status_label = online_status.getStatusLabel(idurl)
+            # state_machine_inst = contact_status.getInstance(idurl)
+            # if state_machine_inst:
+            #     contact_status_label = contact_status.stateToLabel(state_machine_inst.state)
+            #     contact_state = state_machine_inst.state
         result.append({
             'idurl': idurl,
             'global_id': glob_id['customer'],
@@ -1930,7 +2003,7 @@ def suppliers_list(customer_idurl_or_global_id=None, verbose=False):
         return ERROR('service_customer() is not started')
     from contacts import contactsdb
     from customer import supplier_connector
-    from p2p import contact_status
+    from p2p import online_status
     from lib import misc
     from userid import my_id
     from userid import global_id
@@ -1966,10 +2039,13 @@ def suppliers_list(customer_idurl_or_global_id=None, verbose=False):
             'contact_status': None,
             'contact_state': None,
         }
-        if contact_status.isKnown(supplier_idurl):
-            cur_state = contact_status.getInstance(supplier_idurl).state
-            r['contact_status'] = contact_status.stateToLabel(cur_state)
-            r['contact_state'] = cur_state
+        if online_status.isKnown(supplier_idurl):
+            r['contact_status'] = online_status.getStatusLabel(supplier_idurl)
+            r['contact_state'] = online_status.getCurrentState(supplier_idurl)
+        # if contact_status.isKnown(supplier_idurl):
+        #     cur_state = contact_status.getInstance(supplier_idurl).state
+        #     r['contact_status'] = contact_status.stateToLabel(cur_state)
+        #     r['contact_state'] = cur_state
         if verbose:
             _files, _total, _report = backup_matrix.GetSupplierStats(pos, customer_idurl=customer_idurl)
             r['listfiles'] = misc.readSupplierData(supplier_idurl, 'listfiles', customer_idurl)
@@ -2103,7 +2179,7 @@ def customers_list(verbose=False):
     if not driver.is_on('service_supplier'):
         return ERROR('service_supplier() is not started')
     from contacts import contactsdb
-    from p2p import contact_status
+    from p2p import online_status
     from userid import global_id
     results = []
     for pos, customer_idurl in enumerate(contactsdb.customers()):
@@ -2124,10 +2200,13 @@ def customers_list(verbose=False):
             'contact_status': None,
             'contact_state': None,
         }
-        if contact_status.isKnown(customer_idurl):
-            cur_state = contact_status.getInstance(customer_idurl).state
-            r['contact_status'] = contact_status.stateToLabel(cur_state)
-            r['contact_state'] = cur_state
+        if online_status.isKnown(customer_idurl):
+            r['contact_status'] = online_status.getStatusLabel(customer_idurl)
+            r['contact_state'] = online_status.getCurrentState(customer_idurl)
+        # if contact_status.isKnown(customer_idurl):
+        #     cur_state = contact_status.getInstance(customer_idurl).state
+        #     r['contact_status'] = contact_status.stateToLabel(cur_state)
+        #     r['contact_state'] = cur_state
         results.append(r)
     return RESULT(results)
 
@@ -2540,18 +2619,38 @@ def packets_list():
     from transport import packet_out
     result = []
     for pkt_out in packet_out.queue():
+        items = []
+        for itm in pkt_out.items:
+            items.append({
+                'transfer_id': itm.transfer_id,
+                'proto': itm.proto,
+                'host': itm.host,
+                'size': itm.size,
+                'bytes_sent': itm.bytes_sent,
+            })
         result.append({
-            'name': pkt_out.outpacket.Command,
+            'direction': 'outgoing',
+            'command': pkt_out.outpacket.Command,
+            'packet_id': pkt_out.outpacket.PacketID,
             'label': pkt_out.label,
-            'from_to': 'to',
             'target': pkt_out.remote_idurl,
+            'description': pkt_out.description,
+            'label': pkt_out.label,
+            'response_timeout': pkt_out.response_timeout,
+            'items': items,
         })
     for pkt_in in list(packet_in.inbox_items().values()):
         result.append({
-            'name': pkt_in.transfer_id,
+            'direction': 'incoming',
+            'transfer_id': pkt_in.transfer_id,
             'label': pkt_in.label,
-            'from_to': 'from',
             'target': pkt_in.sender_idurl,
+            'label': pkt_in.label,
+            'timeout': pkt_in.timeout,
+            'proto': pkt_in.proto,
+            'host': pkt_in.host,
+            'size': pkt_in.size,
+            'bytes_received': pkt_in.bytes_received,
         })
     return RESULT(result)
 
@@ -2779,19 +2878,19 @@ def user_status(idurl_or_global_id):
     """
     if not driver.is_on('service_identity_propagate'):
         return ERROR('service_identity_propagate() is not started')
-    from p2p import contact_status
+    from p2p import online_status
     from userid import global_id
     idurl = idurl_or_global_id
     if global_id.IsValidGlobalUser(idurl):
         idurl = global_id.GlobalUserToIDURL(idurl)
-    if not contact_status.isKnown(idurl):
+    if not online_status.isKnown(idurl):
         return ERROR('unknown user')
-    state_machine_inst = contact_status.getInstance(idurl)
-    if not state_machine_inst:
-        return ERROR('error fetching user status')
+    # state_machine_inst = contact_status.getInstance(idurl)
+    # if not state_machine_inst:
+    #     return ERROR('error fetching user status')
     return RESULT([{
-        'contact_status': contact_status.stateToLabel(state_machine_inst.state),
-        'contact_state': state_machine_inst.state,
+        'contact_status': online_status.getStatusLabel(idurl),
+        'contact_state': online_status.getCurrentState(idurl),
         'idurl': idurl,
         'global_id': global_id.UrlToGlobalID(idurl),
     }])
@@ -2802,12 +2901,12 @@ def user_status_check(idurl_or_global_id, timeout=5):
     """
     if not driver.is_on('service_identity_propagate'):
         return ERROR('service_identity_propagate() is not started')
-    from p2p import contact_status
+    from p2p import online_status
     from userid import global_id
     idurl = idurl_or_global_id
     if global_id.IsValidGlobalUser(idurl):
         idurl = global_id.GlobalUserToIDURL(idurl)
-    peer_status = contact_status.getInstance(idurl)
+    peer_status = online_status.getInstance(idurl)
     if not peer_status:
         return ERROR('failed to check peer status')
     ret = Deferred()
@@ -2821,18 +2920,18 @@ def user_status_check(idurl_or_global_id, timeout=5):
             idurl=idurl,
             global_id=global_id.UrlToGlobalID(idurl),
             contact_state=newstate,
-            contact_status=contact_status.stateToLabel(newstate),
+            contact_status=online_status.stateToLabel(newstate),
         )))
         return None
 
     def _do_clean(x):
         peer_status.removeStateChangedCallback(_on_peer_status_state_changed)
-        return x
+        return None
 
-    ret.addCallback(_do_clean)
+    ret.addBoth(_do_clean)
 
     peer_status.addStateChangedCallback(_on_peer_status_state_changed)
-    peer_status.automat('ping', timeout)
+    peer_status.automat('ping-now', timeout)
     return ret
 
 
@@ -3196,7 +3295,7 @@ def network_connected(wait_timeout=5):
     In case of some network issues method will return result asap.
     """
     if _Debug:
-        lg.out(_DebugLevel, 'api.network_connected  wait_timeout=%r' % wait_timeout)
+        lg.out(_DebugLevel + 10, 'api.network_connected  wait_timeout=%r' % wait_timeout)
     if not driver.is_on('service_network'):
         return ERROR('service_network() is not started')
     from twisted.internet import reactor  # @UnresolvedImport
@@ -3390,7 +3489,7 @@ def network_status(show_suppliers=True, show_customers=True, show_cache=True,
         if not driver.is_on('service_p2p_hookups'):
             return ERROR('service_p2p_hookups() is not started')
         from contacts import contactsdb
-        from p2p import contact_status
+        from p2p import online_status
         if show_suppliers:
             connected = 0
             items = []
@@ -3400,7 +3499,7 @@ def network_status(show_suppliers=True, show_customers=True, show_cache=True,
                     'global_id': global_id.UrlToGlobalID(idurl),
                     'state': None
                 }
-                inst = contact_status.getInstance(idurl)
+                inst = online_status.getInstance(idurl)
                 if inst:
                     i['state'] = inst.state
                     if inst.state == 'CONNECTED':
@@ -3422,7 +3521,7 @@ def network_status(show_suppliers=True, show_customers=True, show_cache=True,
                     'global_id': global_id.UrlToGlobalID(idurl),
                     'state': None
                 }
-                inst = contact_status.getInstance(idurl)
+                inst = online_status.getInstance(idurl)
                 if inst:
                     i['state'] = inst.state
                     if inst.state == 'CONNECTED':
@@ -3443,7 +3542,7 @@ def network_status(show_suppliers=True, show_customers=True, show_cache=True,
                     'global_id': global_id.UrlToGlobalID(idurl),
                     'state': None
                 }
-                inst = contact_status.getInstance(idurl)
+                inst = online_status.getInstance(idurl)
                 if inst:
                     i['state'] = inst.state
                     if inst.state == 'CONNECTED':

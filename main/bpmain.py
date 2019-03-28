@@ -141,15 +141,15 @@ def init(UI='', options=None, args=None, overDict=None, executablePath=None):
             lg.stdout_start_redirecting()
 
     #---memdebug---
-#    if settings.uconfig('logs.memdebug-enable') == 'True':
-#        try:
-#            from logs import memdebug
-#            memdebug_port = int(settings.uconfig('logs.memdebug-port'))
-#            memdebug.start(memdebug_port)
-#            reactor.addSystemEventTrigger('before', 'shutdown', memdebug.stop)
-#            lg.out(2, 'bpmain.run memdebug web server started on port %d' % memdebug_port)
-#        except:
-#            lg.exc()
+    if config.conf().getBool('logs/memdebug-enabled'):
+        try:
+            from logs import memdebug
+            memdebug_port = int(config.conf().getData('logs/memdebug-port'))
+            memdebug.start(memdebug_port)
+            reactor.addSystemEventTrigger('before', 'shutdown', memdebug.stop)  # @UndefinedVariable
+            lg.out(2, 'bpmain.run memdebug web server started on port %d' % memdebug_port)
+        except:
+            lg.exc()
 
     #---process ID---
     try:
@@ -251,10 +251,13 @@ def run_twisted_reactor():
     lg.out(2, 'bpmain.run_twisted_reactor Twisted reactor stopped')
 
 
-def run(UI='', options=None, args=None, overDict=None, executablePath=None):
+def run(UI='', options=None, args=None, overDict=None, executablePath=None, start_reactor=True):
     init(UI, options, args, overDict, executablePath)
-    run_twisted_reactor()
-    result = shutdown()
+    if start_reactor:
+        run_twisted_reactor()
+        result = shutdown()
+    else:
+        result = True
     return result
 
 #------------------------------------------------------------------------------
@@ -361,6 +364,7 @@ def kill():
             'regexp:^.*python.*bitdust.py.*?$',
             'bitdustnode.exe',
             'BitDustNode.exe',
+            'BitDustConsole.exe',
             'bpmain.py',
             'bppipe.py',
             'bptester.py',
@@ -403,6 +407,7 @@ def wait_then_kill(x):
             'regexp:^.*python.*bitdust.py.*?$',
             'bitdustnode.exe',
             'BitDustNode.exe',
+            'BitDustConsole.exe',
             'bpmain.py',
             'bppipe.py',
             'bptester.py',
@@ -534,7 +539,7 @@ def copyright_text():
 #--- THIS IS THE ENTRY POINT OF THE PROGRAM! ---------------------------------------------------------
 
 
-def main(executable_path=None):
+def main(executable_path=None, start_reactor=True):
     """
     THIS IS THE ENTRY POINT OF THE PROGRAM!
     """
@@ -547,13 +552,14 @@ def main(executable_path=None):
     cmd = ''
     if len(args) > 0:
         cmd = args[0].lower()
+
     #---install---
     if cmd in ['deploy', 'install', 'venv', 'virtualenv', ]:
         from system import deploy
         return deploy.run(args)
 
     try:
-        from logs import lg
+        from system import deploy
     except:
         dirpath = os.path.dirname(os.path.abspath(sys.argv[0]))
         sys.path.insert(0, os.path.abspath(os.path.join(dirpath, '..')))
@@ -561,11 +567,35 @@ def main(executable_path=None):
         from distutils.sysconfig import get_python_lib
         sys.path.append(os.path.join(get_python_lib(), 'bitdust'))
         try:
-            from logs import lg
+            from system import deploy
         except:
             print('ERROR! can not import working code.  Python Path:')
             print('\n'.join(sys.path))
             return 1
+
+    if opts.appdir:
+        appdata = opts.appdir
+        AppDataDir = appdata
+
+    else:
+        curdir = os.getcwd()  # os.path.dirname(os.path.abspath(sys.executable))
+        appdatafile = os.path.join(curdir, 'appdata')
+        # defaultappdata = os.path.join(os.path.expanduser('~'), '.bitdust')
+        defaultappdata = deploy.base_dir_portable()
+        appdata = defaultappdata
+        if os.path.isfile(appdatafile):
+            try:
+                appdata = os.path.abspath(open(appdatafile, 'rb').read().strip())
+            except:
+                appdata = defaultappdata
+            if not os.path.isdir(appdata):
+                appdata = defaultappdata
+        AppDataDir = appdata
+
+    #---BitDust Home
+    deploy.init_base_dir(base_dir=AppDataDir)
+
+    from logs import lg
 
     # init IO module, update locale
     from system import bpio
@@ -581,24 +611,6 @@ def main(executable_path=None):
             # twisted_log.startLogging(sys.stdout)
         except:
             lg.warn('python-twisted is not installed')
-
-    if opts.appdir:
-        appdata = opts.appdir
-        AppDataDir = appdata
-
-    else:
-        curdir = os.getcwd()  # os.path.dirname(os.path.abspath(sys.executable))
-        appdatafile = os.path.join(curdir, 'appdata')
-        defaultappdata = os.path.join(os.path.expanduser('~'), '.bitdust')
-        appdata = defaultappdata
-        if os.path.isfile(appdatafile):
-            try:
-                appdata = os.path.abspath(open(appdatafile, 'rb').read().strip())
-            except:
-                appdata = defaultappdata
-            if not os.path.isdir(appdata):
-                appdata = defaultappdata
-        AppDataDir = appdata
 
     # ask to count time for each log line from that moment, not absolute time
     lg.life_begins()
@@ -666,7 +678,7 @@ def main(executable_path=None):
         # if cmd == 'show' or cmd == 'open':
         # UI = 'show'
         try:
-            ret = run(UI, opts, args, overDict, executable_path)
+            ret = run(UI, opts, args, overDict, executable_path, start_reactor)
         except:
             lg.exc()
             ret = 1
