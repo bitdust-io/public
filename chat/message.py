@@ -35,7 +35,7 @@ from __future__ import absolute_import
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -56,7 +56,7 @@ from twisted.internet.defer import Deferred
 from logs import lg
 
 from p2p import commands
-from p2p import contact_status
+from p2p import online_status
 from p2p import propagate
 
 from lib import packetid
@@ -270,12 +270,12 @@ class PrivateMessage(object):
             'k': self.encrypted_session,
             'p': self.encrypted_body,
         }
-        return serialization.DictToBytes(dct)
+        return serialization.DictToBytes(dct, encoding='utf-8')
 
     @staticmethod
     def deserialize(input_string):
         try:
-            dct = serialization.BytesToDict(input_string, keys_to_text=True)
+            dct = serialization.BytesToDict(input_string, keys_to_text=True, encoding='utf-8')
             _recipient = dct['r']
             _sender = dct['s']
             _encrypted_session_key = dct['k']
@@ -309,6 +309,7 @@ def on_incoming_message(request, info, status, error_message):
         json_message = serialization.BytesToDict(
             decrypted_message,
             unpack_types=True,
+            encoding='utf-8',
         )
     except:
         lg.exc()
@@ -366,6 +367,7 @@ def do_send_message(json_data, recipient_global_id, packet_id, timeout, result_d
     message_body = serialization.DictToBytes(
         json_data,
         pack_types=True,
+        encoding='utf-8',
     )
     lg.out(4, "message.do_send_message to %s with %d bytes message" % (recipient_global_id, len(message_body)))
     try:
@@ -420,7 +422,7 @@ def send_message(json_data, recipient_global_id, packet_id=None, timeout=None):
     else:
         is_expired = time.time() - _LastUserPingTime[remote_idurl] > _PingTrustIntervalSeconds
     remote_identity = identitycache.FromCache(remote_idurl)
-    if is_expired or remote_identity is None or not contact_status.isOnline(remote_idurl):
+    if is_expired or remote_identity is None or not online_status.isOnline(remote_idurl):
         d = propagate.PingContact(remote_idurl, timeout=timeout or 5)
         d.addCallback(lambda response_tuple: on_ping_success(response_tuple, remote_idurl))
         d.addCallback(lambda response_tuple: do_send_message(

@@ -39,7 +39,7 @@ import six
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -247,7 +247,10 @@ def recreate_db(chat_history_dir):
             _LocalStorage.destroy()
         except:
             pass
-        _LocalStorage.create()
+        try:
+            _LocalStorage.create()
+        except Exception as exc:
+            lg.warn('failed to create local storage: %r' % exc)
 
 #------------------------------------------------------------------------------
 

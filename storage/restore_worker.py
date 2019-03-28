@@ -79,7 +79,7 @@ from six.moves import range
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -116,7 +116,7 @@ from userid import global_id
 
 from crypt import encrypted
 
-from p2p import contact_status
+from p2p import online_status
 from p2p import propagate
 
 from customer import data_receiver
@@ -142,7 +142,7 @@ class RestoreWorker(automat.Automat):
                  OutputFile,
                  KeyID=None,
                  debug_level=_DebugLevel,
-                 log_events=_Debug,
+                 log_events=False,
                  log_transitions=_Debug,
                  publish_events=False,
                  **kwargs):
@@ -440,7 +440,7 @@ class RestoreWorker(automat.Automat):
             if not SupplierID:
                 lg.warn('unknown supplier at position %s' % SupplierNumber)
                 continue
-            if contact_status.isOffline(SupplierID):
+            if online_status.isOffline(SupplierID):
                 lg.warn('offline supplier: %s' % SupplierID)
                 continue
             if self.OnHandData[SupplierNumber]:
@@ -453,7 +453,7 @@ class RestoreWorker(automat.Automat):
             if not SupplierID:
                 lg.warn('unknown supplier at position %s' % SupplierNumber)
                 continue
-            if contact_status.isOffline(SupplierID):
+            if online_status.isOffline(SupplierID):
                 lg.warn('offline supplier: %s' % SupplierID)
                 continue
             if self.OnHandParity[SupplierNumber]:
@@ -545,10 +545,7 @@ class RestoreWorker(automat.Automat):
         os.close(fd)
         inputpath = os.path.join(settings.getLocalBackupsDir(), self.customer_id, self.path_id)
         task_params = (outfilename, self.EccMap.name, self.version, self.block_number, inputpath)
-        raid_worker.add_task(
-            'read',
-            task_params,
-            lambda cmd, params, result: self._on_block_restored(result, outfilename))
+        raid_worker.add_task('read', task_params, lambda cmd, params, result: self._on_block_restored(result, outfilename))
 
     def doRemoveTempFile(self, *args, **kwargs):
         """

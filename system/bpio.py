@@ -208,6 +208,13 @@ def Mac():
     return ostype() == "Darwin"
 
 
+def Android():
+    """
+    Return True if running on Android inside Kivy.
+    """
+    return 'ANDROID_ARGUMENT' in os.environ
+
+
 def isFrozen():
     """
     Return True if BitDust is running from exe, not from sources.
@@ -1217,6 +1224,7 @@ def find_main_process(pid_file_path=None, extra_lookups=[], check_processid_file
     appList = find_process([
         'bitdustnode.exe',
         'BitDustNode.exe',
+        'BitDustConsole.exe',
         # 'bitdust.py',
         'regexp:^.*python.*bitdust.py$',
     ] + extra_lookups)

@@ -67,7 +67,7 @@ from six.moves import range
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 4
 
 #------------------------------------------------------------------------------
@@ -121,7 +121,12 @@ def A(event=None, *args, **kwargs):
     global _BackupRebuilder
     if _BackupRebuilder is None:
         _BackupRebuilder = BackupRebuilder(
-            'backup_rebuilder', 'STOPPED', _DebugLevel)
+            name='backup_rebuilder',
+            state='STOPPED',
+            debug_level=_DebugLevel,
+            log_events=_Debug,
+            log_transitions=_Debug,
+        )
     if event is not None:
         _BackupRebuilder.automat(event, *args, **kwargs)
     return _BackupRebuilder
@@ -591,17 +596,15 @@ class BackupRebuilder(automat.Automat):
         lg.out(10, 'backup_rebuilder._start_one_block %d to rebuild, blockIndex=%d, other blocks: %s' % (
             (BlockNumber, self.blockIndex, str(self.workingBlocksQueue))))
         task_params = (
-            self.currentBackupID, BlockNumber, eccmap.Current(),
+            self.currentBackupID,
+            BlockNumber,
+            eccmap.Current().name,
             backup_matrix.GetActiveArray(),
             backup_matrix.GetRemoteMatrix(self.currentBackupID, BlockNumber),
-            backup_matrix.GetLocalMatrix(self.currentBackupID, BlockNumber),)
-        raid_worker.add_task(
-            'rebuild',
-            task_params,
-            lambda cmd,
-            params,
-            result: self._block_finished(result, params),
+            backup_matrix.GetLocalMatrix(self.currentBackupID, BlockNumber),
+            settings.getLocalBackupsDir(),
         )
+        raid_worker.add_task('rebuild', task_params, lambda cmd, params, result: self._block_finished(result, params))
 
     def _block_finished(self, result, params):
         if not result:
@@ -616,28 +619,37 @@ class BackupRebuilder(automat.Automat):
             lg.exc()
             reactor.callLater(0, self._finish_rebuilding)  # @UndefinedVariable
             return
+        lg.out(10, 'backup_rebuilder._block_finished   backupID=%r  blockNumber=%r  newData=%r' % (
+            _backupID, _blockNumber, newData))
+        lg.out(10, '        localData=%r  localParity=%r' % (localData, localParity))
         if newData:
             from storage import backup_matrix
             from customer import data_sender
             count = 0
             customer_idurl = packetid.CustomerIDURL(_backupID)
             for supplierNum in range(contactsdb.num_suppliers(customer_idurl=customer_idurl)):
-                if localData[supplierNum] == 1 and reconstructedData[
-                        supplierNum] == 1:
-                    backup_matrix.LocalFileReport(
-                        None, _backupID, _blockNumber, supplierNum, 'Data')
+                try:
+                    localData[supplierNum]
+                    localParity[supplierNum]
+                    reconstructedData[supplierNum]
+                    reconstructedParity[supplierNum]
+                except:
+                    lg.err('invalid result from the task: %s' % repr(params))
+                    lg.out(10, 'result is %s' % repr(result))
+                    lg.exc()
+                    continue
+                if localData[supplierNum] == 1 and reconstructedData[supplierNum] == 1:
+                    backup_matrix.LocalFileReport(None, _backupID, _blockNumber, supplierNum, 'Data')
                     count += 1
-                if localParity[supplierNum] == 1 and reconstructedParity[
-                        supplierNum] == 1:
-                    backup_matrix.LocalFileReport(
-                        None, _backupID, _blockNumber, supplierNum, 'Parity')
+                if localParity[supplierNum] == 1 and reconstructedParity[supplierNum] == 1:
+                    backup_matrix.LocalFileReport(None, _backupID, _blockNumber, supplierNum, 'Parity')
                     count += 1
             self.blocksSucceed.append(_blockNumber)
             data_sender.A('new-data')
-            lg.out(10, 'backup_rebuilder._block_finished !!!!!! %d NEW DATA segments reconstructed, blockIndex=%d' % (
+            lg.out(10, '        !!!!!! %d NEW DATA segments reconstructed, blockIndex=%d' % (
                 count, self.blockIndex))
         else:
-            lg.out(10, 'backup_rebuilder._block_finished NO CHANGES, blockIndex=%d' % self.blockIndex)
+            lg.out(10, '        NO CHANGES, blockIndex=%d' % self.blockIndex)
         self.blockIndex -= 1
         reactor.callLater(0, self._start_one_block)  # @UndefinedVariable
 

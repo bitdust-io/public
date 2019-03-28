@@ -104,7 +104,7 @@ from six.moves import range
 
 #------------------------------------------------------------------------------
 
-_Debug = False
+_Debug = True
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -135,7 +135,7 @@ from contacts import contactsdb
 
 from services import driver
 
-from p2p import contact_status
+from p2p import online_status
 
 from customer import supplier_finder
 from customer import supplier_connector
@@ -404,8 +404,7 @@ class FireHire(automat.Automat):
                       diskspace.GetBytesFromString(settings.getNeededString()))
         if None in self.configs:
             return True
-        return self.configs[0] != curconfigs[
-            0] or self.configs[1] != curconfigs[1]
+        return self.configs[0] != curconfigs[0] or self.configs[1] != curconfigs[1]
 
     def isExistSomeSuppliers(self, *args, **kwargs):
         """
@@ -419,8 +418,8 @@ class FireHire(automat.Automat):
         """
         self.configs = (
             settings.getSuppliersNumberDesired(),
-            diskspace.GetBytesFromString(
-                settings.getNeededString()))
+            diskspace.GetBytesFromString(settings.getNeededString()),
+        )
 
     def doConnectSuppliers(self, *args, **kwargs):
         """
@@ -437,6 +436,9 @@ class FireHire(automat.Automat):
                     supplier_idurl=supplier_idurl,
                     customer_idurl=my_id.getLocalID(),
                 )
+            else:
+                sc.needed_bytes = None
+                sc.do_calculate_needed_bytes()
             sc.set_callback('fire_hire', self._on_supplier_connector_state_changed)
             self.connect_list.append(supplier_idurl)
             sc.automat(
@@ -445,12 +447,16 @@ class FireHire(automat.Automat):
                 ecc_map=eccmap.Current().name,
                 family_snapshot=my_current_family,
             )
-            supplier_contact_status = contact_status.getInstance(supplier_idurl)
-            if supplier_contact_status:
-                supplier_contact_status.addStateChangedCallback(
-                    self._on_supplier_contact_status_state_changed,
-                    newstate='OFFLINE',
-                )
+            online_status.add_online_status_listener_callback(
+                idurl=supplier_idurl,
+                callback_method=self._on_supplier_online_status_state_changed,
+            )
+#             supplier_contact_status = contact_status.getInstance(supplier_idurl)
+#             if supplier_contact_status:
+#                 supplier_contact_status.addStateChangedCallback(
+#                     self._on_supplier_contact_status_state_changed,
+#                     newstate='OFFLINE',
+#                 )
 
     def doDecideToDismiss(self, *args, **kwargs):
         """
@@ -492,11 +498,11 @@ class FireHire(automat.Automat):
                 disconnected_suppliers.add(supplier_idurl)
 #             elif sc.state in ['QUEUE?', 'REQUEST', ]:
 #                 requested_suppliers.add(supplier_idurl)
-            if contact_status.isOffline(supplier_idurl):
+            if online_status.isOffline(supplier_idurl):
                 offline_suppliers.add(supplier_idurl)
-            elif contact_status.isOnline(supplier_idurl):
+            elif online_status.isOnline(supplier_idurl):
                 online_suppliers.add(supplier_idurl)
-            elif contact_status.isCheckingNow(supplier_idurl):
+            elif online_status.isCheckingNow(supplier_idurl):
                 requested_suppliers.add(supplier_idurl)
         if contactsdb.num_suppliers() > number_desired:
             for supplier_index in range(number_desired, contactsdb.num_suppliers()):
@@ -538,8 +544,9 @@ class FireHire(automat.Automat):
             self.automat('made-decision', [])
             return
         critical_offline_suppliers_count = eccmap.GetFireHireErrors(number_desired)
-        # TODO:  temporary disabled because of an issue: too aggressive replacing suppliers who still have the data
-        if False:  # len(offline_suppliers) >= critical_offline_suppliers_count:
+        if len(offline_suppliers) >= critical_offline_suppliers_count and len(offline_suppliers) > 0:
+            # TODO: check that issue
+            # too aggressive replacing suppliers who still have the data
             one_dead_supplier = offline_suppliers.pop()
             lg.warn('found "CRITICALLY_OFFLINE" supplier %s, max offline limit is %d' % (
                 one_dead_supplier, critical_offline_suppliers_count, ))
@@ -710,9 +717,14 @@ class FireHire(automat.Automat):
                 sc.automat('disconnect')
             else:
                 lg.warn('supplier_connector must exist, but not found %s' % supplier_idurl)
-            supplier_contact_status = contact_status.getInstance(supplier_idurl)
-            if supplier_contact_status:
-                supplier_contact_status.removeStateChangedCallback(self._on_supplier_contact_status_state_changed)
+            online_status.remove_online_status_listener_callbackove_(
+                idurl=supplier_idurl,
+                callback_method=self._on_supplier_online_status_state_changed,
+            )
+            
+#             supplier_contact_status = contact_status.getInstance(supplier_idurl)
+#             if supplier_contact_status:
+#                 supplier_contact_status.removeStateChangedCallback(self._on_supplier_contact_status_state_changed)
 
     def doCloseConnector(self, *args, **kwargs):
         """
@@ -792,12 +804,11 @@ class FireHire(automat.Automat):
             return
         self.automat('supplier-state-changed', (idurl, newstate, ))
 
-    def _on_supplier_contact_status_state_changed(self, oldstate, newstate, event_string, *args, **kwargs):
-        lg.out(6, 'fire_hire._on_supplier_contact_status_state_changed  %s -> %s, own state is %s' % (
+    def _on_supplier_online_status_state_changed(self, oldstate, newstate, event_string, *args, **kwargs):
+        lg.out(6, 'fire_hire._on_supplier_online_status_state_changed  %s -> %s, own state is %s' % (
             oldstate, newstate, self.state))
-#         if newstate == 'OFFLINE' and oldstate != 'OFFLINE':
-        self.automat('restart')
-
+        if oldstate != newstate and newstate in ['CONNECTED', 'OFFLINE', ]:
+            self.automat('restart')
 
 
 # def WhoIsLost():
