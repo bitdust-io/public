@@ -79,7 +79,7 @@ from six.moves import range
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -551,11 +551,11 @@ class RestoreWorker(automat.Automat):
         """
         Action method.
         """
-        try:
-            filename = args[0][1]
-        except:
+        if not args or not len(args) > 1:
             return
-        tmpfile.throw_out(filename, 'block restored')
+        filename = args[1]
+        if filename:
+            tmpfile.throw_out(filename, 'block restored')
         if settings.getBackupsKeepLocalCopies():
             return
         from . import backup_rebuilder
@@ -625,11 +625,20 @@ class RestoreWorker(automat.Automat):
         """
         Action method.
         """
+        if args and len(args) > 0 and args[0] == 'abort':
+            reason = 'abort'
+        else:
+            reason = 'failed'
         if _Debug:
-            lg.out(_DebugLevel, 'restore_worker.doReportFailed')
+            lg.out(_DebugLevel, 'restore_worker.doReportFailed : %s' % reason)
         self.done_flag = True
-        self.MyDeferred.callback('failed')
-        events.send('restore-failed', dict(backup_id=self.backup_id, block_number=self.block_number, reason=args[0]))
+        self.MyDeferred.callback(reason)
+        events.send('restore-failed', dict(
+            backup_id=self.backup_id,
+            block_number=self.block_number,
+            args=args,
+            reason=reason,
+        ))
 
     def doDestroyMe(self, *args, **kwargs):
         """

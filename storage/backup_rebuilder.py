@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # backup_rebuilder.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (backup_rebuilder.py) is part of BitDust Software.
 #
@@ -67,7 +67,7 @@ from six.moves import range
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 4
 
 #------------------------------------------------------------------------------

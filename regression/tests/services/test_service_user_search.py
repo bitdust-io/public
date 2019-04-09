@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-# test_service_my_ip_port.py
+# test_service_proxy_server.py
 #
-# Copyright (C) 2008-2019 Veselin Penev  https://bitdust.io
+# Copyright (C) 2008-2019 Stanislav Evseev, Veselin Penev  https://bitdust.io
 #
-# This file (test_service_my_ip_port.py) is part of BitDust Software.
+# This file (test_service_proxy_server.py) is part of BitDust Software.
 #
 # BitDust is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -20,6 +20,7 @@
 #
 # Please contact us if you have any questions at bitdust.io@gmail.com
 
+
 import os
 import pytest
 import requests
@@ -27,11 +28,15 @@ import requests
 from ..testsupport import tunnel_url
 
 
-def test_network_stun_customer_1():
-    if os.environ.get('RUN_TESTS', '1') == '0':
-        return pytest.skip()  # @UndefinedVariable
-    response = requests.get(url=tunnel_url('customer_1', 'network/stun/v1'))
-    assert response.status_code == 200
-    print('\n\n%r' % response.json())
+def test_search_user():
+    response = requests.get(tunnel_url('customer_1', f'user/search/customer_2/v1'), timeout=30)
     assert response.json()['status'] == 'OK', response.json()
-    assert response.json()['result'][0]['result'] == 'stun-success'
+    assert response.json()['result'][0]['nickname'] == 'customer_2'
+    assert response.json()['result'][0]['result'] == 'exist'
+
+
+def test_search_user_doesnt_exists():
+    response = requests.get(tunnel_url('customer_1', f'user/search/random_name_for_user/v1'), timeout=30)
+    assert response.json()['status'] == 'OK', response.json()
+    assert response.json()['result'][0]['nickname'] == 'random_name_for_user'
+    assert response.json()['result'][0]['result'] == 'not exist'

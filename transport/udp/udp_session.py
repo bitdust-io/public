@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # udp_session.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (udp_session.py) is part of BitDust Software.
 #
@@ -62,7 +62,7 @@ from automats import automat
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 14
 
 #------------------------------------------------------------------------------

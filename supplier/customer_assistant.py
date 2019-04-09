@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # customer_assistant.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (customer_assistant.py) is part of BitDust Software.
 #
@@ -49,7 +49,7 @@ from __future__ import absolute_import
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -120,7 +120,13 @@ class CustomerAssistant(automat.Automat):
             nameurl.GetName(self.customer_idurl),
             diskspace.MakeStringFromBytes(self.donated_bytes).replace(' ', ''),
         )
-        super(CustomerAssistant, self).__init__(name, 'AT_STARTUP', _DebugLevel, _Debug)
+        super(CustomerAssistant, self).__init__(
+            name=name,
+            state='AT_STARTUP',
+            debug_level=_DebugLevel,
+            log_events=False,
+            log_transitions=_Debug,
+        )
 
     def init(self):
         """

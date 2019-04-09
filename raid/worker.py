@@ -1,7 +1,7 @@
     #!/usr/bin/env python
 # rebuild.py
 #
-# Copyright (C) 2008-2018 Stanislav Evseev, Veselin Penev  https://bitdust.io
+# Copyright (C) 2008-2019 Stanislav Evseev, Veselin Penev  https://bitdust.io
 #
 # This file (rebuild.py) is part of BitDust Software.
 #
@@ -27,7 +27,7 @@ import six
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 6
 
 #------------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # stun_server.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (stun_server.py) is part of BitDust Software.
 #
@@ -49,7 +49,7 @@ if __name__ == '__main__':
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 6
 
 #------------------------------------------------------------------------------

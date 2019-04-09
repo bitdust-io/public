@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # udp_node.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (udp_node.py) is part of BitDust Software.
 #
@@ -75,7 +75,7 @@ from transport.udp import udp_session
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 18
 
 #------------------------------------------------------------------------------

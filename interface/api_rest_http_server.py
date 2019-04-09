@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # api_rest_http_server.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (api_rest_http_server.py) is part of BitDust Software.
 #
@@ -36,7 +36,7 @@ from __future__ import absolute_import
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 6
 
 #------------------------------------------------------------------------------
@@ -221,6 +221,11 @@ class BitDustRESTHTTPServer(JsonAPIResource):
     @GET('^/config/list/v1$')
     def config_list_v1(self, request):
         return api.config_list(sort=True)
+
+    @GET('^/c/t$')
+    @GET('^/config/tree/v1$')
+    def config_tree_v1(self, request):
+        return api.config_tree()
 
     @GET('^/c/g/(?P<key1>[^/]+)/(?P<key2>[^/]+)/(?P<key3>[^/]+)/$')
     @GET('^/config/get/(?P<key1>[^/]+)/(?P<key2>[^/]+)/(?P<key3>[^/]+)/v1$')
@@ -738,7 +743,9 @@ class BitDustRESTHTTPServer(JsonAPIResource):
     @GET('^/service/v1$')
     @GET('^/service/list/v1$')
     def service_list_v1(self, request):
-        return api.services_list()
+        return api.services_list(
+            show_configs=bool(_request_arg(request, 'config', '0') in ['1', 'true', ]),
+        )
 
     @GET('^/svc/i/(?P<service_name>[^/]+)/$')
     @GET('^/service/info/(?P<service_name>[^/]+)/v1$')

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # test_service_private_messages.py
 #
-# Copyright (C) 2008-2018 Stanislav Evseev, Veselin Penev  https://bitdust.io
+# Copyright (C) 2008-2019 Stanislav Evseev, Veselin Penev  https://bitdust.io
 #
 # This file (test_service_private_messages.py) is part of BitDust Software.
 #
@@ -44,9 +44,6 @@ def send_message(random_message):
 
 
 def test_send_message_customer_1_to_customer_2():
-    return True
-    if os.environ.get('RUN_TESTS', '1') == '0':
-        return pytest.skip()  # @UndefinedVariable
     random_message = base64.b32encode(os.urandom(20)).decode()
     # send message in different thread to get one in blocked `receive` call
     t = Timer(2.0, send_message, [random_message, ])

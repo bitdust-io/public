@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # service_shared_data.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (service_shared_data.py) is part of BitDust Software.
 #
@@ -53,11 +53,13 @@ class SharedDataService(LocalService):
         from transport import callback
         callback.append_inbox_callback(self._on_inbox_packet_received)
         events.add_subscriber(self._on_supplier_modified, 'supplier-modified')
+        events.add_subscriber(self._on_my_list_files_refreshed, 'my-list-files-refreshed')
         return True
 
     def stop(self):
         from main import events
         from transport import callback
+        events.remove_subscriber(self._on_my_list_files_refreshed)
         events.remove_subscriber(self._on_supplier_modified)
         callback.remove_inbox_callback(self._on_inbox_packet_received)
         return True
@@ -79,6 +81,28 @@ class SharedDataService(LocalService):
             for key_id in my_keys_to_be_republished:
                 d = key_ring.transfer_key(key_id, trusted_idurl=evt.data['new_idurl'], include_private=False)
                 d.addErrback(lambda *a: lg.err('transfer key failed: %s' % str(*a)))
+
+    def _on_my_list_files_refreshed(self, evt):
+        from access import shared_access_coordinator
+        from customer import supplier_connector
+        from p2p import p2p_service
+        for key_id in shared_access_coordinator.list_active_shares():
+            cur_share = shared_access_coordinator.get_active_share(key_id)
+            if not cur_share:
+                continue
+            if cur_share.state != 'CONNECTED':
+                continue
+            for supplier_idurl in cur_share.known_suppliers_list:
+                sc = supplier_connector.by_idurl(
+                    supplier_idurl,
+                    customer_idurl=cur_share.customer_idurl,
+                )
+                if sc is not None and sc.state == 'CONNECTED':
+                    p2p_service.SendListFiles(
+                        target_supplier=supplier_idurl,
+                        customer_idurl=cur_share.customer_idurl,
+                        key_id=cur_share.key_id,
+                    )
 
     def _on_inbox_packet_received(self, newpacket, info, status, error_message):
         from p2p import commands
@@ -178,24 +202,35 @@ class SharedDataService(LocalService):
             return False
         # need to detect supplier position from the list of packets
         # and place that supplier on the correct position in contactsdb
-        real_supplier_pos = backup_matrix.DetectSupplierPosition(supplier_raw_list_files)
+        supplier_pos = backup_matrix.DetectSupplierPosition(supplier_raw_list_files)
         known_supplier_pos = contactsdb.supplier_position(external_supplier_idurl, trusted_customer_idurl)
-        if real_supplier_pos >= 0:
-            if known_supplier_pos >= 0 and known_supplier_pos != real_supplier_pos:
+        if supplier_pos >= 0:
+            if known_supplier_pos >= 0 and known_supplier_pos != supplier_pos:
                 lg.warn('external supplier %s position is not matching to list files, rewriting for customer %s' % (
                     external_supplier_idurl, trusted_customer_idurl))
-                contactsdb.erase_supplier(
-                    idurl=external_supplier_idurl,
-                    customer_idurl=trusted_customer_idurl,
-                )
-            contactsdb.add_supplier(
-                idurl=external_supplier_idurl,
-                position=real_supplier_pos,
-                customer_idurl=trusted_customer_idurl,
-            )
-            contactsdb.save_suppliers(customer_idurl=trusted_customer_idurl)
+            # TODO: we should remove that bellow because we do not need it
+            #     service_customer_family() should take care of suppliers list for trusted customer
+            #     so we need to just read that list from DHT
+            #     contactsdb.erase_supplier(
+            #         idurl=external_supplier_idurl,
+            #         customer_idurl=trusted_customer_idurl,
+            #     )
+            # contactsdb.add_supplier(
+            #     idurl=external_supplier_idurl,
+            #     position=supplier_pos,
+            #     customer_idurl=trusted_customer_idurl,
+            # )
+            # contactsdb.save_suppliers(customer_idurl=trusted_customer_idurl)
         else:
-            lg.warn('not possible to detect external supplier position for customer %s' % trusted_customer_idurl)
+            lg.warn('not possible to detect external supplier position for customer %s from received list files, known position is %s' % (
+                trusted_customer_idurl, known_supplier_pos))
+            supplier_pos = known_supplier_pos
+        backup_matrix.ReadRawListFiles(
+            supplier_pos,
+            supplier_raw_list_files,
+            customer_idurl=trusted_customer_idurl,
+            is_in_sync=True,
+        )
         # finally send ack packet back
         p2p_service.SendAck(newpacket)
         lg.info('received list of packets from external supplier %s for customer %s' % (external_supplier_idurl, trusted_customer_idurl))

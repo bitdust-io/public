@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # coins_index.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (coins_index.py) is part of BitDust Software.
 #
@@ -37,7 +37,7 @@ import six
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 
 #------------------------------------------------------------------------------
 
