@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # restore_monitor.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (restore_monitor.py) is part of BitDust Software.
 #
@@ -96,7 +96,7 @@ def packet_in_callback(backupID, newpacket):
 
 
 def extract_done(retcode, backupID, tarfilename, callback_method):
-    lg.out(4, 'restore_monitor.extract_done %s tarfile: %s, result: %s' % (backupID, tarfilename, str(retcode)))
+    lg.info('EXTRACT SUCCESS of %s  tarfile=%s, result=%s' % (backupID, tarfilename, str(retcode)))
     global OnRestoreDoneFunc
 
     _WorkingBackupIDs.pop(backupID, None)
@@ -117,7 +117,7 @@ def extract_done(retcode, backupID, tarfilename, callback_method):
 
 
 def extract_failed(err, backupID, callback_method):
-    lg.warn(str(err))
+    lg.err('EXTRACT FAILED of %s with: %s' % (backupID, str(err)))
     if callback_method:
         try:
             callback_method(backupID, 'extract failed')
@@ -127,11 +127,13 @@ def extract_failed(err, backupID, callback_method):
 
 
 def restore_done(result, backupID, outfd, tarfilename, outputlocation, callback_method):
-    lg.out(4, '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-    lg.out(4, 'restore_monitor.restore_done for %s with result=%s' % (backupID, result))
     global _WorkingBackupIDs
     global _WorkingRestoreProgress
     global OnRestoreDoneFunc
+    if result == 'done':
+        lg.info('RESTORE SUCCESS of %s with result=%s' % (backupID, result))
+    else:
+        lg.err('RESTORE FAILED of %s with result=%s' % (backupID, result))
     try:
         os.close(outfd)
     except:
@@ -213,7 +215,7 @@ def Abort(backupID):
         lg.warn('%s not found in working list' % backupID)
         return False
     r = _WorkingBackupIDs[backupID]
-    r.abort()
+    r.automat('abort', 'abort')
     lg.out(8, 'restore_monitor.Abort %s' % backupID)
     return True
 

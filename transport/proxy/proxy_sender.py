@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # proxy_sender.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (proxy_sender.py) is part of BitDust Software.
 #
@@ -256,7 +256,7 @@ class ProxySender(automat.Automat):
             return None
         if proxy_receiver.A() and proxy_receiver.A().state != 'LISTEN':
             if _Debug:
-                lg.out(_DebugLevel, 'proxy_sender._on_first_outbox_packet SKIP because proxy_receiver state is not LISTEN')
+                lg.out(_DebugLevel, 'proxy_sender._on_first_outbox_packet DELLAYED because proxy_receiver state is not LISTEN yet')
             return self._add_pending_packet(outpacket, wide, callbacks)
         router_idurl = proxy_receiver.GetRouterIDURL()
         router_identity_obj = proxy_receiver.GetRouterIdentity()
@@ -297,12 +297,12 @@ class ProxySender(automat.Automat):
         )
         block_encrypted = block.Serialize()
         newpacket = signed.Packet(
-            commands.Relay(),
-            outpacket.OwnerID,
-            my_id.getLocalID(),
-            outpacket.PacketID,
-            block_encrypted,
-            router_idurl,
+            Command=commands.Relay(),
+            OwnerID=outpacket.OwnerID,
+            CreatorID=my_id.getLocalID(),
+            PacketID=outpacket.PacketID,
+            Payload=block_encrypted,
+            RemoteID=router_idurl,
         )
         routed_packet = packet_out.create(
             outpacket,

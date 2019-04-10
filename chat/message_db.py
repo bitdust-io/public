@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # message_db.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (message_db.py) is part of BitDust Software.
 #
@@ -39,7 +39,7 @@ import six
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -310,7 +310,8 @@ def insert(message_json):
 
 def remove(message_json):
     # TODO: first need to lookup to get _id and _rev fields
-    return db().delete()
+    # return db().delete(...)
+    return False
 
 
 def exist(message_json):

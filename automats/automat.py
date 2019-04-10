@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # automat.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (automat.py) is part of BitDust Software.
 #
@@ -81,7 +81,7 @@ from twisted.python.failure import Failure  #@UnresolvedImport
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 _LogEvents = True
@@ -348,7 +348,7 @@ class Automat(object):
     def _on_state_change(self, oldstate, newstate, event_string, *args, **kwargs):
         from main import events
         if oldstate != newstate:
-            events.send('%s-state-change' % self.name, dict(
+            events.send('%s-state-changed' % self.name.replace('_', '-'), dict(
                 newstate=newstate,
                 oldstate=oldstate,
                 event=event_string,

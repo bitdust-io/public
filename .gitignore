@@ -9,6 +9,7 @@ push
 *.~vsd
 *.orig
 *_off.py
+pr_merged
 COMMITS.txt
 HISTORY.txt
 .identities/

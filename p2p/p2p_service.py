@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # p2p_service.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (p2p_service.py) is part of BitDust Software.
 #
@@ -48,7 +48,7 @@ from __future__ import absolute_import
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 2
 
 #------------------------------------------------------------------------------
@@ -307,17 +307,18 @@ def Identity(newpacket, send_ack=True):
     #         d = identitycache.immediatelyCaching(source)
     #         d.addCallback(lambda xml_src: identitycache.UpdateAfterChecking(idurl, xml_src))
     #         d.addErrback(lambda err: lg.warn('caching filed: %s' % err))
-    if newpacket.OwnerID == idurl:
-        # TODO: this needs to be moved to a service
-        # wide=True : a small trick to respond to all contacts if we receive pings
+    if not send_ack:
         if _Debug:
-            lg.out(_DebugLevel, "p2p_service.Identity idurl=%s  ... also sent WIDE Acks" % nameurl.GetName(idurl))
+            lg.out(_DebugLevel, "p2p_service.Identity idurl=%s   skip sending Ack()" % idurl)
+        return True
+    if newpacket.OwnerID == idurl:
+        if _Debug:
+            lg.out(_DebugLevel, "p2p_service.Identity idurl=%s   sending wide Ack()" % idurl)
     else:
         if _Debug:
-            lg.out(_DebugLevel, "p2p_service.Identity idurl=%s, but packet ownerID=%s  ... also sent WIDE Acks" % (
-                nameurl.GetName(idurl), newpacket.OwnerID, ))
-    if not send_ack:
-        return True
+            lg.out(_DebugLevel, "p2p_service.Identity idurl=%s   but packet ownerID=%s   sending wide Ack()" % (
+                idurl, newpacket.OwnerID, ))
+    # wide=True : a small trick to respond to all his contacts
     reactor.callLater(0, SendAck, newpacket, wide=True)  # @UndefinedVariable
     return True
 

@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # backup_fs.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (backup_fs.py) is part of BitDust Software.
 #
@@ -1356,8 +1356,6 @@ def IterateIDs(iterID=None):
     """
     if iterID is None:
         iterID = fsID()
-#     customer_idurl = customerIDURLFromRootItemID(iterID)
-#     customer_id = global_id.UrlToGlobalID(customer_idurl)
 
     def recursive_iterate(i, path_id, path):
         name = None

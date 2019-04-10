@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # api.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (api.py) is part of BitDust Software.
 #
@@ -37,7 +37,7 @@ from six.moves import map
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -234,39 +234,11 @@ def config_get(key):
     if _Debug:
         lg.out(_DebugLevel, 'api.config_get [%s]' % key)
     from main import config
-    from main import config_types
     if key and not config.conf().exist(key):
         return ERROR('option "%s" not exist' % key)
 
-    def _get_item(key):
-        typ = config.conf().getType(key)
-        typ_label = config.conf().getTypeLabel(key)
-        value = None
-        if not typ or typ in [config_types.TYPE_STRING,
-                              config_types.TYPE_TEXT,
-                              config_types.TYPE_UNDEFINED, ]:
-            value = config.conf().getData(key)
-        elif typ in [config_types.TYPE_BOOLEAN, ]:
-            value = config.conf().getBool(key)
-        elif typ in [config_types.TYPE_INTEGER,
-                     config_types.TYPE_POSITIVE_INTEGER,
-                     config_types.TYPE_NON_ZERO_POSITIVE_INTEGER, ]:
-            value = config.conf().getInt(key)
-        elif typ in [config_types.TYPE_FOLDER_PATH,
-                     config_types.TYPE_FILE_PATH,
-                     config_types.TYPE_COMBO_BOX,
-                     config_types.TYPE_PASSWORD, ]:
-            value = config.conf().getString(key)
-        else:
-            value = config.conf().getData(key)
-        return {
-            'key': key,
-            'value': value,
-            'type': typ_label,
-        }
-
     if key and not config.conf().hasChilds(key):
-        return RESULT([_get_item(key), ], )
+        return RESULT([config.conf().toJson(key), ], )
     childs = []
     for child in config.conf().listEntries(key):
         if config.conf().hasChilds(child):
@@ -275,7 +247,7 @@ def config_get(key):
                 'childs': len(config.conf().listEntries(child)),
             })
         else:
-            childs.append(_get_item(key))
+            childs.append(config.conf().toJson(child))
     return RESULT(childs)
 
 
@@ -289,42 +261,14 @@ def config_set(key, value):
     """
     key = str(key)
     from main import config
-    from main import config_types
     v = {}
     if config.conf().exist(key):
-        v['old_value'] = config.conf().getData(key)
-    typ = config.conf().getType(key)
+        v['old_value'] = config.conf().getValueOfType(key)
     typ_label = config.conf().getTypeLabel(key)
     if _Debug:
         lg.out(_DebugLevel, 'api.config_set [%s]=%s type is %s' % (key, value, typ_label))
-    if not typ or typ in [config_types.TYPE_STRING,
-                          config_types.TYPE_TEXT,
-                          config_types.TYPE_UNDEFINED, ]:
-        config.conf().setData(key, strng.text_type(value))
-    elif typ in [config_types.TYPE_BOOLEAN, ]:
-        if strng.is_string(value):
-            vl = strng.to_text(value).strip().lower() == 'true'
-        else:
-            vl = bool(value)
-        config.conf().setBool(key, vl)
-    elif typ in [config_types.TYPE_INTEGER,
-                 config_types.TYPE_POSITIVE_INTEGER,
-                 config_types.TYPE_NON_ZERO_POSITIVE_INTEGER, ]:
-        config.conf().setInt(key, int(value))
-    elif typ in [config_types.TYPE_FOLDER_PATH,
-                 config_types.TYPE_FILE_PATH,
-                 config_types.TYPE_COMBO_BOX,
-                 config_types.TYPE_PASSWORD, ]:
-        config.conf().setString(key, value)
-    else:
-        config.conf().setData(key, strng.text_type(value))
-    v.update({'key': key,
-              'value': config.conf().getData(key),
-              'type': config.conf().getTypeLabel(key)
-              # 'code': config.conf().getType(key),
-              # 'label': config.conf().getLabel(key),
-              # 'info': config.conf().getInfo(key),
-              })
+    config.conf().setValueOfType(key, value)
+    v.update(config.conf().toJson(key))
     return RESULT([v, ])
 
 
@@ -353,16 +297,28 @@ def config_list(sort=False):
         lg.out(_DebugLevel, 'api.config_list')
     from main import config
     r = config.conf().cache()
-    r = [{
-        'key': key,
-        'value': str(r[key]).replace('\n', '\\n'),
-        'type': config.conf().getTypeLabel(key),
-        'label': config.conf().getLabel(key),
-        'info': config.conf().getInfo(key),
-    } for key in list(r.keys())]
+    r = [config.conf().toJson(key) for key in list(r.keys())]
     if sort:
         r = sorted(r, key=lambda i: i['key'])
     return RESULT(r)
+
+
+def config_tree():
+    """
+    Returns all options as a tree.
+    """
+    if _Debug:
+        lg.out(_DebugLevel, 'api.config_list')
+    from main import config
+    r = {}
+    for key in config.conf().cache():
+        cursor = r
+        for part in key.split('/'):
+            if part not in cursor:
+                cursor[part] = {}
+            cursor = cursor[part]
+        cursor.update(config.conf().toJson(key))
+    return RESULT(result=[r, ])
 
 #------------------------------------------------------------------------------
 
@@ -1338,7 +1294,7 @@ def file_upload_start(local_path, remote_path, wait_result=False, open_share=Fal
         active_share = shared_access_coordinator.get_active_share(keyID)
         if not active_share:
             active_share = shared_access_coordinator.SharedAccessCoordinator(
-                keyID, log_events=True, publish_events=True, )
+                keyID, log_events=True, publish_events=False, )
         if active_share.state != 'CONNECTED':
             active_share.automat('restart')
     if wait_result:
@@ -1639,7 +1595,7 @@ def file_download_start(remote_path, destination_path=None, wait_result=False, o
             active_share = shared_access_coordinator.SharedAccessCoordinator(
                 key_id=key_id,
                 log_events=True,
-                publish_events=True,
+                publish_events=False,
             )
             if _Debug:
                 lg.out(_DebugLevel, 'api.download_start._open_share opened new share : %s' % active_share.key_id)
@@ -1701,7 +1657,8 @@ def file_download_stop(remote_path):
         if not versions:
             versions.extend(item.get_versions())
         for version in versions:
-            backupIDs.append(packetid.MakeBackupID(customerGlobalID, pathID, version))
+            backupIDs.append(packetid.MakeBackupID(customerGlobalID, pathID, version,
+                                                   key_alias=glob_path['key_alias']))
     else:
         remotePath = bpio.remotePath(glob_path['path'])
         knownPathID = backup_fs.ToID(remotePath, iter=backup_fs.fs(glob_path['idurl']))
@@ -1716,7 +1673,8 @@ def file_download_stop(remote_path):
         if not versions:
             versions.extend(item.get_versions())
         for version in versions:
-            backupIDs.append(packetid.MakeBackupID(glob_path['customer'], knownPathID, version))
+            backupIDs.append(packetid.MakeBackupID(glob_path['customer'], knownPathID, version,
+                                                   key_alias=glob_path['key_alias']))
     if not backupIDs:
         return ERROR('not found any remote versions for "%s"' % remote_path)
     r = []
@@ -1846,7 +1804,7 @@ def share_grant(trusted_remote_user, key_id, timeout=30):
     d.addCallback(_on_shared_access_donor_success)
     d.addErrback(_on_shared_access_donor_failed)
     d.addTimeout(timeout, clock=reactor)
-    shared_access_donor_machine = shared_access_donor.SharedAccessDonor(log_events=True, publish_events=True, )
+    shared_access_donor_machine = shared_access_donor.SharedAccessDonor(log_events=True, publish_events=False, )
     shared_access_donor_machine.automat('init', trusted_idurl=remote_idurl, key_id=key_id, result_defer=d)
     return ret
 
@@ -1864,7 +1822,7 @@ def share_open(key_id):
     new_share = False
     if not active_share:
         new_share = True
-        active_share = shared_access_coordinator.SharedAccessCoordinator(key_id, log_events=True, publish_events=True, )
+        active_share = shared_access_coordinator.SharedAccessCoordinator(key_id, log_events=True, publish_events=False, )
     ret = Deferred()
 
     def _on_shared_access_coordinator_state_changed(oldstate, newstate, event_string, *args, **kwargs):
@@ -2404,7 +2362,7 @@ def automats_list():
 #------------------------------------------------------------------------------
 
 
-def services_list():
+def services_list(show_configs=False):
     """
     Returns detailed info about all currently running network services.
 
@@ -2429,15 +2387,23 @@ def services_list():
             'state': 'ON'
         }]}
     """
-    result = [{
-        'index': svc.index,
-        'name': name,
-        'state': svc.state,
-        'enabled': svc.enabled(),
-        'installed': svc.installed(),
-        'config_path': svc.config_path,
-        'depends': svc.dependent_on()
-    } for name, svc in sorted(list(driver.services().items()), key=lambda i: i[0])]
+    from main import config
+    result = []
+    for name, svc in sorted(list(driver.services().items()), key=lambda i: i[0]):
+        svc_info = {
+            'index': svc.index,
+            'name': name,
+            'state': svc.state,
+            'enabled': svc.enabled(),
+            'installed': svc.installed(),
+            'depends': svc.dependent_on()
+        }
+        if show_configs:
+            svc_configs = []
+            for child in config.conf().listEntries(svc.config_path.replace('/enabled', '')):
+                svc_configs.append(config.conf().toJson(child))
+            svc_info['configs'] = svc_configs
+        result.append(svc_info)
     if _Debug:
         lg.out(_DebugLevel, 'api.services_list responded with %d items' % len(result))
     return RESULT(result)
@@ -3055,6 +3021,11 @@ def nickname_set(nickname):
 #------------------------------------------------------------------------------
 
 def message_history(user):
+    """
+    Returns chat history with that user.
+    """
+    if not driver.is_on('service_private_messages'):
+        return ERROR('service_private_messages() is not started')
     from chat import message_db
     from userid import my_id, global_id
     from crypt import my_keys

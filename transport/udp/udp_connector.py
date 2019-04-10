@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # udp_connector.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (udp_connector.py) is part of BitDust Software.
 #
@@ -55,7 +55,7 @@ from dht import dht_service
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 12
 
 #------------------------------------------------------------------------------

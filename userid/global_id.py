@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # global_id.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (global_id.py) is part of BitDust Software.
 #
@@ -281,6 +281,8 @@ def UrlToGlobalID(url, include_key=False):
     _, host, port, filename = nameurl.UrlParse(url)
     if filename.count('.'):
         username = filename.split('.')[0]
+    else:
+        username = filename
     if port:
         host = '%s_%s' % (host, port)
     if include_key:

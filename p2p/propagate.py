@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # propagate.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (propagate.py) is part of BitDust Software.
 #
@@ -47,7 +47,7 @@ from __future__ import absolute_import
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 8
 
 #------------------------------------------------------------------------------
@@ -537,7 +537,7 @@ def PingContact(idurl, timeout=30, retries=2):
             if not ping_result.called:
                 ping_result.errback(Exception('failed to fetch remote identity after %d attempts : %s' % (attempts, idurl, )))
             return None
-        idcache_defer = identitycache.scheduleForCaching(idurl, timeout=timeout)
+        idcache_defer = identitycache.scheduleForCaching(strng.to_text(idurl), timeout=timeout)
         idcache_defer.addCallback(_identity_cached, idurl)
         idcache_defer.addErrback(_identity_cache_failed, idurl, attempts)
         # ping_result.addErrback(lg.errback)

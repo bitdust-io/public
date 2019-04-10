@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # cmd_line_json.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (cmd_line_json.py) is part of BitDust Software.
 #
@@ -114,7 +114,7 @@ def print_text(msg, nl='\n'):
     """
     Send some output to the console.
     """
-    sys.stdout.write(msg + nl)
+    sys.stdout.write(strng.to_text(msg) + nl)
     sys.stdout.flush()
 
 
@@ -876,7 +876,9 @@ def cmd_set(opts, args, overDict):
         sort = True
         result = api.config_list(sort=sort)
         for i in range(len(result['result'])):
-            result['result'][i]['value'] = result['result'][i]['value'][:60]
+            val = result['result'][i]['value']
+            if strng.is_string(val) and len(val) > 60:
+                result['result'][i]['value'] = val[:60].replace('\n', '') + '...'
         tpl = jsontemplate.Template(templ.TPL_OPTIONS_LIST_KEY_TYPE_VALUE)
         print_template(result, tpl)
         return 0
@@ -904,7 +906,9 @@ def cmd_set_request(opts, args, overDict):
 
         def _limit_length(result):
             for i in range(len(result['result'])):
-                result['result'][i]['value'] = result['result'][i]['value'][:60]
+                val = result['result'][i]['value']
+                if strng.is_string(val) and len(val) > 60:
+                    result['result'][i]['value'] = val[:60].replace('\n', '') + '...'
             return result
 
         return call_jsonrpc_method_transform_template_and_stop('config_list', tpl, _limit_length, sort)

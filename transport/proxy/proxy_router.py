@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # proxy_router.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (proxy_router.py) is part of BitDust Software.
 #
@@ -59,7 +59,7 @@ from io import BytesIO
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 10
 
 #------------------------------------------------------------------------------
@@ -583,12 +583,12 @@ class ProxyRouter(automat.Automat):
                 if newpacket.CreatorID in list(self.routes.keys()):
                     # sent by proxy_sender() from node A : a man behind proxy_router()
                     # addressed to some third node B in outside world - need to route
-                    # A is my consumer and B is a recipient which A wants to contant
+                    # A is my consumer and B is a recipient which A wants to contact
                     if _Debug:
                         lg.out(_DebugLevel, '        sending "routed-outbox-packet-received" event')
                     self.automat('routed-outbox-packet-received', (newpacket, info))
                     return True
-                # looke like we do not know this guy, so why he is sending us routed traffic?
+                # looks like we do not know this guy, so why he is sending us routed traffic?
                 lg.warn('unknown %s from %s received, no known routes with %s' % (
                     newpacket, newpacket.CreatorID, newpacket.CreatorID))
                 self.automat('unknown-packet-received', (newpacket, info))

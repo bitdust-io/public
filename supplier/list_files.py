@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # list_files.py
 #
-# Copyright (C) 2008-2018 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
 #
 # This file (list_files.py) is part of BitDust Software.
 #
@@ -29,7 +29,7 @@ from io import StringIO
 
 #------------------------------------------------------------------------------
 
-_Debug = True
+_Debug = False
 _DebugLevel = 6
 
 #------------------------------------------------------------------------------
@@ -43,7 +43,7 @@ from logs import lg
 
 from system import bpio
 
-from lib import nameurl
+from lib import strng
 from lib import packetid
 from lib import misc
 
@@ -121,7 +121,7 @@ def PackListFiles(plaintext, method):
     if method == "Text":
         return plaintext
     elif method == "Compressed":
-        return zlib.compress(plaintext)
+        return zlib.compress(strng.to_bin(plaintext))
     return ''
 
 
@@ -129,7 +129,7 @@ def UnpackListFiles(payload, method):
     if method == "Text":
         return payload
     elif method == "Compressed":
-        return zlib.decompress(payload)
+        return strng.to_text(zlib.decompress(strng.to_bin(payload)))
     return payload
 
 #------------------------------------------------------------------------------
