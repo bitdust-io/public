@@ -2,6 +2,12 @@ Change Log
 ==========
 
 
+2019-04-19 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
+* bug fixed in id_registrator()
+
+
+
 2019-04-13 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
 * added new feature: backup/restore/sync my keys to suppliers encrypting with my "master" key (#313)
