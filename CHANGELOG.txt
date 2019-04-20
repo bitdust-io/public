@@ -2,9 +2,11 @@ Change Log
 ==========
 
 
-2019-04-19 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+2019-04-20 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
-* bug fixed in id_registrator()
+* minor changes in logging and events
+* bug fix in my_keys (#317)
+* make sure suppliers receive and register my customer public key every time (#316)
 
 
 
