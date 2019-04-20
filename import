@@ -20,4 +20,5 @@ cp -r * "$curpath"
 diff --brief -r "$curpath" "$sourcepath" | grep -v ".git" | grep -v "__pycache__" | grep -v ".pyc" | grep -v ".DS_Store" | grep "Only in"
 cd "$curpath"
 rm -rf "$tmppath"
+find . -type f -name "*.py" -exec sed -i '' -e 's/_Debug = True/_Debug = False/g' {} +
 git status
