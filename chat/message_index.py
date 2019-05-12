@@ -82,43 +82,40 @@ def definitions():
 
 def make_custom_header():
     src = '\n'
-    src += 'from chat.message_index import BaseHashIndex\n'
-    src += 'from chat.message_index import BaseMD5Index\n'
     src += 'from chat.message_index import BaseTimeIndex\n'
+    src += 'from chat.message_index import BaseMD5Index\n'
     src += 'from chat.message_index import BaseMD5DoubleKeyIndex\n'
     return src
 
 #------------------------------------------------------------------------------
 
-class BaseHashIndex(HashIndex):
+class BaseMD5Index(HashIndex):
     role = None
     field = None
-    key_format = '16s'
+    key_format = '32s'
 
     def __init__(self, *args, **kwargs):
         kwargs['key_format'] = self.key_format
-        super(BaseHashIndex, self).__init__(*args, **kwargs)
-
-    def transform_key(self, key):
-        return key
+        super(BaseMD5Index, self).__init__(*args, **kwargs)
 
     def make_key_value(self, data):
         try:
-            return self.transform_key(data[self.role][self.field]), None
+            key = data[self.role][self.field]
+            if isinstance(key, six.text_type):
+                key = key.encode()
+            k = md5(key).hexdigest()
+            return k, {}
         except (AttributeError, ValueError, KeyError, IndexError, ):
             return None
-        except Exception:
+        except Exception as exc:
             lg.exc()
+            raise exc
 
     def make_key(self, key):
-        return self.transform_key(key)
-
-#------------------------------------------------------------------------------
-
-class BaseMD5Index(BaseHashIndex):
-
-    def transform_key(self, key):
-        return md5(strng.to_bin(key)).digest()
+        if isinstance(key, six.text_type):
+            key = key.encode()
+        k = md5(key).hexdigest()
+        return k
 
 #------------------------------------------------------------------------------
 
@@ -132,7 +129,8 @@ class BaseTimeIndex(TreeBasedIndex):
 
     def make_key_value(self, data):
         try:
-            return data[self.role]['time'], None
+            key = data[self.role]['time']
+            return key, None
         except (ValueError, KeyError, IndexError, ):
             return None
         except Exception:
@@ -148,14 +146,16 @@ class BaseMD5DoubleKeyIndex(MultiTreeBasedIndex):
     field_a = None
     role_b = None
     field_b = None
-    key_format = '16s'
+    key_format = '32s'
 
     def __init__(self, *args, **kwargs):
         kwargs['key_format'] = self.key_format
         super(BaseMD5DoubleKeyIndex, self).__init__(*args, **kwargs)
 
     def transform_key(self, key):
-        return md5(strng.to_bin(key)).digest()
+        if isinstance(key, six.text_type):
+            key = key.encode()
+        return md5(key).hexdigest().encode()
 
     def make_key_value(self, data):
         try:

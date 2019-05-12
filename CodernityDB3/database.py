@@ -638,16 +638,14 @@ for ID index. You should update that index \
         try:
             old_should_index = index.make_key_value(db_data)
         except Exception as ex:
-            warnings.warn("""Problem during update for `%s`, ex = `%s`, \
-uou should check index code.""" % (index.name, ex), RuntimeWarning)
+            warnings.warn("""Problem during update for `%s`, ex = `%s`, you should check index code.""" % (index.name, ex), RuntimeWarning)
             old_should_index = None
         if old_should_index:
             old_key, old_value = old_should_index
             try:
                 new_should_index = index.make_key_value(data)
             except Exception as ex:
-                warnings.warn("""Problem during update for `%s`, ex = `%r`, \
-you should check index code.""" % (index.name, ex), RuntimeWarning)
+                warnings.warn("""Problem during update for `%s`, ex = `%r`, you should check index code.""" % (index.name, ex), RuntimeWarning)
                 new_should_index = None
             if new_should_index:
                 new_key, new_value = new_should_index
@@ -671,6 +669,7 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
         Performs update on **id** index
         """
         _id, value = self.id_ind.make_key_value(data)
+        # print('_update_id_index', _id, value)
         db_data = self.get('id', _id)
         if db_data['_rev'] != _rev:
             raise RevConflict()
@@ -686,6 +685,7 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
         Performs update operation on all indexes in order
         """
         _id, new_rev, db_data = self._update_id_index(_rev, data)
+        # print('_update_indexes', _id, new_rev)
         for index in self.indexes[1:]:
             self._single_update_index(index, data, db_data, _id)
         return _id, new_rev
@@ -701,9 +701,9 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
         try:
             should_index = index.make_key_value(data)
         except Exception as ex:
-            warnings.warn("""Problem during insert for `%s`, ex = `%r`, \
-you should check index code.""" % (index.name, ex), RuntimeWarning)
+            warnings.warn("""Problem during insert for `%s`, ex = `%r`, you should check index code.""" % (index.name, ex), RuntimeWarning)
             should_index = None
+        # print('_single_insert_index %r %r %r' % (index, should_index, doc_id))
         if should_index:
             key, value = should_index
             index.insert_with_storage(doc_id, key, value)
@@ -731,6 +731,7 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
         Performs insert operation on all indexes in order
         """
         _id = self._insert_id_index(_rev, data)
+        # print('database._insert_indexes %r' % _id)
         for index in self.indexes[1:]:
             self._single_insert_index(index, data, _id)
 
@@ -751,7 +752,7 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
         try:
             index.delete(doc_id, key)
         except TryReindexException as exc:
-            print("Error in _single_delete_index: %r" % exc)
+            # print("Error in _single_delete_index: %r" % exc)
             return
 
     def _delete_id_index(self, _id, _rev, data):
@@ -832,7 +833,7 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
         doc_id, rev, start, size, status = self.id_ind.get(
             data['_id'])  # it's cached so it's ok
         # print(status)
-        if status != b'd' and status != b'u':
+        if status != b'd' and status != b'u' and status != 'd' and status != 'u':
             self._single_insert_index(index, data, doc_id)
 
     def reindex_index(self, index):
@@ -902,6 +903,7 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
         assert _id is not None
         data['_rev'] = _rev  # for make_key_value compat with update / delete
         data['_id'] = _id
+        # print('database.insert %r %r' % (_id, _rev))
         self._insert_indexes(_rev, data)
         ret = {'_id': _id, '_rev': _rev}
         data.update(ret)
@@ -928,6 +930,10 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
             raise PreconditionsException(
                 "`_rev` must be valid bytes object")
         _id, new_rev = self._update_indexes(_rev, data)
+        if isinstance(_id, six.binary_type):
+            _id = _id.decode()
+        if isinstance(new_rev, six.binary_type):
+            new_rev = new_rev.decode()
         ret = {'_id': _id, '_rev': new_rev}
         data.update(ret)
         return ret
@@ -945,6 +951,7 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
         """
         # if not self.indexes_names.has_key(index_name):
         #     raise DatabaseException, "Invalid index name"
+        # print('database.get %r key=%r' % (index_name, key))
         if isinstance(key, six.text_type):
             key = codecs.encode(key, 'utf-8')
         try:
@@ -959,13 +966,12 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
             raise RecordNotFound(ex)
         if not start and not size:
             raise RecordNotFound("Not found")
-        elif status == b'd':
+        elif status == b'd' or status == 'd':
             raise RecordDeleted("Deleted")
         if with_storage and size:
             storage = ind.storage
             data = storage.get(start, size, status)
         else:
-
             data = {}
         if with_doc and index_name != 'id':
             storage = ind.storage
@@ -1013,7 +1019,6 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
             gen = ind.get_between(start, end, limit, offset, **kwargs)
         while True:
             try:
-#                l_key, start, size, status = gen.next()
                 ind_data = next(gen)
             except StopIteration:
                 break
@@ -1055,6 +1060,7 @@ you should check index code.""" % (index.name, ex), RuntimeWarning)
         while True:
             try:
                 doc_id, unk, start, size, status = next(gen)
+                # print('database.all %r doc_id=%r unk=%r start=%r size=%r status=%r' % (index_name, doc_id, unk, start, size, status))
             except StopIteration:
                 break
             else:
