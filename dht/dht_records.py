@@ -85,6 +85,8 @@ _Rules = {
     },
 }
 
+#------------------------------------------------------------------------------
+
 def get_rules(record_type):
     global _Rules
     return _Rules.get(record_type, {})
@@ -100,17 +102,14 @@ def set_nickname(key, idurl):
     if _Debug:
         lg.args(_DebugLevel, key, idurl)
     nickname, _, pos = key.partition(':')
-    return dht_service.set_valid_data(
-        key=key,
-        json_data={
-            'type': 'nickname',
-            'timestamp': utime.get_sec1970(),
-            'idurl': idurl,
-            'nickname': nickname,
-            'position': pos,
-        },
-        rules=get_rules('nickname'),
-    )
+    json_data={
+        'type': 'nickname',
+        'timestamp': utime.get_sec1970(),
+        'idurl': idurl.to_bin(),
+        'nickname': nickname,
+        'position': pos,
+    }
+    return dht_service.set_valid_data(key=key, json_data=json_data, rules=get_rules('nickname'), )
 
 #------------------------------------------------------------------------------
 
@@ -194,10 +193,10 @@ def set_suppliers(customer_idurl, ecc_map, suppliers_list, revision=None, publis
             'type': 'suppliers',
             'timestamp': utime.get_sec1970(),
             'revision': 0 if revision is None else revision,
-            'publisher_idurl': publisher_idurl,
-            'customer_idurl': customer_idurl,
+            'publisher_idurl': publisher_idurl.to_text() if publisher_idurl else None,
+            'customer_idurl': customer_idurl.to_text(),
             'ecc_map': ecc_map,
-            'suppliers': suppliers_list,
+            'suppliers': list(map(lambda i: i.to_text(), suppliers_list)),
         },
         rules=get_rules('suppliers'),
         expire=expire,

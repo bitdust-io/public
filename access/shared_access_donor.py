@@ -80,6 +80,7 @@ from crypt import encrypted
 
 from userid import my_id
 from userid import global_id
+from userid import id_url
 
 from access import key_ring
 
@@ -95,7 +96,7 @@ class SharedAccessDonor(automat.Automat):
     timers = {
         'timer-2sec': (2.0, ['PUB_KEY']),
         'timer-10sec': (10.0, ['PRIV_KEY', 'LIST_FILES']),
-        'timer-15sec': (15.0, ['PUB_KEY']),
+        'timer-15sec': (25.0, ['PUB_KEY']),
         'timer-5sec': (5.0, ['PING', 'AUDIT', 'CACHE']),
     }
 
@@ -231,7 +232,7 @@ class SharedAccessDonor(automat.Automat):
         """
         Action method.
         """
-        self.remote_idurl = strng.to_bin(kwargs['trusted_idurl'])
+        self.remote_idurl = id_url.field(kwargs['trusted_idurl'])
         self.key_id = strng.to_text(kwargs['key_id'])
         self.result_defer = kwargs.get('result_defer', None)
 
@@ -295,10 +296,11 @@ class SharedAccessDonor(automat.Automat):
             return
         self.suppliers_acks = 0
         for supplier_idurl in contactsdb.suppliers():
-            d = key_ring.share_key(self.key_id, supplier_idurl, include_private=False)
-            d.addCallback(self._on_supplier_pub_key_shared, supplier_idurl)
-            d.addErrback(self._on_supplier_pub_key_failed, supplier_idurl)
-            self.suppliers_responses[supplier_idurl] = d
+            if supplier_idurl:
+                d = key_ring.share_key(self.key_id, supplier_idurl, include_private=False)
+                d.addCallback(self._on_supplier_pub_key_shared, supplier_idurl)
+                d.addErrback(self._on_supplier_pub_key_failed, supplier_idurl)
+                self.suppliers_responses[supplier_idurl] = d
 
     def doCheckAllAcked(self, *args, **kwargs):
         """

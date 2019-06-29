@@ -91,6 +91,7 @@ from p2p import p2p_service
 
 from userid import global_id
 from userid import my_id
+from userid import id_url
 
 #------------------------------------------------------------------------------
 
@@ -656,7 +657,7 @@ def do_notify(callback_method, consumer_id, queue_id, message_id):
 
     if strng.is_string(callback_method):
         p2p_service.SendEvent(
-            remote_idurl=strng.to_bin(callback_method),
+            remote_idurl=id_url.field(callback_method),
             event_id=event_id,
             payload=existing_message.payload,
             producer_id=existing_message.producer_id,
@@ -690,12 +691,13 @@ def do_consume(interested_consumers=None):
     to_be_consumed = []
     for consumer_id in interested_consumers:
         if len(consumer(consumer_id).commands) == 0:
-            # skip, no avaliable notification methods found for given consumer
+            # skip, no available notification methods found for given consumer
             continue
         interested_queues = set()
         for queue_id in consumer(consumer_id).queues:
             if queue_id not in queue():
-                lg.warn('consumer queue %s was not found' % queue_id)
+                if _Debug:
+                    lg.out(_DebugLevel, 'p2p_queue.do_consume consumer queue %s was not found' % queue_id)
                 continue
             if len(queue(queue_id)) == 0:
                 # no messages in the queue

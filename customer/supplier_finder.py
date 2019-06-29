@@ -53,8 +53,6 @@ from logs import lg
 
 from automats import automat
 
-from lib import strng
-
 from p2p import commands
 from p2p import p2p_service
 from p2p import lookup
@@ -63,6 +61,7 @@ from contacts import identitycache
 from contacts import contactsdb
 
 from userid import my_id
+from userid import id_url
 
 from transport import callback
 
@@ -90,7 +89,13 @@ def A(event=None, *args, **kwargs):
     global _SupplierFinder
     if _SupplierFinder is None:
         # set automat name and starting state here
-        _SupplierFinder = SupplierFinder('supplier_finder', 'AT_STARTUP', _DebugLevel, _Debug)
+        _SupplierFinder = SupplierFinder(
+            name='supplier_finder',
+            state='AT_STARTUP',
+            debug_level=_DebugLevel,
+            log_events=_Debug,
+            log_transitions=_Debug,
+        )
     if event is not None:
         _SupplierFinder.automat(event, *args, **kwargs)
     return _SupplierFinder
@@ -204,7 +209,7 @@ class SupplierFinder(automat.Automat):
         Action method.
         """
         callback.append_inbox_callback(self._inbox_packet_received)
-        self.family_position = kwargs.get('family_position')
+        self.family_position = kwargs.get('family_position', None)
         self.ecc_map = kwargs.get('ecc_map')
         self.family_snapshot = kwargs.get('family_snapshot')
 
@@ -222,7 +227,7 @@ class SupplierFinder(automat.Automat):
         from customer import fire_hire
         from raid import eccmap
         position = self.family_position
-        if not position:
+        if position is None:
             lg.warn('position for new supplier is unknown, will "guess"')
             current_suppliers = list(contactsdb.suppliers())
             for i in range(len(current_suppliers)):
@@ -268,7 +273,7 @@ class SupplierFinder(automat.Automat):
         """
         Action method.
         """
-        self.target_idurl = strng.to_bin(args[0])
+        self.target_idurl = id_url.field(args[0])
 
     def doPopCandidate(self, *args, **kwargs):
         """
@@ -306,7 +311,6 @@ class SupplierFinder(automat.Automat):
                 sc.remove_callback('supplier_finder')
             self.target_idurl = None
         self.destroy()
-        lg.out(14, 'supplier_finder.doDestroyMy index=%s' % self.index)
 
     #------------------------------------------------------------------------------
 
@@ -316,22 +320,33 @@ class SupplierFinder(automat.Automat):
 
     def _nodes_lookup_finished(self, idurls):
         if _Debug:
-            lg.out(_DebugLevel, 'broadcasters_finder._nodes_lookup_finished : %r' % idurls)
+            lg.out(_DebugLevel, 'supplier_finder._nodes_lookup_finished : %r' % idurls)
         if not idurls:
+            lg.warn('no available nodes found via DHT lookup')
             self.automat('users-not-found')
             return
-        # if driver.is_on('service_proxy_transport'):
-        #     current_router_idurl = config.conf().getString('services/proxy-transport/current-router', '').strip()
-        #     if current_router_idurl and current_router_idurl in idurls:
-        #         idurls.remove(current_router_idurl)
+        found_idurl = None
         for idurl in idurls:
+            if id_url.is_in(idurl, contactsdb.suppliers()):
+                if _Debug:
+                    lg.out('    skip %r because already my supplier' % idurl)
+                continue
             ident = identitycache.FromCache(idurl)
             remoteprotos = set(ident.getProtoOrder())
             myprotos = set(my_id.getLocalIdentity().getProtoOrder())
-            if len(myprotos.intersection(remoteprotos)) > 0:
-                self.automat('found-one-user', idurl)
-                return
-        self.automat('users-not-found')
+            if not len(myprotos.intersection(remoteprotos)):
+                if _Debug:
+                    lg.out(_DebugLevel, '    skip %r because no matching protocols exists' % idurl)
+                continue
+            found_idurl = idurl
+            break
+        if not found_idurl:
+            lg.warn('found some nodes via DHT lookup, but none of them is available')
+            self.automat('users-not-found')
+            return
+        if _Debug:
+            lg.out(_DebugLevel, '    selected %r and will request supplier service' % found_idurl)
+        self.automat('found-one-user', found_idurl)
 
     def _supplier_connector_state(self, supplier_idurl, newstate, **kwargs):
         if supplier_idurl != self.target_idurl:
@@ -343,6 +358,6 @@ class SupplierFinder(automat.Automat):
             return
         if contactsdb.is_supplier(self.target_idurl):
             return
-        family_position = kwargs.get('family_position')
+        family_position = kwargs.get('family_position', None)
         ecc_map = kwargs.get('ecc_map')
         self.automat('supplier-connected', self.target_idurl, family_position=family_position, ecc_map=ecc_map, family_snapshot=self.family_snapshot)

@@ -167,7 +167,7 @@ def out(level, msg, nl='\n', log_name='main', showtime=False):
         _WebStreamFunc(level, s_ + nl)
     _LogLinesCounter += 1
     if _LogLinesCounter % 10000 == 0:
-        out(2, '[%s]' % time.asctime())
+        out(10, '[%s]' % time.asctime())
     return None
 
 
@@ -191,10 +191,10 @@ def args(level, *args, **kwargs):
     funcargs = []
     for k, v in enumerate(args):
         funcargs.append('%s' % v)
-    for k, v in kwargs:
-        funcargs.append('%s=%s' % (k, v))
+    for k in kwargs:
+        funcargs.append('%s=%s' % (k, kwargs.get(k)))
     funcname = '%s.%s' % (modul, caller)
-    o = '%s(%s)' % (funcname, ','.join(funcargs), )
+    o = '%s(%s)' % (funcname, ', '.join(funcargs), )
     if message:
         o += ' : ' + message
     out(level, o)
@@ -212,7 +212,7 @@ def info(message):
         output_string = '\033[6;37;42m INFO %s \033[0m in %s.%s()' % (message, modul, caller, )
     else:
         output_string = ' INFO %s in %s.%s()' % (message, modul, caller, )
-    out(0, output_string)
+    out(0, output_string, showtime=True)
     return message
 
 
@@ -283,10 +283,12 @@ def exception(level, maxTBlevel, exc_info):
         _, value, trbk = sys.exc_info()
     else:
         _, value, trbk = exc_info
-    try:
-        excArgs = value.__dict__["args"]
-    except KeyError:
-        excArgs = ''
+    excArgs = ''
+    if value: 
+        try:
+            excArgs = value.__dict__["args"]
+        except KeyError:
+            excArgs = ''
     if trbk:
         excTb = traceback.format_tb(trbk, maxTBlevel)
     else:

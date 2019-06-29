@@ -63,6 +63,7 @@ from main import events
 from dht import dht_relations
 
 from userid import global_id
+from userid import id_url
 
 from p2p import p2p_service
 
@@ -86,7 +87,7 @@ def register_share(A):
     global _ActiveSharesByIDURL
     if A.key_id in _ActiveShares:
         raise Exception('share already exist')
-    if A.customer_idurl not in _ActiveSharesByIDURL:
+    if id_url.is_not_in(A.customer_idurl, _ActiveSharesByIDURL):
         _ActiveSharesByIDURL[A.customer_idurl] = []
     _ActiveSharesByIDURL[A.customer_idurl].append(A)
     _ActiveShares[A.key_id] = A
@@ -98,7 +99,7 @@ def unregister_share(A):
     global _ActiveShares
     global _ActiveSharesByIDURL
     _ActiveShares.pop(A.key_id, None)
-    if A.customer_idurl not in _ActiveSharesByIDURL:
+    if id_url.is_not_in(A.customer_idurl, _ActiveSharesByIDURL):
         lg.warn('given customer idurl not found in active shares list')
     else:
         _ActiveSharesByIDURL[A.customer_idurl] = []
@@ -381,8 +382,11 @@ class SharedAccessCoordinator(automat.Automat):
                     key_id=self.key_id,
                     queue_subscribe=False,
                 )
-            sc.set_callback('shared_access_coordinator', self._on_supplier_connector_state_changed)
-            sc.automat('connect')
+            if sc.state in ['CONNECTED', 'QUEUE?', ]:
+                self.automat('supplier-connected', supplier_idurl)
+            else:
+                sc.set_callback('shared_access_coordinator', self._on_supplier_connector_state_changed)
+                sc.automat('connect')
 
     def doRequestSupplierFiles(self, *args, **kwargs):
         """

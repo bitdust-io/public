@@ -78,6 +78,7 @@ from crypt import key
 from crypt import my_keys
 
 from userid import my_id
+from userid import id_url
 
 #------------------------------------------------------------------------------
 
@@ -104,9 +105,9 @@ class Packet(object):
         # Legal Commands are in commands.py
         self.Command = strng.to_text(Command)
         # who owns this data and pays bills - http://cate.com/id1.xml
-        self.OwnerID = strng.to_bin(OwnerID)
+        self.OwnerID = id_url.field(OwnerID)
         # signer - http://cate.com/id1.xml - might be an authorized scrubber
-        self.CreatorID = strng.to_bin(CreatorID)
+        self.CreatorID = id_url.field(CreatorID)
         # string of the above 4 "Number"s with "-" separator to uniquely identify a packet
         # on the local machine.  Can be used for filenames, and to prevent duplicates.
         self.PacketID = strng.to_text(PacketID)
@@ -117,7 +118,7 @@ class Packet(object):
         self.Payload = strng.to_bin(Payload)
         # want full IDURL for other party so troublemaker could not
         # use his packets to mess up other nodes by sending it to them
-        self.RemoteID = strng.to_bin(RemoteID)
+        self.RemoteID = id_url.field(RemoteID)
         # which private key to use to generate signature
         self.KeyID = strng.to_text(KeyID or my_id.getGlobalID(key_alias='master'))
         if Signature:
@@ -154,14 +155,14 @@ class Packet(object):
         (without Signature).
         Just to be able to generate a hash of the whole packet .
         """
-        sep = b"-"
-        stufftosum = b""
+        sep = b'-'
+        stufftosum = b''
         try:
             stufftosum += strng.to_bin(self.Command)
             stufftosum += sep
-            stufftosum += strng.to_bin(self.OwnerID)
+            stufftosum += self.OwnerID.to_bin()
             stufftosum += sep
-            stufftosum += strng.to_bin(self.CreatorID)
+            stufftosum += self.CreatorID.to_bin()
             stufftosum += sep
             stufftosum += strng.to_bin(self.PacketID)
             stufftosum += sep
@@ -169,7 +170,7 @@ class Packet(object):
             stufftosum += sep
             stufftosum += strng.to_bin(self.Payload)
             stufftosum += sep
-            stufftosum += strng.to_bin(self.RemoteID)
+            stufftosum += self.RemoteID.to_bin()
             if self.KeyID:
                 stufftosum += sep
                 stufftosum += strng.to_bin(self.KeyID)
@@ -206,7 +207,7 @@ class Packet(object):
         if CreatorIdentity is None:
             OwnerIdentity = contactsdb.get_contact_identity(self.OwnerID)
             if OwnerIdentity is None:
-                lg.out(1, "signed.SignatureChecksOut ERROR could not get Identity for " + self.CreatorID + " so returning False")
+                lg.err("could not get Identity for " + self.CreatorID + " so returning False")
                 return False
             CreatorIdentity = OwnerIdentity
         Result = key.Verify(CreatorIdentity, self.GenerateHash(), self.Signature)
@@ -229,7 +230,8 @@ class Packet(object):
         is equal to owner or a scrubber for owner 8) etc.
         """
         if not self.Ready():
-            lg.out(4, "signed.Valid packet is not ready yet " + str(self))
+            if _Debug:
+                lg.out(_DebugLevel, "signed.Valid packet is not ready yet " + str(self))
             return False
         if not commands.IsCommand(self.Command):
             lg.warn("signed.Valid bad Command " + str(self.Command))
@@ -270,18 +272,20 @@ class Packet(object):
         """
         dct = {
             'm': self.Command,
-            'o': self.OwnerID,
-            'c': self.CreatorID,
+            'o': self.OwnerID.to_bin(),
+            'c': self.CreatorID.to_bin(),
             'i': self.PacketID,
             'd': self.Date,
             'p': self.Payload,
-            'r': self.RemoteID,
+            'r': self.RemoteID.to_bin(),
             'k': self.KeyID,
             's': self.Signature,
         }        
-        if _Debug:
-            lg.out(_DebugLevel, 'signed.Serialize %r' % dct)
         src = serialization.DictToBytes(dct, encoding='latin1')
+        # if _Debug:
+        #     lg.out(_DebugLevel, 'signed.Serialize %d bytes %s(%s) %s/%s/%s KeyID=%s' % (
+        #         len(src), self.Command, self.PacketID, nameurl.GetName(self.OwnerID),
+        #         nameurl.GetName(self.CreatorID), nameurl.GetName(self.RemoteID), self.KeyID, ))
         return src
 
     def __len__(self):
@@ -312,27 +316,52 @@ def Unserialize(data):
     dct = serialization.BytesToDict(data, keys_to_text=True, encoding='latin1')
 
     if _Debug:
-        lg.out(_DebugLevel, 'signed.Unserialize %r' % dct)
+        lg.out(_DebugLevel, 'signed.Unserialize %d bytes' % len(data))
+
+    try:
+        Command = strng.to_text(dct['m'])
+        OwnerID = dct['o']
+        CreatorID = dct['c']
+        PacketID = strng.to_text(dct['i'])
+        Date = strng.to_text(dct['d'])
+        Payload = dct['p']
+        RemoteID = dct['r']
+        KeyID = strng.to_text(dct['k'])
+        Signature = dct['s']
+    except:
+        lg.exc()
+        return None
 
     try:
         newobject = Packet(
-            Command=strng.to_text(dct['m']),
-            OwnerID=dct['o'],
-            CreatorID=dct['c'],
-            PacketID=strng.to_text(dct['i']),
-            Date=strng.to_text(dct['d']),
-            Payload=dct['p'],
-            RemoteID=dct['r'],
-            KeyID=strng.to_text(dct['k']),
-            Signature=dct['s'],
+            Command=Command,
+            OwnerID=OwnerID,
+            CreatorID=CreatorID,
+            PacketID=PacketID,
+            Date=Date,
+            Payload=Payload,
+            RemoteID=RemoteID,
+            KeyID=KeyID,
+            Signature=Signature,
         )
     except:
+        if _Debug:
+            lg.args(_DebugLevel,
+                Command=Command,
+                OwnerID=OwnerID,
+                CreatorID=CreatorID,
+                PacketID=PacketID,
+                Date=Date,
+                Payload=Payload,
+                RemoteID=RemoteID,
+                KeyID=KeyID,
+                Signature=Signature,
+            )
         lg.exc()
-        newobject = None
-    
-    if newobject is None:
-        lg.warn("result is None")
         return None
+
+    if _Debug:
+        lg.args(_DebugLevel, Command=Command, PacketID=PacketID, OwnerID=OwnerID, CreatorID=CreatorID, RemoteID=RemoteID)
 
     return newobject
 
