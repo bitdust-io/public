@@ -98,6 +98,7 @@ from p2p import propagate
 from transport import callback
 
 from userid import my_id
+from userid import id_url
 from userid import global_id
 
 #------------------------------------------------------------------------------
@@ -154,12 +155,13 @@ def check_create(idurl):
     """
     Creates new instance of online_status() state machine and send "init" event to it.
     """
-    if idurl in [None, 'None', '', b'None', b'', ]:
+    if id_url.is_empty(idurl):
         return False
-    idurl = strng.to_bin(idurl)
+    idurl = id_url.field(idurl)
     if idurl not in list(_OnlineStatusDict.keys()):
         A(idurl, 'init')
-        lg.info('online_status() for %r was not found, made a new instance with state OFFLINE' % idurl)
+        if _Debug:
+            lg.out(_DebugLevel, 'online_status.check_create instance for %r was not found, made a new with state OFFLINE' % idurl)
     return True
 
 #------------------------------------------------------------------------------
@@ -173,9 +175,9 @@ def isKnown(idurl):
     global _ShutdownFlag
     if _ShutdownFlag:
         return False
-    if idurl in [None, 'None', '', b'None', b'', ]:
+    if id_url.is_empty(idurl):
         return False
-    idurl = strng.to_bin(idurl)
+    idurl = id_url.field(idurl)
     return idurl in list(_OnlineStatusDict.keys())
 
 
@@ -186,9 +188,9 @@ def isOnline(idurl):
     global _ShutdownFlag
     if _ShutdownFlag:
         return False
-    if idurl in [None, 'None', '', b'None', b'', ]:
+    if id_url.is_empty(idurl):
         return False
-    idurl = strng.to_bin(idurl)
+    idurl = id_url.field(idurl)
     if not isKnown(idurl):
         return False
     return A(idurl).state in ['CONNECTED', 'PING?', ]
@@ -201,9 +203,9 @@ def isOffline(idurl):
     global _ShutdownFlag
     if _ShutdownFlag:
         return True
-    if idurl in [None, 'None', '', b'None', b'', ]:
+    if id_url.is_empty(idurl):
         return True
-    idurl = strng.to_bin(idurl)
+    idurl = id_url.field(idurl)
     if not isKnown(idurl):
         return True
     return A(idurl).state == 'OFFLINE'
@@ -216,9 +218,9 @@ def isCheckingNow(idurl):
     global _ShutdownFlag
     if _ShutdownFlag:
         return False
-    if idurl in [None, 'None', '', b'None', b'', ]:
+    if id_url.is_empty(idurl):
         return False
-    idurl = strng.to_bin(idurl)
+    idurl = id_url.field(idurl)
     if not isKnown(idurl):
         return False
     return A(idurl).state == 'PING'
@@ -229,9 +231,9 @@ def getInstance(idurl, autocreate=True):
     """
     if _ShutdownFlag:
         return None
-    if idurl in [None, 'None', '', b'None', b'', ]:
+    if id_url.is_empty(idurl):
         return None
-    idurl = strng.to_bin(idurl)
+    idurl = id_url.field(idurl)
     if not isKnown(idurl) and not autocreate:
         return None
     check_create(idurl)
@@ -250,9 +252,9 @@ def getCurrentState(idurl):
     global _ShutdownFlag
     if _ShutdownFlag:
         return None
-    if idurl in [None, 'None', '', b'None', b'', ]:
+    if id_url.is_empty(idurl):
         return None
-    idurl = strng.to_bin(idurl)
+    idurl = id_url.field(idurl)
     if not isKnown(idurl):
         return None
     return A(idurl).state
@@ -265,9 +267,9 @@ def getStatusLabel(idurl):
     global _ShutdownFlag
     if _ShutdownFlag:
         return '?'
-    if idurl in [None, 'None', '', b'None', b'', ]:
+    if id_url.is_empty(idurl):
         return '?'
-    idurl = strng.to_bin(idurl)
+    idurl = id_url.field(idurl)
     if not isKnown(idurl):
         return '?'
     return stateToLabel(A(idurl).state)
@@ -362,9 +364,9 @@ def OutboxStatus(pkt_out, status, error=''):
     global _ShutdownFlag
     if _ShutdownFlag:
         return False
-    if pkt_out.outpacket.RemoteID == my_id.getLocalID():
+    if pkt_out.outpacket.RemoteID.to_bin() == my_id.getLocalID().to_bin():
         return False
-    if pkt_out.outpacket.CreatorID != my_id.getLocalID():
+    if pkt_out.outpacket.CreatorID.to_bin() != my_id.getLocalID().to_bin():
         return False
     if status == 'finished':
         if error == 'unanswered' and pkt_out.outpacket.Command == commands.Identity():
@@ -448,7 +450,7 @@ def A(idurl, event=None, *args, **kwargs):
     """
     global _ShutdownFlag
     global _OnlineStatusDict
-    idurl = strng.to_bin(idurl)
+    idurl = id_url.field(idurl)
     if idurl not in _OnlineStatusDict:
         if _ShutdownFlag:
             return None
@@ -508,6 +510,10 @@ class OnlineStatus(automat.Automat):
         """
         if _Debug:
             lg.out(_DebugLevel - 2, '%s : [%s]->[%s]' % (self.name, oldstate, newstate))
+        if newstate == 'CONNECTED' and newstate != oldstate:
+            lg.info('remote node connected : %s' % self.idurl)
+        if newstate == 'OFFLINE' and oldstate != 'AT_STARTUP' and newstate != oldstate:
+            lg.info('remote node disconnected : %s' % self.idurl)
 
     def state_not_changed(self, curstate, event, *args, **kwargs):
         """

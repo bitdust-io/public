@@ -31,7 +31,6 @@ module:: dht_service
 
 from __future__ import absolute_import
 from __future__ import print_function
-import six
 
 #------------------------------------------------------------------------------
 
@@ -61,23 +60,28 @@ if __name__ == '__main__':
 
 #------------------------------------------------------------------------------
 
-from dht.entangled.kademlia.datastore import SQLiteVersionedJsonDataStore  # @UnresolvedImport
-from dht.entangled.kademlia.node import rpcmethod  # @UnresolvedImport
-from dht.entangled.kademlia.protocol import KademliaProtocol, encoding, msgformat  # @UnresolvedImport
-from dht.entangled.kademlia import constants  # @UnresolvedImport
-from dht.entangled.node import EntangledNode  # @UnresolvedImport
-
-#------------------------------------------------------------------------------
-
 from logs import lg
 
 from system import bpio
 
 from main import settings
+from main import config
 
 from lib import strng
 from lib import utime
 from lib import jsn
+
+from userid import id_url
+
+from dht import known_nodes
+
+#------------------------------------------------------------------------------
+
+from dht.entangled.kademlia.datastore import SQLiteVersionedJsonDataStore  # @UnresolvedImport
+from dht.entangled.kademlia.node import rpcmethod  # @UnresolvedImport
+from dht.entangled.kademlia.protocol import KademliaProtocol, encoding, msgformat  # @UnresolvedImport
+from dht.entangled.kademlia import constants  # @UnresolvedImport
+from dht.entangled.node import EntangledNode  # @UnresolvedImport
 
 #------------------------------------------------------------------------------
 
@@ -104,6 +108,13 @@ def init(udp_port, db_file_path=None):
         if _Debug:
             lg.out(_DebugLevel, 'dht_service.init SKIP, DHTNode already exist')
         return
+    nw_info = known_nodes.network_info()
+    constants.k = nw_info['dht-constants']['bucket_size']
+    constants.alpha = nw_info['dht-constants']['parallel_calls']
+    constants.rpcTimeout = nw_info['dht-constants']['rpc_timeout']
+    constants.refreshTimeout = nw_info['dht-constants']['refresh_timeout']
+    constants.dataExpireTimeout = nw_info['dht-constants']['max_age']
+    constants.dataExpireSecondsDefaut = nw_info['dht-constants']['default_age']
     if db_file_path is None:
         db_file_path = settings.DHTDBFile()
     dbPath = bpio.portablePath(db_file_path)
@@ -115,9 +126,16 @@ def init(udp_port, db_file_path=None):
         os.remove(dbPath)
         dataStore = SQLiteVersionedJsonDataStore(dbFile=dbPath)
     networkProtocol = KademliaProtocolConveyor
-    _MyNode = DHTNode(udp_port, dataStore, networkProtocol=networkProtocol)
+    _MyNode = DHTNode(
+        udpPort=udp_port,
+        dataStore=dataStore,
+        networkProtocol=networkProtocol,
+        nodeID=config.conf().getString('services/entangled-dht/node-id', '').strip(),
+    )
+    config.conf().setString('services/entangled-dht/node-id', _MyNode.id)
     if _Debug:
-        lg.out(_DebugLevel, 'dht_service.init UDP port is %d, DB file path: %s' % (udp_port, dbPath))
+        lg.out(_DebugLevel, 'dht_service.init UDP port is %d, DB file path is %s, my DHT ID is %s' % (
+            udp_port, dbPath, _MyNode.id))
 
 
 def shutdown():
@@ -461,7 +479,7 @@ def validate_rules(value, key, rules, result_defer=None, raise_for_result=False,
 
     if not isinstance(value, dict):
         if _Debug:
-            lg.out(_DebugLevel, 'dht_service.validate_data_received    key=[%s] not found : %s' % (key, type(value)))
+            lg.out(_DebugLevel, 'dht_service.validate_rules    key=[%s] not found : %s' % (key, type(value)))
         if not result_defer:
             return value if populate_meta_fields else None
         if raise_for_result:
@@ -481,37 +499,44 @@ def validate_rules(value, key, rules, result_defer=None, raise_for_result=False,
             result_defer.errback(Exception('invalid validation rules can not be applied'))
         return None
 
-    if populate_meta_fields:
-        # Otherwise those records will not pass validation
-        if value.get('type') != expected_record_type:
-            value['type'] = expected_record_type
-        if value.get('key') != key:
-            value['key'] = key
-
     passed = True
     errors = []
-    for field, field_rules in rules.items():
-        for rule in field_rules:
-            if 'op' not in rule:
-                lg.warn('incorrect validation rule found: %r' % rule)
-                continue
-            if rule['op'] == 'equal' and rule.get('arg') != strng.to_text(value.get(field)):
-                passed = False
-                errors.append((field, rule, ))
+    try:
+        if populate_meta_fields:
+            # Otherwise those records will not pass validation
+            if value.get('type') != expected_record_type:
+                value['type'] = expected_record_type
+            if value.get('key') != key:
+                value['key'] = key
+    
+        for field, field_rules in rules.items():
+            if _Debug:
+                lg.out(_DebugLevel, '    %r : %r' % (field, field_rules, ))
+            for rule in field_rules:
+                if 'op' not in rule:
+                    lg.warn('incorrect validation rule found: %r' % rule)
+                    continue
+                if rule['op'] == 'equal' and rule.get('arg') != strng.to_text(value.get(field)):
+                    passed = False
+                    errors.append((field, rule, ))
+                    break
+                if rule['op'] == 'exist' and field not in value:
+                    passed = False
+                    errors.append((field, rule, ))
+                    break
+            if not passed:
                 break
-            if rule['op'] == 'exist' and field not in value:
-                passed = False
-                errors.append((field, rule, ))
-                break
-        if not passed:
-            break
+    except Exception as exc:
+        lg.exc()
+        passed = False
+        errors = [('unknown', exc, )]
     if not passed:
-        lg.err('DHT record validation failed, errors: %s' % errors)
+        lg.exc(exc_value=Exception('DHT record validation failed, errors: %s' % errors))
         if result_defer:
-            result_defer.errback(Exception('DHT record validation failed'))
+            result_defer.errback(Exception('DHT record validation failed: %r' % errors))
         return None
     if _Debug:
-        lg.out(_DebugLevel, 'dht_service.validate_data_received   key=[%s] : value is OK' % key)
+        lg.out(_DebugLevel, 'dht_service.validate_rules   key=[%s] : value is OK' % key)
     if result_defer:
         result_defer.callback(value)
     return value
@@ -590,8 +615,8 @@ def validate_before_store(key, value, originalPublisherID, age, expireSeconds, *
                     if _Debug:
                         lg.out(_DebugLevel, '        new json data have same revision but different ecc_map, store operation FAILED')
                     raise ValueError('new json data have same revision but different ecc_map, current revision is %d ' % prev_revision)
-                prev_suppliers = [strng.to_bin(idurl.strip()) for idurl in json_prev_value.get('suppliers', [])]
-                new_suppliers = [strng.to_bin(idurl.strip()) for idurl in json_new_value.get('suppliers', [])]
+                prev_suppliers = id_url.to_bin_list(json_prev_value.get('suppliers', []))
+                new_suppliers = id_url.to_bin_list(json_new_value.get('suppliers', []))
                 if prev_suppliers != new_suppliers:
                     if _Debug:
                         lg.out(_DebugLevel, '        new json data have same revision but different suppliers list, store operation FAILED')
@@ -659,7 +684,7 @@ def validate_before_send(value, key, rules, populate_meta_fields):
     Will be executed on sender side before every (key,value) set request towards DHT
     """
     if _Debug:
-        lg.out(_DebugLevel, 'dht_service.validate_data_before_send for key [%s]' % key)
+        lg.out(_DebugLevel, 'dht_service.validate_before_send for key [%s]' % key)
     if populate_meta_fields:
         if value.get('key') != key:
             value['key'] = key
@@ -673,10 +698,10 @@ def validate_after_receive(value, key, rules, result_defer, raise_for_result, po
     Will be executed on sender side for each (key,value) get response from DHT
     """
     if _Debug:
-        lg.out(_DebugLevel, 'dht_service.validate_data_after_receive for key [%s]' % key)
+        lg.out(_DebugLevel, 'dht_service.validate_after_receive for key [%s]' % key)
     response = validate_rules(value, key, rules, result_defer=result_defer,
-                            raise_for_result=raise_for_result,
-                            populate_meta_fields=populate_meta_fields)
+                              raise_for_result=raise_for_result,
+                              populate_meta_fields=populate_meta_fields)
     if not isinstance(response, dict):
         if populate_meta_fields:
             ret = {
@@ -903,8 +928,8 @@ def dump_local_db(value_as_json=False):
 
 class DHTNode(EntangledNode):
 
-    def __init__(self, udpPort=4000, dataStore=None, routingTable=None, networkProtocol=None):
-        super(DHTNode, self).__init__(udpPort=udpPort, dataStore=dataStore, routingTable=routingTable, networkProtocol=networkProtocol, id=None, )
+    def __init__(self, udpPort=4000, dataStore=None, routingTable=None, networkProtocol=None, nodeID=None):
+        super(DHTNode, self).__init__(udpPort=udpPort, dataStore=dataStore, routingTable=routingTable, networkProtocol=networkProtocol, id=nodeID, )
         self._counter = count
         self.data = {}
         self.expire_task = LoopingCall(self.expire)

@@ -72,12 +72,14 @@ from system import bpio
 from lib import nameurl
 from lib import net_misc
 from lib import strng
+from lib import packetid
 
 from contacts import contactsdb
 from contacts import identitycache
 
 from userid import known_servers
 from userid import my_id
+from userid import id_url
 
 from p2p import commands
 from p2p import p2p_stats
@@ -104,14 +106,16 @@ def init():
     """
     Need to call that at start up to link with transport_control.
     """
-    lg.out(4, "propagate.init ")
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.init ")
     # callback.add_finish_file_sending_callback(OnFileSent)
 
 
 def shutdown():
     """
     """
-    lg.out(4, "propagate.shutdown")
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.shutdown")
 
 #------------------------------------------------------------------------------
 
@@ -123,14 +127,17 @@ def propagate(selected_contacts, AckHandler=None, wide=False):
     First need to fetch ``selected_contacts`` IDs from id server. And
     then send our Identity file to that contacts.
     """
-    lg.out(6, "propagate.propagate to %d contacts" % len(selected_contacts))
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.propagate to %d contacts" % len(selected_contacts))
     d = Deferred()
 
     def contacts_fetched(x):
-        lg.out(6, "propagate.propagate.contacts_fetched")
+        if _Debug:
+            lg.out(_DebugLevel, "propagate.contacts_fetched: %r" % x)
         SendToIDs(selected_contacts, ack_handler=AckHandler, wide=wide)
         d.callback(list(selected_contacts))
-        return x
+        return None
+
     fetch(selected_contacts).addBoth(contacts_fetched)
     return d
 
@@ -139,14 +146,15 @@ def fetch(list_ids):
     """
     Request a list of identity files.
     """
-    lg.out(6, "propagate.fetch %d identities" % len(list_ids))
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.fetch %d identities" % len(list_ids))
     dl = []
     for url in list_ids:
         if not url:
             continue
         if identitycache.FromCache(url):
             continue
-        dl.append(identitycache.scheduleForCaching(url))
+        dl.append(identitycache.scheduleForCaching(id_url.to_bin(url)))
     return DeferredList(dl, consumeErrors=True)
 
 
@@ -154,7 +162,8 @@ def start(AckHandler=None, wide=False):
     """
     Call ``propagate()`` for all known contacts.
     """
-    lg.out(6, 'propagate.start')
+    if _Debug:
+        lg.out(_DebugLevel, 'propagate.start')
     return propagate(contactsdb.contacts_remote(), AckHandler, wide)
 
 
@@ -162,7 +171,8 @@ def suppliers(AckHandler=None, wide=False, customer_idurl=None):
     """
     Call ``propagate()`` for all suppliers.
     """
-    lg.out(6, 'propagate.suppliers')
+    if _Debug:
+        lg.out(_DebugLevel, 'propagate.suppliers')
     return propagate(contactsdb.suppliers(customer_idurl=customer_idurl), AckHandler, wide)
 
 
@@ -170,7 +180,8 @@ def customers(AckHandler=None, wide=False):
     """
     Call ``propagate()`` for all known customers.
     """
-    lg.out(6, 'propagate.customers')
+    if _Debug:
+        lg.out(_DebugLevel, 'propagate.customers')
     return propagate(contactsdb.customers(), AckHandler, wide)
 
 
@@ -179,7 +190,8 @@ def allcontacts(AckHandler=None, wide=False):
     Call ``propagate()`` for all contacts and correspondents, almost the same
     to ``start()``.
     """
-    lg.out(6, 'propagate.allcontacts')
+    if _Debug:
+        lg.out(_DebugLevel, 'propagate.allcontacts')
     return propagate(contactsdb.contacts_full(), AckHandler, wide)
 
 
@@ -198,7 +210,8 @@ def update():
     """
     A wrapper of ``SendServers()`` method.
     """
-    lg.out(6, "propagate.update")
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.update")
     return SendServers()
 
 
@@ -206,7 +219,8 @@ def write_to_dht():
     """
 
     """
-    lg.out(6, "propagate.write_to_dht")
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.write_to_dht")
     LocalIdentity = my_id.getLocalIdentity()
     return dht_records.set_identity(
         LocalIdentity.getIDURL(),
@@ -220,7 +234,8 @@ def FetchSingle(idurl):
     """
     Fetch single identity file from given ``idurl``.
     """
-    lg.out(6, "propagate.fetch_single " + idurl)
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.fetch_single " + idurl)
     return identitycache.scheduleForCaching(idurl)
 
 
@@ -281,7 +296,8 @@ def SendSuppliers(customer_idurl=None):
     """
     Send my identity file to all my suppliers, calls to ``SendToIDs()`` method.
     """
-    lg.out(6, "propagate.SendSuppliers")
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.SendSuppliers")
     SendToIDs(contactsdb.suppliers(customer_idurl=customer_idurl), ack_handler=HandleSuppliersAck, wide=True)
 
 
@@ -289,7 +305,8 @@ def SendCustomers():
     """
     Calls ``SendToIDs()`` to send identity to all my customers.
     """
-    lg.out(8, "propagate.SendCustomers")
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.SendCustomers")
     SendToIDs(contactsdb.customers(), ack_handler=HandleCustomersAck, wide=True)
 
 
@@ -301,9 +318,11 @@ def SlowSendSuppliers(delay=1, customer_idurl=None):
     """
     global _SlowSendIsWorking
     if _SlowSendIsWorking:
-        lg.out(8, "propagate.SlowSendSuppliers  is working at the moment. skip.")
+        if _Debug:
+            lg.out(_DebugLevel, "propagate.SlowSendSuppliers  is working at the moment. skip.")
         return
-    lg.out(8, "propagate.SlowSendSuppliers delay=%s" % str(delay))
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.SlowSendSuppliers delay=%s" % str(delay))
 
     def _send(index, payload, delay):
         global _SlowSendIsWorking
@@ -327,9 +346,11 @@ def SlowSendCustomers(delay=1):
 
     global _SlowSendIsWorking
     if _SlowSendIsWorking:
-        lg.out(8, "propagate.SlowSendCustomers  slow send is working at the moment. skip.")
+        if _Debug:
+            lg.out(_DebugLevel, "propagate.SlowSendCustomers  slow send is working at the moment. skip.")
         return
-    lg.out(8, "propagate.SlowSendCustomers delay=%s" % str(delay))
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.SlowSendCustomers delay=%s" % str(delay))
 
     def _send(index, payload, delay):
         global _SlowSendIsWorking
@@ -350,22 +371,26 @@ def HandleSuppliersAck(ackpacket, info):
     """
     Called when supplier is "Acked" to my after call to ``SendSuppliers()``.
     """
-    lg.out(8, "propagate.HandleSupplierAck %s" % ackpacket.OwnerID)
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.HandleSupplierAck %s" % ackpacket.OwnerID)
 
 
 def HandleCustomersAck(ackpacket, info):
     """
     Called when supplier is "Acked" to my after call to ``SendCustomers()``.
     """
-    lg.out(8, "propagate.HandleCustomerAck %s" % ackpacket.OwnerID)
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.HandleCustomerAck %s" % ackpacket.OwnerID)
 
 
 def HandleAck(ackpacket, info):
-    lg.out(8, "propagate.HandleAck %r %r" % (ackpacket, info))
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.HandleAck %r %r" % (ackpacket, info))
 
 
 def HandleTimeOut(pkt_out):
-    lg.out(8, "propagate.HandleTimeOut %r" % pkt_out)
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.HandleTimeOut %r" % pkt_out)
 
 
 def OnFileSent(pkt_out, item, status, size, error_message):
@@ -379,7 +404,8 @@ def SendToID(idurl, Payload=None, wide=False, ack_handler=None, timeout_handler=
     Create ``packet`` with my Identity file and calls
     ``transport.gateway.outbox()`` to send it.
     """
-    lg.out(8, "propagate.SendToID [%s] wide=%s" % (nameurl.GetName(idurl), str(wide)))
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.SendToID [%s] wide=%s" % (nameurl.GetName(idurl), str(wide)))
     if ack_handler is None:
         ack_handler = HandleAck
     if timeout_handler is None:
@@ -388,12 +414,13 @@ def SendToID(idurl, Payload=None, wide=False, ack_handler=None, timeout_handler=
     if thePayload is None:
         thePayload = strng.to_bin(my_id.getLocalIdentity().serialize())
     p = signed.Packet(
-        commands.Identity(),
-        my_id.getLocalID(),  # MyID,
-        my_id.getLocalID(),  # MyID,
-        commands.Identity(),  #  'Identity',  # my_id.getLocalID(), #PacketID,
-        thePayload,
-        idurl,
+        Command=commands.Identity(),
+        OwnerID=my_id.getLocalID(),  # MyID,
+        CreatorID=my_id.getLocalID(),  # MyID,
+        # commands.Identity(),  #  'Identity',  # my_id.getLocalID(), #PacketID,
+        PacketID=('identity:%s' % packetid.UniqueID()),
+        Payload=thePayload,
+        RemoteID=idurl,
     )
     # callback.register_interest(AckHandler, p.RemoteID, p.PacketID)
     result = gateway.outbox(p, wide, response_timeout=response_timeout, callbacks={
@@ -412,7 +439,8 @@ def SendToIDs(idlist, wide=False, ack_handler=None, timeout_handler=None, respon
     """
     Same, but send to many IDs and also check previous packets to not re-send.
     """
-    lg.out(8, "propagate.SendToIDs to %d users, wide=%s" % (len(idlist), wide))
+    if _Debug:
+        lg.out(_DebugLevel, "propagate.SendToIDs to %d users, wide=%s" % (len(idlist), wide))
     if ack_handler is None:
         ack_handler = HandleAck
     if timeout_handler is None:
@@ -441,7 +469,8 @@ def SendToIDs(idlist, wide=False, ack_handler=None, timeout_handler=None, respon
             continue
         if contact in inqueue and inqueue[contact] > 2:
             # now only 2 protocols is working: tcp and udp
-            lg.out(8, '        skip sending [Identity] to %s, packet already in the queue' % contact)
+            if _Debug:
+                lg.out(_DebugLevel, '        skip sending [Identity] to %s, packet already in the queue' % contact)
             continue
 #        found_previous_packets = 0
 #        for transfer_id in gate.transfers_out_by_idurl().get(contact, []):
@@ -453,14 +482,16 @@ def SendToIDs(idlist, wide=False, ack_handler=None, timeout_handler=None, respon
 #            lg.out(8, '        skip sending to %s' % contact)
 #            continue
         p = signed.Packet(
-            commands.Identity(),
-            my_id.getLocalID(),  # MyID,
-            my_id.getLocalID(),  # MyID,
-            commands.Identity(),  #'Identity',  # my_id.getLocalID(), #PacketID,
-            Payload,
-            contact,
+            Command=commands.Identity(),
+            OwnerID=my_id.getLocalID(),  # MyID,
+            CreatorID=my_id.getLocalID(),  # MyID,
+            # commands.Identity(),  #'Identity',  # my_id.getLocalID(), #PacketID,
+            PacketID=('identity:%s' % packetid.UniqueID()),
+            Payload=Payload,
+            RemoteID=contact,
         )
-        lg.out(8, "        sending [Identity] to %s" % nameurl.GetName(contact))
+        if _Debug:
+            lg.out(_DebugLevel, "        sending [Identity] to %s" % nameurl.GetName(contact))
         # callback.register_interest(AckHandler, signed.RemoteID, signed.PacketID)
         gateway.outbox(p, wide, response_timeout=response_timeout, callbacks={
             commands.Ack(): ack_handler,
@@ -482,6 +513,7 @@ def PingContact(idurl, timeout=30, retries=2):
     Can be called when you need to "ping" another user.
     This will send your Identity to that node, and it must respond.
     """
+    idurl = id_url.field(idurl)
     if _Debug:
         lg.out(_DebugLevel, "propagate.PingContact [%s]" % nameurl.GetName(idurl))
     ping_result = Deferred()

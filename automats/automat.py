@@ -368,7 +368,7 @@ class Automat(object):
         index = self.index
         if _StateChangedCallback is not None:
             _StateChangedCallback(index, automatid, name, '')
-        debug_level = max(_DebugLevel, self.debug_level)
+        debug_level = max(_DebugLevel or 0, self.debug_level or 0)
         erase_index(automatid)
         if _Debug and self.log_transitions:
             self.log(debug_level,
@@ -397,6 +397,12 @@ class Automat(object):
         new instance of Automat class.
         """
 
+    def shutdown(self):
+        """
+        Define this method in subclass to execute some code when closing an
+        existing instance of Automat class.
+        """
+
     def register(self):
         """
         Put reference to this automat instance into a global dictionary.
@@ -422,6 +428,7 @@ class Automat(object):
         Be sure to not have any existing references on that instance so
         destructor will be called immediately.
         """
+        self.shutdown()
         self.state = dead_state
         self._callbacks_before_die = self._state_callbacks.copy()
         self._state_callbacks.clear()

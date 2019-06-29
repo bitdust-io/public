@@ -24,19 +24,19 @@ specific constants, and do not affect general Kademlia operation.
 ######### KADEMLIA CONSTANTS ###########
 
 #: Small number Representing the degree of parallelism in network calls
-alpha = 3
+alpha = 2
 
 #: Maximum number of contacts stored in a bucket; this should be an even number
-k = 4
+k = 2
 
 #: Timeout for network operations (in seconds)
-rpcTimeout = 7
+rpcTimeout = 10
 
 # Delay between iterations of iterative node lookups (for loose parallelism)  (in seconds)
 iterativeLookupDelay = rpcTimeout / 2
 
 #: If a k-bucket has not been used for this amount of time, refresh it (in seconds)
-refreshTimeout = 3600  # 1 hour
+refreshTimeout = 600  # 10 min
 #: The interval at which nodes replicate (republish/refresh) data they are holding
 replicateInterval = refreshTimeout
 # The time it takes for data to expire in the network; the original publisher of the data

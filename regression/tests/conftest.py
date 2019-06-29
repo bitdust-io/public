@@ -28,12 +28,18 @@ import pprint
 
 
 from . import testsupport as ts
+from . import keywords
 
 #------------------------------------------------------------------------------
 
 # DHT_SEED_NODES = 'dht_seed_0:14441, dht_seed_1:14441, dht_seed_2:14441, dht_seed_3:14441, dht_seed_4:14441, stun_1:14441, stun_2:14441'
 DHT_SEED_NODES = 'dht_seed_0:14441'
 
+OTHER_KNOWN_ID_SERVERS = [
+    'is:8084:6661',
+    'is_a:8084:6661',
+    'is_b:8084:6661',
+]
 
 # TODO: keep this list up to date with docker-compose links
 ALL_NODES = [
@@ -50,13 +56,13 @@ ALL_NODES = [
     'supplier_4',
     'supplier_5',
     'supplier_6',
-    'supplier_7',
-    'supplier_8',
     'proxy_server_1',
     'proxy_server_2',
     'stun_1',
     'stun_2',
     'is',
+    'identity-server-a',
+    'identity-server-b',
     'dht_seed_0',
     'dht_seed_1',
     'dht_seed_2',
@@ -72,12 +78,11 @@ ALL_ROLES = {
         {'name': 'dht_seed_2', 'other_seeds': 'dht_seed_0:14441', },
         {'name': 'dht_seed_3', 'other_seeds': 'dht_seed_0:14441', },
         {'name': 'dht_seed_4', 'other_seeds': 'dht_seed_0:14441', },
-#         {'name': 'dht_seed_2', 'other_seeds': 'dht_seed_0:14441, dht_seed_1:14441', },
-#         {'name': 'dht_seed_3', 'other_seeds': 'dht_seed_0:14441, dht_seed_1:14441, dht_seed_2:14441', },
-#         {'name': 'dht_seed_4', 'other_seeds': 'dht_seed_0:14441, dht_seed_1:14441, dht_seed_2:14441, dht_seed_3:14441', },
     ],
     'identity-servers': [
         'is',
+        'identity-server-a',
+        'identity-server-b',
     ],
     'stun-servers': [
         'stun_1',
@@ -94,8 +99,6 @@ ALL_ROLES = {
         'supplier_4',
         'supplier_5',
         'supplier_6',
-        'supplier_7',
-        'supplier_8',
     ],
     'customers': [
         {'name': 'customer_1', 'join_network': True, 'num_suppliers': 2, 'block_size': '10 KB', },
@@ -127,7 +130,6 @@ def clean_all_nodes(event_loop, skip_checks=False):
     event_loop.run_until_complete(asyncio.gather(*[
         ts.clean_one_customer_async(node['name'], event_loop=event_loop) for node in ALL_ROLES['customers']
     ]))
-
     print('\n\nAll nodes cleaned in %5.3f seconds\n' % (time.time() - _begin))
 
 
@@ -140,7 +142,7 @@ def start_all_nodes(event_loop):
         ts.start_dht_seed(
             node=dhtseed['name'],
             other_seeds=dhtseed['other_seeds'],
-            wait_seconds=(5 if number > 0 else 0),
+            wait_seconds=(15 if number > 0 else 0),
             # wait_seconds=5,
         )
     print('\nALL DHT SEEDS STARTED\n')
@@ -190,14 +192,25 @@ def kill_all_nodes():
 
 
 def report_all_nodes(event_loop):
-    print('\n\nTest report:')
+    print('\n\nSTDOUT:')
+    for node in ['customer_restore', ]:
+        print('\n\nSTDOUT on [%s]:' % node)
+        ts.print_stdout_one_node(node)
+
+    # print('\n\nDHT records:')
+    # for node in ALL_NODES:
+    #     print('\n\nDHT records on [%s]:' % node)
+    #     keywords.dht_db_dump_v1(node)
 
     print('\n\nALL EXCEPTIONS:')
+    failed = False 
     for node in ALL_NODES:
-        ts.print_exceptions_one_node(node)
+        failed = failed or ts.print_exceptions_one_node(node)
 
     for node in ALL_NODES:
         ts.report_one_node(node)
+
+    assert not failed, 'found some critical errors'
 
 #------------------------------------------------------------------------------
 

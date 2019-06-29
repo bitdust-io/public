@@ -78,6 +78,7 @@ from system import bpio
 from system import tmpfile
 
 from userid import global_id
+from userid import id_url
 
 from contacts import contactsdb
 from contacts import identitycache
@@ -164,6 +165,10 @@ def history():
 
 
 def process(newpacket, info):
+    """
+    Main entry point where all incoming signed packets are coming from remote peers.
+    The main aspect here is to "authenticate" remote node - need to know it identity.
+    """
     from p2p import p2p_service
     from userid import my_id
     if not driver.is_on('service_p2p_hookups'):
@@ -182,8 +187,14 @@ def process(newpacket, info):
         lg.out(0, '        \033[0;49;92m IN %s(%s) with %d bytes from %s TID:%s\033[0m' % (
             newpacket.Command, newpacket.PacketID, info.bytes_received,
             global_id.UrlToGlobalID(info.sender_idurl), info.transfer_id), log_name='packet', showtime=True)
+    # we must know recipient identity
+    if not id_url.is_cached(newpacket.RemoteID):
+        d = identitycache.immediatelyCaching(newpacket.RemoteID)
+        d.addCallback(lambda _: process(newpacket, info))
+        d.addErrback(lambda err: lg.err('RemoteID is unknown, failed caching remote %s identity: %s' % (newpacket.RemoteID, str(err))))
+        return d
     if newpacket.Command == commands.Identity():
-        if newpacket.RemoteID != my_id.getLocalIDURL():
+        if newpacket.RemoteID != my_id.getLocalID():
             if _Debug:
                 lg.out(_DebugLevel, '    incoming Identity is routed to another user')
             if not p2p_service.Identity(newpacket, send_ack=False):
@@ -211,19 +222,34 @@ def process(newpacket, info):
 
 
 def handle(newpacket, info):
+    """
+    Actually process incoming packet. Here we can be sure that owner/creator of the packet is identified.
+    """
     from transport import packet_out
     handled = False
     # check that signed by a contact of ours
     if not newpacket.Valid():
+        if _Debug:
+            lg.args(_DebugLevel,
+                    PacketID=newpacket.PacketID,
+                    OwnerID=newpacket.OwnerID,
+                    CreatorID=newpacket.CreatorID,
+                    RemoteID=newpacket.RemoteID, )
         lg.warn('new packet from %s://%s is NOT VALID: %r' % (
             info.proto, info.host, newpacket))
         return None
-    for p in packet_out.search_by_response_packet(newpacket, info.proto, info.host):
-        p.automat('inbox-packet', (newpacket, info))
-        handled = True
-        if _Debug:
-            lg.out(_DebugLevel, '    processed by %s as response packet' % p)
-    handled = callback.run_inbox_callbacks(newpacket, info, info.status, info.error_message) or handled
+    try:
+        for p in packet_out.search_by_response_packet(newpacket, info.proto, info.host):
+            p.automat('inbox-packet', (newpacket, info))
+            handled = True
+            if _Debug:
+                lg.out(_DebugLevel, '    processed by %s as response packet' % p)
+    except:
+        lg.exc()
+    try:
+        handled = callback.run_inbox_callbacks(newpacket, info, info.status, info.error_message) or handled
+    except:
+        lg.exc()
     if not handled and newpacket.Command not in [commands.Ack(), commands.Fail(), commands.Identity(), ]:
         lg.warn('incoming %s from [%s://%s] was NOT HANDLED' % (newpacket, info.proto, info.host))
     if _Debug:
@@ -271,6 +297,7 @@ class PacketIn(automat.Automat):
             state='AT_STARTUP',
             debug_level=_DebugLevel,
             log_events=_Debug,
+            log_transitions=_Debug,
             publish_events=False,
         )
 
@@ -281,10 +308,10 @@ class PacketIn(automat.Automat):
         return '%s%s(%s)' % (self.id, self.label, self.state)
 
     def is_timed_out(self):
-        return False
 #         if self.time is None or self.timeout is None:
 #             return False
 #         return time.time() - self.time > self.timeout
+        return False
 
     def init(self):
         """
@@ -433,9 +460,9 @@ class PacketIn(automat.Automat):
                 lg.exc()
             self.automat('unserialize-failed', None)
             return
-        self.label = '[%s(%s)]' % (newpacket.Command, newpacket.PacketID[:10])
+        self.label = '[%s(%s)]' % (newpacket.Command, newpacket.PacketID[:25])
         if _Debug:
-            lg.out(_DebugLevel + 2, 'packet_in.doReadAndUnserialize: %s' % newpacket)
+            lg.out(_DebugLevel, 'packet_in.doReadAndUnserialize: %s' % newpacket)
         self.automat('valid-inbox-packet', newpacket)
         if False:
             events.send('inbox-packet-recevied', data=dict(

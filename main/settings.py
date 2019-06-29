@@ -31,7 +31,7 @@ I think this is a most used module in the project.
 Various parts of the code use this module to get the user settings and global constants.
 
 TODO:
-need to move out userconfig stuff from that file
+need to move out user config stuff from that file
 """
 
 #------------------------------------------------------------------------------
@@ -742,6 +742,14 @@ def TempDir():
     and be able limit that.
     """
     return os.path.join(BaseDir(), "temp")
+
+
+def IdentityHistoryDir():
+    """
+    See ``lib.id_url`` module, this is a place to store all known idurl's to match
+    "rotated" identies together.
+    """
+    return os.path.join(BaseDir(), "identityhistory")
 
 
 def IdentityCacheDir():
@@ -2420,6 +2428,7 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/entangled-dht/enabled', 'true')
     config.conf().setDefaultValue('services/entangled-dht/udp-port', DefaultDHTPort())
     config.conf().setDefaultValue('services/entangled-dht/known-nodes', '')
+    config.conf().setDefaultValue('services/entangled-dht/node-id', '')
 
     config.conf().setDefaultValue('services/employer/enabled', 'true')
 
@@ -2455,6 +2464,8 @@ def _setUpDefaultSettings():
     config.conf().setDefaultValue('services/message-history/enabled', 'true')
 
     config.conf().setDefaultValue('services/miner/enabled', 'false')
+
+    config.conf().setDefaultValue('services/my-data/enabled', 'true')
 
     config.conf().setDefaultValue('services/my-ip-port/enabled', 'true')
 

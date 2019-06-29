@@ -259,14 +259,23 @@ class Initializer(automat.Automat):
     def doInitInterfaces(self, *args, **kwargs):
         lg.out(2, 'initializer.doInitInterfaces')
         if settings.enableFTPServer():
-            from interface import ftp_server
-            ftp_server.init()
+            try:
+                from interface import ftp_server
+                ftp_server.init()
+            except:
+                lg.exc()
         if settings.enableJsonRPCServer():
-            from interface import api_jsonrpc_server
-            api_jsonrpc_server.init()
+            try:
+                from interface import api_jsonrpc_server
+                api_jsonrpc_server.init()
+            except:
+                lg.exc()
         if settings.enableRESTHTTPServer():
-            from interface import api_rest_http_server
-            api_rest_http_server.init(port=settings.getRESTHTTPServerPort())
+            try:
+                from interface import api_rest_http_server
+                api_rest_http_server.init(port=settings.getRESTHTTPServerPort())
+            except:
+                lg.exc()
         reactor.callLater(0, self.automat, 'init-interfaces-done')  # @UndefinedVariable
 
     def doInitModules(self, *args, **kwargs):
@@ -360,15 +369,25 @@ class Initializer(automat.Automat):
         from system import tmpfile
         from system import run_upnpc
         from raid import eccmap
+        from userid import id_url
         from userid import my_id
+        from contacts import identitydb
         from crypt import my_keys
+        id_url.init()
+        identitydb.init()
         my_id.init()
         if settings.enableWebStream():
-            from logs import weblog
-            weblog.init(settings.getWebStreamPort())
+            try:
+                from logs import weblog
+                weblog.init(settings.getWebStreamPort())
+            except:
+                lg.exc()
         if settings.enableWebTraffic():
-            from logs import webtraffic
-            webtraffic.init(port=settings.getWebTrafficPort())
+            try:
+                from logs import webtraffic
+                webtraffic.init(port=settings.getWebTrafficPort())
+            except:
+                lg.exc()
         misc.init()
         commands.init()
         tmpfile.init(settings.getTempDir())

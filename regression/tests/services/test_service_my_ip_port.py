@@ -27,9 +27,10 @@ import requests
 from ..testsupport import tunnel_url
 
 
-def test_network_stun_customer_1():
+def test_customer_1_network_stun():
     if os.environ.get('RUN_TESTS', '1') == '0':
         return pytest.skip()  # @UndefinedVariable
+
     response = requests.get(url=tunnel_url('customer_1', 'network/stun/v1'))
     assert response.status_code == 200
     print('\n\n%r' % response.json())

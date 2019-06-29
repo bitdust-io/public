@@ -40,7 +40,7 @@ from __future__ import absolute_import
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 18
+_DebugLevel = 12
 
 _EventLogFileEnabled = True
 

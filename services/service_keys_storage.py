@@ -53,9 +53,11 @@ class KeysStorageService(LocalService):
 
     def start(self):
         from twisted.internet.defer import Deferred
-        from storage import index_synchronizer
+        from logs import lg
         from main import events
+        from storage import index_synchronizer
         self.starting_deferred = Deferred()
+        self.starting_deferred.addErrback(lg.errback)
         events.add_subscriber(self._on_key_generated, 'key-generated')
         events.add_subscriber(self._on_key_registered, 'key-registered')
         events.add_subscriber(self._on_key_erased, 'key-erased')
@@ -65,7 +67,7 @@ class KeysStorageService(LocalService):
             # it can be that machine is offline... we must start here, but expect to be online soon and sync keys later 
             return True
         if index_synchronizer.A().state == 'IN_SYNC!':
-            # if we already online and backup index in sync - refresh keys asap
+            # if we already online and backup index in sync - refresh keys ASAP
             self._do_synchronize_keys()
         return self.starting_deferred
 
@@ -101,6 +103,7 @@ class KeysStorageService(LocalService):
 
     def _on_my_backup_index_synchronized(self, evt):
         import time
+        from logs import lg
         if self.starting_deferred:
             self._do_synchronize_keys()
             return
@@ -110,6 +113,15 @@ class KeysStorageService(LocalService):
         if time.time() - self.last_time_keys_synchronized > 5 * 60:
             self._do_synchronize_keys()
             return
+        from main import events
+        from access import key_ring
+        from storage import index_synchronizer
+        if key_ring.is_my_keys_in_sync() and index_synchronizer.is_synchronized():
+            lg.info('backup index and all keys synchronized')
+            events.send('my-storage-ready', data=dict())
+        else:
+            lg.info('my keys in sync, but backup index still in progress')
+            events.send('my-storage-not-ready-yet', data=dict())
 
     def _on_my_backup_index_out_of_sync(self, evt):
         from logs import lg
@@ -120,20 +132,27 @@ class KeysStorageService(LocalService):
             self.starting_deferred.errback(Exception('not possible to synchronize keys because backup index is out of sync'))
             self.starting_deferred = None
         events.send('my-keys-out-of-sync', data=dict())
-        lg.warn('not possible to synchronize keys because backup index is out of sync')
+        events.send('my-storage-not-ready-yet', data=dict())
+        lg.info('not possible to synchronize keys because backup index is out of sync')
 
     def _on_keys_synchronized(self, x):
         import time
         from logs import lg
         from main import events
         from access import key_ring
+        from storage import index_synchronizer
         key_ring.set_my_keys_in_sync_flag(True)
         self.last_time_keys_synchronized = time.time()
         if self.starting_deferred:
             self.starting_deferred.callback(True)
             self.starting_deferred = None
         events.send('my-keys-synchronized', data=dict())
-        lg.info('all keys synchronized')
+        if key_ring.is_my_keys_in_sync() and index_synchronizer.is_synchronized():
+            events.send('my-storage-ready', data=dict())
+            lg.info('all my keys and my backup index synchronized, my distributed storage is ready')
+        else:
+            events.send('my-storage-not-ready-yet', data=dict())
+            lg.info('my keys in sync, but backup index still in progress')
         return None
 
     def _on_keys_synchronize_failed(self, err):
@@ -145,5 +164,6 @@ class KeysStorageService(LocalService):
             self.starting_deferred.errback(err)
             self.starting_deferred = None
         events.send('my-keys-out-of-sync', data=dict())
+        events.send('my-storage-not-ready-yet', data=dict())
         lg.err(err)
         return None

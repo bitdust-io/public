@@ -53,7 +53,6 @@ EVENTS:
 #------------------------------------------------------------------------------
 
 from __future__ import absolute_import
-import six
 from six.moves import map
 from six.moves import range
 
@@ -89,6 +88,7 @@ from contacts import identitycache
 
 from userid import my_id
 from userid import global_id
+from userid import id_url
 
 from main import settings
 from main import events
@@ -122,14 +122,14 @@ def queue():
     return _OutboxQueue
 
 
-def create(outpacket, wide, callbacks, target=None, route=None, response_timeout=None, keep_alive=True):
+def create(outpacket, wide, callbacks, target=None, route=None, response_timeout=None, keep_alive=True, skip_ack=False):
     """
     """
     if _Debug:
         lg.out(_DebugLevel, 'packet_out.create [%s/%s/%s]:%s(%s) target=%r route=%r callbacks=%s' % (
             nameurl.GetName(outpacket.OwnerID), nameurl.GetName(outpacket.CreatorID), nameurl.GetName(outpacket.RemoteID),
             outpacket.Command, outpacket.PacketID, target, route, list(callbacks.keys())))
-    p = PacketOut(outpacket, wide, callbacks, target, route, response_timeout, keep_alive)
+    p = PacketOut(outpacket, wide, callbacks, target, route, response_timeout, keep_alive, skip_ack=skip_ack)
     queue().append(p)
     p.automat('run')
     return p
@@ -145,10 +145,12 @@ def search(proto, host, filename, remote_idurl=None):
             if i.proto == proto:
                 if not remote_idurl:
                     return p, i
-                if p.remote_idurl and remote_idurl != p.remote_idurl:
-                    if _Debug:
-                        lg.out(_DebugLevel, 'packet_out.search found a packet addressed for another idurl: %s != %s' % (
-                            p.remote_idurl, remote_idurl))
+                # TODO: to be checked later - need to make sure we identify users correctly
+                if p.remote_idurl and id_url.is_cached(p.remote_idurl) and id_url.is_cached(remote_idurl):
+                    if id_url.field(remote_idurl) != id_url.field(p.remote_idurl):
+                        if _Debug:
+                            lg.out(_DebugLevel, 'packet_out.search found a packet addressed to another user: %s != %s' % (
+                                p.remote_idurl, remote_idurl))
                 return p, i
     if _Debug:
         for p in queue():
@@ -180,7 +182,9 @@ def search_many(proto=None,
                 ):
     results = []
     for p in queue():
-        if remote_idurl and p.remote_idurl != remote_idurl:
+        # TODO: to be checked later - need to make sure we identify users correctly
+        # if remote_idurl and p.remote_idurl.to_bin() != remote_idurl.to_bin():
+        if remote_idurl and id_url.field(p.remote_idurl) != id_url.field(remote_idurl):
             continue
         if filename and p.filename != filename:
             continue
@@ -218,32 +222,33 @@ def search_by_response_packet(newpacket, proto=None, host=None):
         lg.out(_DebugLevel, 'packet_out.search_by_response_packet for incoming [%s/%s/%s]:%s(%s) from [%s://%s]' % (
             nameurl.GetName(incoming_owner_idurl), nameurl.GetName(incoming_creator_idurl), nameurl.GetName(incoming_remote_idurl),
             newpacket.Command, newpacket.PacketID, proto, host, ))
-        lg.out(_DebugLevel, '    [%s]' % (','.join([str(p.outpacket) for p in queue()])))
+        lg.out(_DebugLevel, '    [%s]' % (', '.join([str(p.outpacket) for p in queue()])))
     for p in queue():
         # TODO: investigate 
         if p.outpacket.PacketID.lower() != newpacket.PacketID.lower():
             # PacketID of incoming packet not matching with that outgoing packet
             continue
         if p.outpacket.PacketID != newpacket.PacketID:
-            lg.warn('packet ID in queue "almost" matching with incoming: %s ~ %s' % (
+            lg.err('packet ID in queue "almost" matching with incoming: %s ~ %s' % (
                 p.outpacket.PacketID, newpacket.PacketID, ))
         if not commands.IsCommandAck(p.outpacket.Command, newpacket.Command):
             # this command must not be in the reply
             continue
+        # TODO: to be checked later - need to make sure we identify users correctly
         expected_recipient = [p.outpacket.RemoteID, ]
-        if p.outpacket.RemoteID != p.remote_idurl:
+        if p.outpacket.RemoteID != id_url.field(p.remote_idurl):
             # outgoing packet was addressed to another node, so that means we need to expect response from another node also
-            expected_recipient.append(p.remote_idurl)
+            expected_recipient.append(id_url.field(p.remote_idurl))
         matched = False
-        if incoming_owner_idurl in expected_recipient and my_id.getLocalIDURL() == incoming_remote_idurl:
+        if incoming_owner_idurl in expected_recipient and my_id.getLocalID() == incoming_remote_idurl:
             if _Debug:
                 lg.out(_DebugLevel, '    matched with incoming owner: %s' % expected_recipient)
             matched = True
-        if incoming_creator_idurl in expected_recipient and my_id.getLocalIDURL() == incoming_remote_idurl:
+        if incoming_creator_idurl in expected_recipient and my_id.getLocalID() == incoming_remote_idurl:
             if _Debug:
                 lg.out(_DebugLevel, '    matched with incoming creator: %s' % expected_recipient)
             matched = True
-        if incoming_remote_idurl in expected_recipient and my_id.getLocalIDURL() == incoming_owner_idurl and commands.Data() == newpacket.Command:
+        if incoming_remote_idurl in expected_recipient and my_id.getLocalID() == incoming_owner_idurl and commands.Data() == newpacket.Command:
             if _Debug:
                 lg.out(_DebugLevel, '    matched my own incoming Data with incoming remote: %s' % expected_recipient)
             matched = True
@@ -257,7 +262,7 @@ def search_by_response_packet(newpacket, proto=None, host=None):
     if len(result) == 0:
         if _Debug:
             lg.out(_DebugLevel, '        NOT FOUND pending packets in outbox queue matching incoming %s' % newpacket)
-        if newpacket.Command == commands.Ack() and newpacket.PacketID not in [commands.Identity(), commands.Identity().lower()]:
+        if newpacket.Command == commands.Ack() and not newpacket.PacketID.lower().startswith('identity:'):
             lg.warn('received %s was not a "good reply" from %s://%s' % (newpacket, proto, host, ))
     return result
 
@@ -327,26 +332,35 @@ class PacketOut(automat.Automat):
         'MSG_5': 'pushing outgoing packet was cancelled',
     }
 
-    def __init__(self, outpacket, wide, callbacks={}, target=None, route=None, response_timeout=None, keep_alive=True):
+    def __init__(self, outpacket, wide, callbacks={}, target=None, route=None, response_timeout=None, keep_alive=True, skip_ack=False):
         self.outpacket = outpacket
         self.wide = wide
         self.callbacks = {}
         self.caching_deferred = None
         self.description = self.outpacket.Command + '[' + self.outpacket.PacketID + ']'
-        self.remote_idurl = target
+        self.remote_idurl = id_url.field(target) if target else None
         self.route = route
         self.response_timeout = response_timeout
         if self.route:
             self.description = self.route['description']
-            self.remote_idurl = self.route['remoteid']
+            self.remote_idurl = id_url.field(self.route['remoteid'])
         if not self.remote_idurl:
-            self.remote_idurl = self.outpacket.RemoteID  # correct_packet_destination(self.outpacket)
-        self.remote_name = nameurl.GetName(self.remote_idurl)
-        self.label = 'out_%d_%s' % (get_packets_counter(), self.remote_name)
+            self.remote_idurl = self.outpacket.RemoteID
+        self.remote_name = nameurl.GetName(self.outpacket.RemoteID)
+        if id_url.to_bin(self.remote_idurl) != self.outpacket.RemoteID.to_bin():
+            self.label = 'out_%d_%s_via_%s' % (get_packets_counter(), self.remote_name, nameurl.GetName(self.remote_idurl))
+        else:
+            self.label = 'out_%d_%s' % (get_packets_counter(), self.remote_name)
         self.keep_alive = keep_alive
-        automat.Automat.__init__(
-            self, self.label, 'AT_STARTUP',
-            debug_level=_DebugLevel, log_events=_Debug, publish_events=False, )
+        self.skip_ack = skip_ack
+        automat.Automat.__init__(self,
+            name=self.label,
+            state='AT_STARTUP',
+            debug_level=_DebugLevel,
+            log_events=_Debug,
+            log_transitions=_Debug,
+            publish_events=False,
+        )
         increment_packets_counter()
         for command, cb in callbacks.items():
             self.set_callback(command, cb)
@@ -357,7 +371,7 @@ class PacketOut(automat.Automat):
         """
         packet_label = '?'
         if self.outpacket:
-            packet_label = '%s:%s' % (self.outpacket.Command, self.outpacket.PacketID[:10], )
+            packet_label = '%s:%s' % (self.outpacket.Command, self.outpacket.PacketID[:25], )
         return '%s[%s](%s)' % (self.id, packet_label, self.state)
 
     def init(self):
@@ -550,6 +564,10 @@ class PacketOut(automat.Automat):
         """
         Condition method.
         """
+        if self.skip_ack:
+            return False
+        if commands.IsReplyExpected(self.outpacket.Command):
+            return True
         return commands.Ack() in list(self.callbacks.keys()) or commands.Fail() in list(self.callbacks.keys())
 
     def isMoreItems(self, *args, **kwargs):
@@ -563,7 +581,11 @@ class PacketOut(automat.Automat):
         Condition method.
         """
         newpacket, _ = args[0]
-        return newpacket.Command in list(self.callbacks.keys())
+        if newpacket.Command in list(self.callbacks.keys()):
+            return True
+        if not commands.IsCommandAck(self.outpacket.Command, newpacket.Command):
+            return False
+        return True
 
     def isDataExpected(self, *args, **kwargs):
         """
@@ -710,8 +732,12 @@ class PacketOut(automat.Automat):
         """
         Action method.
         """
+        if _Debug:
+            lg.out(_DebugLevel, 'packet_out.doReportResponse %d callbacks known' % len(self.callbacks))
         if self.response_packet.Command in self.callbacks:
             for cb in self.callbacks[self.response_packet.Command]:
+                if _Debug:
+                    lg.out(_DebugLevel, '        calling to %r with %r' % (cb, self.response_packet))
                 try:
                     cb(self.response_packet, self.response_info)
                 except:
@@ -743,7 +769,10 @@ class PacketOut(automat.Automat):
         """
         Action method.
         """
-        callback.run_queue_item_status_callbacks(self, 'finished', 'unanswered')
+        if (args and args[0]) or self.skip_ack:
+            callback.run_queue_item_status_callbacks(self, 'finished', '')
+        else:
+            callback.run_queue_item_status_callbacks(self, 'finished', 'unanswered')
         if _PacketLogFileEnabled:
             lg.out(0, '\033[0;49;95mOUT %s(%s) with %s bytes to %s TID:%r\033[0m' % (
                 self.outpacket.Command, self.outpacket.PacketID, self.filesize or '?', global_id.UrlToGlobalID(self.remote_idurl),
@@ -868,7 +897,7 @@ class PacketOut(automat.Automat):
                     if proto == 'tcp' and localIP:
                         host = localIP
                     gateway.send_file(
-                        strng.to_bin(self.remote_idurl),
+                        self.remote_idurl.to_bin(),
                         proto,
                         host,
                         self.filename,
@@ -914,7 +943,7 @@ class PacketOut(automat.Automat):
                     host = localIP + ':' + str(port)
                 proto = strng.to_text(proto)
                 host = strng.to_bin(host)
-                gateway.send_file(strng.to_bin(self.remote_idurl), proto, host, self.filename, self.description, self)
+                gateway.send_file(self.remote_idurl.to_bin(), proto, host, self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 if _PacketLogFileEnabled:
                     lg.out(0, '        \033[2;49;90mPUSH %d bytes to %s://%r\033[0m' % (
@@ -929,7 +958,7 @@ class PacketOut(automat.Automat):
                     host = host + ':' + str(port)
                 proto = strng.to_text(proto)
                 host = strng.to_bin(host)
-                gateway.send_file(strng.to_bin(self.remote_idurl), proto, host, self.filename, self.description)
+                gateway.send_file(self.remote_idurl.to_bin(), proto, host, self.filename, self.description)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 if _PacketLogFileEnabled:
                     lg.out(0, '        \033[2;49;90mPUSH %d bytes to %s://%r\033[0m' % (
@@ -942,7 +971,7 @@ class PacketOut(automat.Automat):
             if host.strip() and gateway.is_installed('udp') and gateway.can_send(proto):
                 proto = strng.to_text(proto)
                 host = strng.to_bin(host)
-                gateway.send_file(strng.to_bin(self.remote_idurl), proto, host, self.filename, self.description, self)
+                gateway.send_file(self.remote_idurl.to_bin(), proto, host, self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 if _PacketLogFileEnabled:
                     lg.out(0, '        \033[2;49;90mPUSH %d bytes to %s://%r\033[0m' % (
@@ -957,7 +986,7 @@ class PacketOut(automat.Automat):
                     host = host + ':' + str(port)
                 proto = strng.to_text(proto)
                 host = strng.to_bin(host)
-                gateway.send_file(strng.to_bin(self.remote_idurl), proto, host, self.filename, self.description, self)
+                gateway.send_file(self.remote_idurl.to_bin(), proto, host, self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 if _PacketLogFileEnabled:
                     lg.out(0, '        \033[2;49;90mPUSH %d bytes to %s://%r\033[0m' % (
@@ -970,7 +999,7 @@ class PacketOut(automat.Automat):
             if host.strip() and gateway.is_installed('proxy') and gateway.can_send(proto):
                 proto = strng.to_text(proto)
                 host = strng.to_bin(host)
-                gateway.send_file(strng.to_bin(self.remote_idurl), proto, host, self.filename, self.description, self)
+                gateway.send_file(self.remote_idurl.to_bin(), proto, host, self.filename, self.description, self)
                 self.items.append(WorkItem(proto, host, self.filesize))
                 if _PacketLogFileEnabled:
                     lg.out(0, '        \033[2;49;90mPUSH %d bytes to %s://%r\033[0m' % (
@@ -987,7 +1016,7 @@ class PacketOut(automat.Automat):
                 # try sending with tcp even if it is switched off in the settings
                 if gateway.is_installed(proto) and gateway.can_send(proto):
                     if settings.enableTransport(proto) and settings.transportSendingIsEnabled(proto):
-                        gateway.send_file(strng.to_bin(self.remote_idurl), strng.to_text(proto), strng.to_bin(host), self.filename, self.description, self)
+                        gateway.send_file(self.remote_idurl.to_bin(), strng.to_text(proto), strng.to_bin(host), self.filename, self.description, self)
                         self.items.append(WorkItem(strng.to_text(proto), strng.to_bin(host), self.filesize))
                         if _PacketLogFileEnabled:
                             lg.out(0, '        \033[2;49;90mPUSH %d bytes to %s://%r\033[0m' % (

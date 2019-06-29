@@ -119,7 +119,7 @@ def ParseIDURL(idurl):
     return ParseGlobalID(UrlToGlobalID(idurl, include_key=False))
 
 
-def ParseGlobalID(inp, detect_version=False):
+def ParseGlobalID(inp, detect_version=False, as_field=True):
     """
     Split input string by parts according to different global ID formats:
 
@@ -227,10 +227,13 @@ def ParseGlobalID(inp, detect_version=False):
         key_alias=result['key_alias'],
         user=result['customer'],
     )
+    if as_field:
+        from userid import id_url
+        result['idurl'] = id_url.field(result['idurl'])
     return result
 
 
-def NormalizeGlobalID(inp, detect_version=False):
+def NormalizeGlobalID(inp, detect_version=False, as_field=True):
     """
     Input `inp` is a string or glob_path_id dict.
     This will fill out missed/empty fields from existing data.
@@ -247,7 +250,7 @@ def NormalizeGlobalID(inp, detect_version=False):
     else:
         g = ParseGlobalID(inp, detect_version=detect_version)
     if not g['idurl']:
-        g['idurl'] = my_id.getLocalID()
+        g['idurl'] = my_id.getLocalID().to_bin()
     if not g['customer']:
         g['customer'] = UrlToGlobalID(g['idurl'])
     if not g['user']:
@@ -257,6 +260,9 @@ def NormalizeGlobalID(inp, detect_version=False):
     if not g['idhost']:
         from lib import nameurl
         g['idhost'] = nameurl.GetHost(g['idurl'])
+    if as_field:
+        from userid import id_url
+        g['idurl'] = id_url.field(g['idurl'])
     return g
 
 
@@ -290,9 +296,10 @@ def UrlToGlobalID(url, include_key=False):
     return '%s@%s' % (username, host)
 
 
-def GlobalUserToIDURL(inp):
+def GlobalUserToIDURL(inp, as_field=True):
     """
     """
+    inp = strng.to_text(inp)
     user, _, idhost = inp.strip().rpartition('@')
     if not user:
         return None
@@ -308,7 +315,10 @@ def GlobalUserToIDURL(inp):
             port = -1
         if port >= 0:
             idhost = "%s:%d" % (idhost[:_pos], port)
-    return strng.to_bin('http://{}/{}.xml'.format(idhost, user))
+    if not as_field:
+        return strng.to_bin('http://{}/{}.xml'.format(idhost, user))
+    from userid import id_url
+    return id_url.field('http://{}/{}.xml'.format(idhost, user))
 
 #------------------------------------------------------------------------------
 
@@ -317,6 +327,7 @@ def IsValidGlobalUser(inp):
     """
     if not inp:
         return False
+    inp = strng.to_text(inp)
     if inp.count('@') != 1:
         return False
     user, _, idhost = inp.strip().rpartition('@')
@@ -333,6 +344,7 @@ def IsFullGlobalID(inp):
     """
     if not inp:
         return False
+    inp = strng.to_text(inp)
     user, _, remote_path = inp.strip().rpartition(':')
     if not IsValidGlobalUser(user):
         return False

@@ -45,7 +45,7 @@ class SharedDataService(LocalService):
 
     def dependent_on(self):
         return [
-            'service_keys_storage',
+            'service_my_data',
         ]
 
     def start(self):
@@ -76,7 +76,7 @@ class SharedDataService(LocalService):
                 if not key_id.startswith('share_'):
                     continue
                 _glob_id = global_id.ParseGlobalID(key_id)
-                if _glob_id['idurl'] == my_id.getLocalIDURL():
+                if _glob_id['idurl'] == my_id.getLocalID():
                     # only send public keys of my own shares
                     my_keys_to_be_republished.append(key_id)
             for key_id in my_keys_to_be_republished:
@@ -132,7 +132,7 @@ class SharedDataService(LocalService):
             return False
         trusted_customer_idurl = list_files_global_id['idurl']
         incoming_key_id = list_files_global_id['key_id']
-        if trusted_customer_idurl == my_id.getGlobalID():
+        if trusted_customer_idurl == my_id.getLocalID():
             lg.warn('skip %s packet which seems to came from my own supplier' % newpacket)
             # only process list Files() from other users who granted me access
             return False
