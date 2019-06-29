@@ -22,6 +22,14 @@ Change Log
 
 
 
+2019-05-12 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
+* critical bug fix in CodernityDB3
+* chat history fixed to be stored after BitDust process stopped
+* a bunch of other Py3 fixes in CodernityDB3 (#338)
+
+
+
 2019-05-10 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
 * workaround fix in CodernityDB  (#336)
