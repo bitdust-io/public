@@ -4,6 +4,15 @@ Change Log
 
 2019-07-11 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
+* check if key file already exists in the catalog
+* py3 fix in contactsdb
+* idurl fix in get_contact_identity()
+* idurl bug fix in service_customer_family()
+
+
+
+2019-07-11 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
 * protect code from idurl caching errors when identiy history is broken
 * more idurl fixes in packet_out
 * idurl fixes in service_identity_propagate() and service_customer_family() (#359)
