@@ -2,6 +2,14 @@ Change Log
 ==========
 
 
+2019-07-12 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
+* idurl fixes in contactsdb and api  (#363)
+* able to read networks.json file from metadata folder if it exists
+* improved index_synchronizer() automat
+
+
+
 2019-07-11 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
 * check if key file already exists in the catalog
