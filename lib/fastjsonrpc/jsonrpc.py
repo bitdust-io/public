@@ -78,7 +78,14 @@ def jdumps(obj):
         except cjson.EncodeError as e:
             raise ValueError(str(e))
     else:
-        return json.dumps(obj, default=_to_text)
+        try:
+            return json.dumps(obj, default=_to_text)
+        except Exception as e:
+            try:
+                from lib import jsn
+                return jsn.dumps(obj, keys_to_text=True, values_to_text=True)
+            except:
+                raise ValueError(str(e))
 
 
 def jloads(json_string):
