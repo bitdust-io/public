@@ -31,7 +31,7 @@ from ..testsupport import tunnel_url, run_ssh_command_and_wait, create_identity,
 from ..keywords import service_info_v1, file_create_v1, file_upload_start_v1, file_download_start_v1, \
     supplier_list_v1, config_set_v1, transfer_list_v1, packet_list_v1, file_list_all_v1, supplier_list_dht_v1, \
     user_ping_v1, identity_get_v1, identity_rotate_v1, key_list_v1, share_create_v1, share_open_v1, \
-    supplier_switch_v1, file_sync_v1
+    supplier_switch_v1, file_sync_v1, friend_add_v1, friend_list_v1
 
 
 def test_identity_recover_from_customer_backup_to_customer_restore():
@@ -203,6 +203,7 @@ def test_identity_rotate_customer_6():
     r = identity_get_v1('customer_6')
     old_sources = r['result'][0]['sources']
     old_global_id = r['result'][0]['global_id']
+    old_idurl = r['result'][0]['idurl']
 
     # test other nodes able to talk to customer_6 before identity get rotated
     user_ping_v1('customer_1', old_global_id)
@@ -245,6 +246,12 @@ def test_identity_rotate_customer_6():
     assert f'messages${old_global_id}' in old_keys
     assert f'customer${old_global_id}' in old_keys
 
+    # make customer_6 and customer_1 friends to each other
+    friend_add_v1('customer_6', 'http://is:8084/customer_1.xml', 'friend1')
+    friend_add_v1('customer_1', old_idurl, 'friend6')
+    old_friends = friend_list_v1('customer_1', extract_idurls=True)
+    assert old_idurl in old_friends
+
     # rotate identity sources
     identity_rotate_v1('customer_6')
 
@@ -254,12 +261,14 @@ def test_identity_rotate_customer_6():
     r = identity_get_v1('customer_6')
     new_sources = r['result'][0]['sources'] 
     new_global_id = r['result'][0]['global_id']
+    new_idurl = r['result'][0]['idurl']
     assert new_sources != old_sources
     assert new_global_id != old_global_id
+    assert new_idurl != old_idurl
 
     service_info_v1('customer_6', 'service_customer', 'ON', attempts=30, delay=2)
 
-    supplier_list_v1('customer_6', expected_min_suppliers=2, expected_max_suppliers=2)
+    customer6_suppliers = supplier_list_v1('customer_6', expected_min_suppliers=2, expected_max_suppliers=2, extract_suppliers=True)
 
     service_info_v1('customer_6', 'service_my_data', 'ON', attempts=30, delay=2)
 
@@ -290,6 +299,26 @@ def test_identity_rotate_customer_6():
     new_downloaded_file_src = run_ssh_command_and_wait('customer_6', 'cat %s' % downloaded_filepath)[0].strip()
     assert local_file_src == downloaded_file_src, "source file and received file content is not equal after identity rotate"
     assert new_downloaded_file_src == downloaded_file_src, "received file content before identity rotate is not equal to received file after identity rotate"
+
+    first_supplier = customer6_suppliers[0].replace('http://is:8084/', '').replace('.xml', '')
+    old_folder_first_supplier = run_ssh_command_and_wait(first_supplier, f'ls -la ~/.bitdust/customers/{old_global_id}/')[0].strip()
+    new_folder_first_supplier = run_ssh_command_and_wait(first_supplier, f'ls -la ~/.bitdust/customers/{new_global_id}/')[0].strip()
+    assert old_folder_first_supplier == ''
+    assert new_folder_first_supplier != ''
+    print(f'first supplier {first_supplier} :\n', new_folder_first_supplier)
+
+    second_supplier = customer6_suppliers[1].replace('http://is:8084/', '').replace('.xml', '')
+    old_folder_second_supplier = run_ssh_command_and_wait(second_supplier, f'ls -la ~/.bitdust/customers/{old_global_id}/')[0].strip()
+    new_folder_second_supplier = run_ssh_command_and_wait(second_supplier, f'ls -la ~/.bitdust/customers/{new_global_id}/')[0].strip()
+    assert old_folder_second_supplier == ''
+    assert new_folder_second_supplier != ''
+    print(f'second supplier {second_supplier} :\n', new_folder_second_supplier)
+
+    # test that friend6 idurl changed for customer_1
+    new_friends = friend_list_v1('customer_1', extract_idurls=True)
+    assert new_idurl in new_friends
+    assert old_idurl not in new_friends
+
 
 
 def test_identity_rotate_supplier_6_with_customer_3():
