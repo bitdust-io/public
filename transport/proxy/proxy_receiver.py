@@ -65,6 +65,8 @@ from io import BytesIO
 _Debug = False
 _DebugLevel = 10
 
+_PacketLogFileEnabled = True
+
 #------------------------------------------------------------------------------
 
 import re
@@ -93,6 +95,8 @@ from p2p import lookup
 from p2p import online_status
 
 from contacts import identitycache
+
+from services import driver
 
 from transport import callback
 from transport import packet_in
@@ -613,6 +617,11 @@ class ProxyReceiver(automat.Automat):
         if _Debug:
             lg.out(_DebugLevel, '<<<Relay-IN %s from %s://%s with %d bytes' % (
                 str(routed_packet), info.proto, info.host, len(data)))
+        if _PacketLogFileEnabled:
+            lg.out(0, '  \033[0;49;36m RELAY_IN %s(%s) with %d bytes from %s to %s TID:%s\033[0m' % (
+                routed_packet.Command, routed_packet.PacketID, info.bytes_received,
+                global_id.UrlToGlobalID(info.sender_idurl), global_id.UrlToGlobalID(routed_packet.RemoteID),
+                info.transfer_id), log_name='packet', showtime=True)
         if routed_packet.Command == commands.Identity():
             if _Debug:
                 lg.out(_DebugLevel, '    found identity in relay packet %s' % routed_packet)
@@ -787,6 +796,12 @@ class ProxyReceiver(automat.Automat):
         if newpacket.CreatorID == self.router_idurl:
             self.latest_packet_received = time.time()
         if newpacket.Command == commands.Relay():
+            if driver.is_enabled('service_proxy_server'):
+                # TODO:
+                # in case this node already running proxy router service this will not work
+                # actually you can not use proxy transport for receiving and running proxy router at same time
+                # need to change one of the services to solve that dependency and prevent this
+                return False
             self.automat('inbox-packet', (newpacket, info, status, error_message))
             return True
         return False
