@@ -514,10 +514,11 @@ def key_get(key_id, include_private=False):
         lg.out(_DebugLevel, 'api.key_get')
     from crypt import my_keys
     try:
-        r = my_keys.get_key_info(key_id=key_id, include_private=include_private)
+        key_info = my_keys.get_key_info(key_id=key_id, include_private=include_private)
+        key_info.pop('include_private', None)
     except Exception as exc:
         return ERROR(str(exc))
-    return RESULT([r, ])
+    return RESULT([key_info, ])
 
 
 def keys_list(sort=False, include_private=False):
@@ -566,6 +567,7 @@ def keys_list(sort=False, include_private=False):
             key_info = my_keys.make_key_info(key_object, key_id=key_id, include_private=include_private)
         except:
             key_info = my_keys.make_key_info(key_object, key_id=key_id, include_private=False)
+        key_info.pop('include_private', None)
         r.append(key_info)
     if sort:
         r = sorted(r, key=lambda i: i['alias'])
@@ -612,11 +614,13 @@ def key_create(key_alias, key_size=None, include_private=False):
     key_object = my_keys.generate_key(key_id, key_size=key_size)
     if key_object is None:
         return ERROR('failed to generate private key "%s"' % key_id)
-    return OK(my_keys.make_key_info(
+    key_info = my_keys.make_key_info(
         key_object,
         key_id=key_id,
         include_private=include_private
-    ), message='new private key "%s" was generated successfully' % key_alias, )
+    )
+    key_info.pop('include_private', None)
+    return OK(key_info, message='new private key "%s" was generated successfully' % key_alias, )
 
 
 def key_erase(key_id):
@@ -1610,7 +1614,7 @@ def file_download_start(remote_path, destination_path=None, wait_result=False, o
                 },
             ))
         return True
-    
+
     def _start_restore():
         if _Debug:
             lg.out(_DebugLevel, 'api.file_download_start._start_restore %s to %s, wait_result=%s' % (
@@ -1633,7 +1637,7 @@ def file_download_start(remote_path, destination_path=None, wait_result=False, o
             },
         ))
         return True
-    
+
     def _on_share_connected(active_share, callback_id, result):
         if _Debug:
             lg.out(_DebugLevel, 'api.download_start._on_share_connected callback_id=%s result=%s' % (callback_id, result, ))
@@ -1840,11 +1844,13 @@ def share_create(owner_id=None, key_size=2048):
     key_object = my_keys.generate_key(key_id, key_size=key_size)
     if key_object is None:
         return ERROR('failed to generate private key "%s"' % key_id)
-    return OK(my_keys.make_key_info(
+    key_info = my_keys.make_key_info(
         key_object,
         key_id=key_id,
         include_private=False,
-    ), message='new share "%s" was generated successfully' % key_id, )
+    )
+    key_info.pop('include_private', None)
+    return OK(key_info, message='new share "%s" was generated successfully' % key_id, )
 
 
 def share_grant(trusted_remote_user, key_id, timeout=30):
