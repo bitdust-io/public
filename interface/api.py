@@ -574,7 +574,7 @@ def keys_list(sort=False, include_private=False):
     return RESULT(r)
 
 
-def key_create(key_alias, key_size=None, include_private=False):
+def key_create(key_alias, key_size=None, label='', include_private=False):
     """
     Generate new Private Key and add it to the list of known keys with given `key_id`.
 
@@ -596,10 +596,11 @@ def key_create(key_alias, key_size=None, include_private=False):
     """
     if not driver.is_on('service_keys_registry'):
         return ERROR('service_keys_registry() is not started')
+    from lib import utime
     from crypt import my_keys
     from main import settings
     from userid import my_id
-    key_alias = str(key_alias)
+    key_alias = strng.to_text(key_alias)
     key_alias = key_alias.strip().lower()
     key_id = my_keys.make_key_id(key_alias, creator_idurl=my_id.getLocalID())
     if not my_keys.is_valid_key_id(key_id):
@@ -610,7 +611,9 @@ def key_create(key_alias, key_size=None, include_private=False):
         key_size = settings.getPrivateKeySize()
     if _Debug:
         lg.out(_DebugLevel, 'api.key_create id=%s, size=%s' % (key_id, key_size))
-    key_object = my_keys.generate_key(key_id, key_size=key_size)
+    if not label:
+        label = 'share%s' % utime.make_timestamp()
+    key_object = my_keys.generate_key(key_id, label=label, key_size=key_size)
     if key_object is None:
         return ERROR('failed to generate private key "%s"' % key_id)
     key_info = my_keys.make_key_info(
@@ -620,6 +623,29 @@ def key_create(key_alias, key_size=None, include_private=False):
     )
     key_info.pop('include_private', None)
     return OK(key_info, message='new private key "%s" was generated successfully' % key_alias, )
+
+
+def key_label(key_id, label):
+    """
+    Set new label for given key.
+    """
+    if not driver.is_on('service_keys_registry'):
+        return ERROR('service_keys_registry() is not started')
+    from crypt import my_keys
+    from userid import my_id
+    key_label = strng.to_text(label)
+    if not my_keys.is_valid_key_id(key_id):
+        return ERROR('key "%s" is not valid' % key_id)
+    if not my_keys.is_key_registered(key_id):
+        return ERROR('key "%s" not exist' % key_id)
+    if key_id == 'master' or key_id == my_id.getGlobalID(key_alias='master') or key_id == my_id.getGlobalID():
+        return ERROR('master key label can not be changed')
+    if _Debug:
+        lg.out(_DebugLevel, 'api.key_label id=%s, label=%r' % (key_id, key_label))
+    my_keys.key_obj(key_id).label = label
+    if not my_keys.save_key(key_id):
+        return ERROR('key "%s" store failed' % key_id)
+    return OK(message='key "%s" label updated successfully' % key_id)
 
 
 def key_erase(key_id):
@@ -1822,11 +1848,12 @@ def share_list(only_active=False, include_mine=True, include_granted=True):
     return RESULT(results)
 
 
-def share_create(owner_id=None, key_size=2048):
+def share_create(owner_id=None, key_size=2048, label=''):
     """
     """
     if not driver.is_on('service_shared_data'):
         return ERROR('service_shared_data() is not started')
+    from lib import utime
     from crypt import key
     from crypt import my_keys
     from userid import my_id
@@ -1840,7 +1867,9 @@ def share_create(owner_id=None, key_size=2048):
         if my_keys.is_key_registered(key_id):
             continue
         break
-    key_object = my_keys.generate_key(key_id, key_size=key_size)
+    if not label:
+        label = 'share%s' % utime.make_timestamp()
+    key_object = my_keys.generate_key(key_id, label=label, key_size=key_size)
     if key_object is None:
         return ERROR('failed to generate private key "%s"' % key_id)
     key_info = my_keys.make_key_info(
