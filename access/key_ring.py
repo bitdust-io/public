@@ -62,7 +62,7 @@ from main import settings
 
 from contacts import identitycache
 
-from p2p import propagate
+from p2p import online_status
 from p2p import p2p_service
 from p2p import commands
 
@@ -201,15 +201,20 @@ def transfer_key(key_id, trusted_idurl, include_private=False, timeout=10, resul
     return result
 
 
-def share_key(key_id, trusted_idurl, include_private=False, timeout=10):
+def share_key(key_id, trusted_idurl, include_private=False, timeout=20):
     """
     Method to be used to send given key to one trusted user.
     Make sure remote user is identified and connected.
     Returns deferred, callback will be fired with response Ack() packet argument.
     """
     result = Deferred()
-    d = propagate.PingContact(trusted_idurl, timeout=timeout)
-    d.addCallback(lambda response_tuple: _do_request_service_keys_registry(
+    d = online_status.ping(
+        idurl=trusted_idurl,
+        ack_timeout=timeout,
+        channel='share_key',
+        keep_alive=False,
+    )
+    d.addCallback(lambda ok: _do_request_service_keys_registry(
         key_id, trusted_idurl, include_private, timeout, result,
     ))
     d.addErrback(result.errback)
