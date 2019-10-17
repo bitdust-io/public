@@ -254,7 +254,7 @@ def init():
         if _Debug:
             lg.out(_DebugLevel, '%s initialized' % name)
     build_order()
-    config.conf().addCallback('services/', on_service_enabled_disabled)
+    config.conf().addConfigNotifier('services/', on_service_enabled_disabled)
 
 
 def shutdown():
@@ -262,7 +262,7 @@ def shutdown():
     """
     if _Debug:
         lg.out(_DebugLevel, 'driver.shutdown')
-    config.conf().removeCallback('services/')
+    config.conf().removeConfigNotifier('services/')
     while len(services()):
         name, svc = services().popitem()
         if _Debug:
@@ -318,6 +318,9 @@ def start(services_list=[]):
     """
     global _StartingDeferred
     global _StopingDeferred
+    if _Debug:
+        lg.args(_DebugLevel, services_list=services_list,
+                starting=bool(_StartingDeferred), stoping=bool(_StopingDeferred))
     if _StartingDeferred:
         lg.warn('driver.start already called')
         return _StartingDeferred
@@ -354,6 +357,9 @@ def stop(services_list=[]):
     """
     global _StopingDeferred
     global _StartingDeferred
+    if _Debug:
+        lg.args(_DebugLevel, services_list=services_list,
+                starting=bool(_StartingDeferred), stoping=bool(_StopingDeferred))
     if _StopingDeferred:
         lg.warn('driver.stop already called')
         return _StopingDeferred
@@ -439,7 +445,8 @@ def restart(service_name, wait_timeout=None):
 
     def _on_wait_timeout(err):
         if _Debug:
-            lg.out(_DebugLevel, 'driver.restart._on_wait_timeout %s : %s' % (service_name, err))
+            lg.out(_DebugLevel, 'driver.restart._on_wait_timeout %s : %s' % (service_name, err.getErrorMessage()))
+        # restart_result.errback(failure.Failure(Exception('timeout')))
         return None
 
     dl = []
@@ -624,35 +631,45 @@ def on_service_callback(result, service_name):
     return result
 
 
+def do_finish_starting():
+    global _StartingDeferred
+    if _Debug:
+        lg.args(_DebugLevel, starting=bool(_StartingDeferred))
+    _StartingDeferred = None
+
+
+def do_finish_stoping():
+    global _StopingDeferred
+    if _Debug:
+        lg.args(_DebugLevel, stoping=bool(_StopingDeferred))
+    _StopingDeferred = None
+
+
 def on_started_all_services(results):
     if _Debug:
-        lg.out(_DebugLevel, 'driver.on_started_all_services')
-    global _StartingDeferred
-    _StartingDeferred = None
+        lg.out(_DebugLevel, 'driver.on_started_all_services results=%d' % len(results))
+    reactor.callLater(0, do_finish_starting)  # @UndefinedVariable
     return results
 
 
 def on_services_failed_to_start(err, services_list):
     if _Debug:
         lg.args(_DebugLevel, err=err, services_list=services_list)
-    global _StartingDeferred
-    _StartingDeferred = None
+    reactor.callLater(0, do_finish_starting)  # @UndefinedVariable
     return None
 
 
 def on_stopped_all_services(results):
     if _Debug:
-        lg.out(_DebugLevel, 'driver.on_stopped_all_services')
-    global _StopingDeferred
-    _StopingDeferred = None
+        lg.out(_DebugLevel, 'driver.on_stopped_all_services results=%d' % len(results))
+    reactor.callLater(0, do_finish_stoping)  # @UndefinedVariable
     return results
 
 
 def on_services_failed_to_stop(err, services_list):
     if _Debug:
         lg.args(_DebugLevel, err=err, services_list=services_list)
-    global _StopingDeferred
-    _StopingDeferred = None
+    reactor.callLater(0, do_finish_stoping)  # @UndefinedVariable
     return None
 
 

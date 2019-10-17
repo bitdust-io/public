@@ -34,7 +34,6 @@ from .testsupport import open_one_tunnel_async, clean_one_node_async, clean_one_
 
 #------------------------------------------------------------------------------
 
-# DHT_SEED_NODES = 'dht_seed_0:14441, dht_seed_1:14441, dht_seed_2:14441, dht_seed_3:14441, dht_seed_4:14441, stun_1:14441, stun_2:14441'
 DHT_SEED_NODES = 'dht_seed_0:14441'
 
 OTHER_KNOWN_ID_SERVERS = [
@@ -49,10 +48,10 @@ ALL_NODES = [
     'customer_2',
     'customer_3',
     'customer_4',
-    'customer_5',
     'customer_6',
     'customer_backup',
     'customer_restore',
+    'customer_7',
     'supplier_1',
     'supplier_2',
     'supplier_3',
@@ -66,11 +65,10 @@ ALL_NODES = [
     'is',
     'identity-server-a',
     'identity-server-b',
+    'identity-server-dead',
     'dht_seed_0',
     'dht_seed_1',
     'dht_seed_2',
-    'dht_seed_3',
-    'dht_seed_4',
 ]
 
 # TODO: keep this list up to date with docker-compose links
@@ -79,13 +77,12 @@ ALL_ROLES = {
         {'name': 'dht_seed_0', 'other_seeds': 'genesis', },
         {'name': 'dht_seed_1', 'other_seeds': 'dht_seed_0:14441', },
         {'name': 'dht_seed_2', 'other_seeds': 'dht_seed_0:14441', },
-        {'name': 'dht_seed_3', 'other_seeds': 'dht_seed_0:14441', },
-        {'name': 'dht_seed_4', 'other_seeds': 'dht_seed_0:14441', },
     ],
     'identity-servers': [
         'is',
         'identity-server-a',
         'identity-server-b',
+        'identity-server-dead',
     ],
     'stun-servers': [
         'stun_1',
@@ -116,16 +113,19 @@ ALL_ROLES = {
         {'name': 'customer_4', 'join_network': True, 'num_suppliers': 2,
          'supplier_candidates': 'http://is:8084/supplier_3.xml,http://is:8084/supplier_4.xml',
          'preferred_routers': 'http://is:8084/proxy_server_2.xml', },
-        {'name': 'customer_5', 'join_network': True, 'num_suppliers': 4,
-         'supplier_candidates': 'http://is:8084/supplier_2.xml,http://is:8084/supplier_3.xml,http://is:8084/supplier_4.xml,http://is:8084/supplier_5.xml',
-         'preferred_routers': 'http://is:8084/proxy_server_1.xml', },
         {'name': 'customer_6', 'join_network': True, 'num_suppliers': 2,
          'known_servers': OTHER_KNOWN_ID_SERVERS, 'max_servers': 2, 'min_servers': 2,
-         'preferred_routers': 'http://is:8084/proxy_server_2.xml', },
+         'preferred_routers': 'http://is:8084/proxy_server_2.xml',
+         'supplier_candidates': 'http://is:8084/supplier_1.xml,http://is:8084/supplier_2.xml', },
         {'name': 'customer_backup', 'join_network': True, 'num_suppliers': 2,
          'preferred_routers': 'http://is:8084/proxy_server_1.xml', },
         {'name': 'customer_restore', 'join_network': False, 'num_suppliers': 2,
-         'preferred_routers': 'http://is:8084/proxy_server_1.xml', },
+         'preferred_routers': 'http://is:8084/proxy_server_2.xml', },
+        {'name': 'customer_7', 'join_network': True, 'num_suppliers': 2,
+         'known_servers': ['identity-server-dead:8084:6661',],
+         'max_servers': 2, 'min_servers': 1, 'health_check_interval_seconds': 5,
+         # 'preferred_routers': 'http://is:8084/proxy_server_2.xml',
+         'supplier_candidates': 'http://is:8084/supplier_3.xml,http://is:8084/supplier_4.xml', },
     ],
 }
 
@@ -186,7 +186,7 @@ def start_all_nodes(event_loop):
     print(f'\nALL SUPPLIERS STARTED\n')
 
     event_loop.run_until_complete(asyncio.gather(*[
-        start_one_customer_async(customer, event_loop) for customer in ALL_ROLES['customers']
+        start_one_customer_async(customer, event_loop, i * 10) for i, customer in enumerate(ALL_ROLES['customers'])
     ]))
     print(f'\nALL CUSTOMERS STARTED\n')
 
