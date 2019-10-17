@@ -1,9 +1,9 @@
 #
-# Dockerfile.py
+# Dockerfile
 #
 # Copyright (C) 2008-2018 Stanislav Evseev, Veselin Penev  https://bitdust.io
 #
-# This file (Dockerfile.py) is part of BitDust Software.
+# This file (Dockerfile) is part of BitDust Software.
 #
 # BitDust is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -24,6 +24,7 @@ ARG  PYTHON_VERSION=2.7.15
 
 FROM python:${PYTHON_VERSION}
 
+ENV BITDUST_LOG_USE_COLORS=0
 
 
 RUN apt-get update && apt-get install -y \
