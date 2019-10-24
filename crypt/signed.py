@@ -199,10 +199,11 @@ class Packet(object):
         Call ``crypt.key.Sign`` to generate digital signature.
         """
         _hash_base = self.GenerateHash()
-        if not self.KeyID or self.KeyID == my_id.getGlobalID(key_alias='master'):
-            signature = key.Sign(_hash_base)
-        else:
-            signature = my_keys.sign(self.KeyID, _hash_base)
+        signature = key.Sign(_hash_base)
+        # if not self.KeyID or self.KeyID == my_id.getGlobalID(key_alias='master'):
+        #     signature = key.Sign(_hash_base)
+        # else:
+        #     signature = my_keys.sign(self.KeyID, _hash_base)
         if _Debug:
             if _LogSignVerify:
                 try:
@@ -216,7 +217,7 @@ class Packet(object):
                     lg.exc()
         return signature
 
-    def SignatureChecksOut(self):
+    def SignatureChecksOut(self, raise_signature_invalid=False):
         """
         This check correctness of signature, uses ``crypt.key.Verify``. To
         verify we need 3 things:
@@ -227,11 +228,15 @@ class Packet(object):
         """
         CreatorIdentity = contactsdb.get_contact_identity(self.CreatorID)
         if CreatorIdentity is None:
-            OwnerIdentity = contactsdb.get_contact_identity(self.OwnerID)
-            if OwnerIdentity is None:
-                lg.err("could not get Identity for %s so returning False" % self.CreatorID.to_text())
-                return False
-            CreatorIdentity = OwnerIdentity
+            # OwnerIdentity = contactsdb.get_contact_identity(self.OwnerID)
+            # if OwnerIdentity is None:
+            #     lg.err("could not get Identity for %s so returning False" % self.CreatorID.to_text())
+            #     return False
+            # CreatorIdentity = OwnerIdentity
+            if raise_signature_invalid:
+                raise Exception('can not verify signed packet, unknown identity %r' % self.CreatorID)
+            lg.err("could not get Identity for %r so returning False" % self.CreatorID)
+            return False
 
         if _Debug:
             if _LogSignVerify:
@@ -280,9 +285,16 @@ class Packet(object):
         if not commands.IsCommand(self.Command):
             lg.warn("signed.Valid bad Command " + str(self.Command))
             return False
-        if not self.SignatureChecksOut():
+        if not self.SignatureChecksOut(raise_signature_invalid=raise_signature_invalid):
             if raise_signature_invalid:
-                raise Exception('signature is not valid for %r:\n\n%r' % (self, self.Serialize()))
+                creator_xml = contactsdb.get_contact_identity(self.CreatorID)
+                if creator_xml:
+                    creator_xml = creator_xml.serialize(as_text=True)
+                owner_xml = contactsdb.get_contact_identity(self.OwnerID)
+                if owner_xml:
+                    owner_xml = owner_xml.serialize(as_text=True)
+                raise Exception('signature is not valid for %r:\n\n%r\n\ncreator:\n\n%r\n\nowner:\n\n%r' % (
+                    self, self.Serialize(), creator_xml, owner_xml))
             lg.warn("signed.Valid Signature IS NOT VALID!!!")
             return False
         return True
@@ -444,5 +456,14 @@ if __name__ == '__main__':
     from main import settings
     settings.init()
     key.InitMyKey()
+    from userid import identity
+    from contacts import identitycache
+    if len(sys.argv) > 2:
+        creator_ident = identity.identity(xmlsrc=bpio.ReadTextFile(sys.argv[2]))
+        identitycache.UpdateAfterChecking(idurl=creator_ident.getIDURL(), xml_src=creator_ident.serialize())
+    if len(sys.argv) > 3:
+        owner_ident = identity.identity(xmlsrc=bpio.ReadTextFile(sys.argv[3]))
+        identitycache.UpdateAfterChecking(idurl=owner_ident.getIDURL(), xml_src=owner_ident.serialize())
     p = Unserialize(bpio.ReadBinaryFile(sys.argv[1]))
+    print(p.Valid())
     print(p)

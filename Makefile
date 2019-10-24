@@ -23,9 +23,10 @@
 
 # This Makefile requires the following commands to be available:
 # * virtualenv
-# * python2.7
+# * python2.7 or python3
 # * docker
 # * docker-compose
+
 
 DEPS:=requirements.txt
 DOCKER_COMPOSE=$(shell which docker-compose)
@@ -39,6 +40,7 @@ CMD_FROM_VENV:=". ${VENV}/bin/activate; which"
 TOX=$(shell "$(CMD_FROM_VENV)" "tox")
 PYTHON=$(shell "$(CMD_FROM_VENV)" "python")
 PYTHON_NEW="${VENV}/bin/python"
+COVERAGE_NEW="${VENV}/bin/coverage"
 TOX_PY_LIST="$(shell $(TOX) -l | grep ^py | xargs | sed -e 's/ /,/g')"
 
 REQUIREMENTS_TEST:=requirements/requirements-testing.txt
@@ -53,8 +55,8 @@ VENV_TEST=${VENV}/.venv_test
 .PHONY: install
 
 install:
-	@echo "Building BitDust environment and installing requirements"
-	@if [ "$(VENV_PYTHON_VERSION)" = "python2.7" ]; then python bitdust.py install; else python3 bitdust.py install; fi
+	@echo "Building BitDust environment and installing requirements";
+	@if [ "$(VENV_PYTHON_VERSION)" = "python2.7" ]; then python bitdust.py install; else python3 bitdust.py install; fi;
 
 venv_install: install
 
@@ -91,75 +93,43 @@ venv_off:
 	@$(PIP) install -U "pip>=7.0" -q
 	@$(PIP) install -r $(DEPS)
 
+
+
 test_tox: clean tox
 
 test_tox/%: venv_install pyclean
 	$(TOX) -e $(TOX_PY_LIST) -- $*
 
 test_unit: $(VENV_TEST)
-	$(PYTHON_NEW) -m unittest discover -s tests/ -v
+	PYTHONPATH=. $(COVERAGE_NEW) run --omit=*/site-packages/*,*CodernityDB*,*transport/http/* -m unittest discover -s tests/ -v
 
 test_raid: $(VENV_TEST)
 	$(PYTHON_NEW) -m unittest tests.test_raid_worker
 
-test_regression:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ test
 
-regression_test:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ test
 
-regression_build:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ build
+regress_stop:
+	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regress/ stop_all
 
-regression_run:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ run
+regress_test:
+	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regress/ test
 
-regression_prepare:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ prepare
+regress_test_log:
+	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regress/ test_log
 
-regression_try:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ try
+regress_prepare:
+	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regress/ prepare
 
-regression_test_one/%:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ test_one/$*
+regress_run:
+	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regress/ run_all
 
-regression_try_one/%:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ try_one/$*
+regress_run_log:
+	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regress/ run_all_log
 
-regression_clean:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ clean
+regress_report:
+	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regress/ report
 
-regression_clean_orphans:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ clean_orphans
 
-regression_clean_unused:
-	PYTHON_VERSION=$(REGRESSION_PY_VER) make -C regression/ clean_unused_images
-
-regression_log_one/%:
-	@echo "### [identity-server] #########################################################################"
-	docker-compose -f regression/docker-compose.yml exec $* cat /root/.bitdust/logs/stdout.log
-
-regression_states_one/%:
-	@echo "### [identity-server] #########################################################################"
-	docker-compose -f regression/docker-compose.yml exec $* cat /root/.bitdust/logs/automats.log
-
-regression_logs_all:
-	make -C regression/ logs_all_stdout
-
-regression_errors_all:
-	make -C regression/ logs_all_stderr
-
-regression_states_all:
-	make -C regression/ logs_all_states
-
-regression_events_all:
-	make -C regression/ logs_all_events
-
-regression_exceptions_all:
-	@make -C regression/ logs_all_exceptions
-
-regression_logs_fetch:
-	make -C regression/ logs_fetch
 
 dht_network_up:
 	docker-compose -f tests/dht/docker-compose.yml up --force-recreate --build
@@ -181,6 +151,7 @@ dht_network_ssh_producer:
 
 dht_network_ssh_consumer:
 	docker-compose -f tests/dht/docker-compose.yml exec dht_consumer bash
+
 
 
 lint: venv_install
