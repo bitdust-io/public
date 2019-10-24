@@ -9,17 +9,17 @@ language: python
 matrix:
   include:
 
-  - name: "2.7"
-    python: "2.7"
-    env:
-      - REGRESSION_PY_VER=2.7.15
-      - VENV_PYTHON_VERSION=python2.7
+    - name: "2.7"
+      python: "2.7"
+      env:
+        - REGRESSION_PY_VER=2.7.15
+        - VENV_PYTHON_VERSION=python2.7
 
-  - name: "3.6"
-    python: "3.6"
-    env:
-      - REGRESSION_PY_VER=3.6
-      - VENV_PYTHON_VERSION=python3.6
+    - name: "3.6"
+      python: "3.6"
+      env:
+        - REGRESSION_PY_VER=3.6
+        - VENV_PYTHON_VERSION=python3.6
 
 before_install:
   - set -e
@@ -34,4 +34,6 @@ before_install:
 
 script:
   - make test_unit
-  - make regression_test
+  - make regress_prepare
+  - make regress_run
+  - make regress_report
