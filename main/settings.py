@@ -38,13 +38,16 @@ need to move out user config stuff from that file
 
 from __future__ import absolute_import
 from __future__ import print_function
+
+#------------------------------------------------------------------------------
+
 import os
+import sys
 import random
 
 #------------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    import sys
     import os.path as _p
     sys.path.append(_p.join(_p.dirname(_p.abspath(sys.argv[0])), '..'))
 
@@ -707,6 +710,8 @@ def DefaultRestoreDir():
     """
     Default location to place restored files and folders.
     """
+    if sys.executable == 'android_python':
+        return '/storage/emulated/0'
     return os.path.expanduser('~')
 
 
@@ -816,13 +821,6 @@ def DefaultReceiptsDir():
     return os.path.join(BaseDir(), 'receipts')
 
 
-def Q2QDir():
-    """
-    I was playing with vertex protocol, this is a place for q2q config files.
-    """
-    return os.path.join(BaseDir(), 'q2qcerts')
-
-
 def LogsDir():
     """
     Place for log files.
@@ -883,6 +881,12 @@ def KeyStoreDir():
 
 
 def BlockchainDir():
+    """
+    """
+    return os.path.join(BaseDir(), 'blockchain')
+
+
+def APICertificatesDir():
     """
     """
     return os.path.join(BaseDir(), 'blockchain')
@@ -1230,6 +1234,30 @@ def FTPServerCredentialsFile():
     """
     """
     return os.path.join(MetaDataDir(), 'ftpcredentials')
+
+
+def APIServerCertificateKeyFile():
+    """
+    """
+    return os.path.join(MetaDataDir(), 'apiservercertkey')
+
+
+def APIServerCertificateFile():
+    """
+    """
+    return os.path.join(MetaDataDir(), 'apiservercert')
+
+
+def APIClientCertificateKeyFile():
+    """
+    """
+    return os.path.join(MetaDataDir(), 'apiclientcertkey')
+
+
+def APIClientCertificateFile():
+    """
+    """
+    return os.path.join(MetaDataDir(), 'apiclientcert')
 
 #------------------------------------------------------------------------------
 #--- BINARY FILES -------------------------------------------------------------
@@ -2340,13 +2368,15 @@ def RenameBaseDir(newdir):
         lg.out(_DebugLevel, 'settings.RenameBaseDir  BaseDir path was saved to ' + pathfilename)
     logfilename = lg.log_filename()
     lg.close_log_file()
+    lg.close_intercepted_log_file()
     try:
         bpio.rmdir_recursive(olddir, True)
         if _Debug:
             lg.out(_DebugLevel, 'settings.RenameBaseDir  old directory was removed: ' + olddir)
     except:
         lg.exc()
-    lg.open_log_file(logfilename, True)
+    if logfilename:
+        lg.open_log_file(logfilename, True)
     return True
 
 #------------------------------------------------------------------------------
