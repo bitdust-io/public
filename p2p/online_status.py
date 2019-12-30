@@ -779,7 +779,7 @@ class OnlineStatus(automat.Automat):
         """
         Action method.
         """
-        err = args[0] if (args and args[0]) else Failure(Exception('user is offline'))
+        err = args[0] if (args and args[0]) else Exception('user is offline')
         try:
             err_msg = err.getErrorMessage()
         except:
