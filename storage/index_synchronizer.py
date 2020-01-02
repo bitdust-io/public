@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # index_synchronizer.py
 #
-# Copyright (C) 2008-2019 Veselin Penev, https://bitdust.io
+# Copyright (C) 2008 Veselin Penev, https://bitdust.io
 #
 # This file (index_synchronizer.py) is part of BitDust Software.
 #
@@ -495,10 +495,11 @@ class IndexSynchronizer(automat.Automat):
             if online_status.isOffline(supplierId):
                 continue
             pkt_out = p2p_service.SendRetreive(
-                localID,
-                localID,
-                packetID,
-                supplierId,
+                ownerID=localID,
+                creatorID=localID,
+                packetID=packetID,
+                remoteID=supplierId,
+                response_timeout=60*2,
                 callbacks={
                     commands.Data(): self._on_supplier_response,
                     commands.Fail(): self._on_supplier_fail,
