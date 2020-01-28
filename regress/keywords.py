@@ -70,8 +70,8 @@ def supplier_list_dht_v1(customer_id, observers_ids, expected_ecc_map, expected_
         response = None
         num_suppliers = 0
         count = 0
-        mistakes = 0
         while True:
+            mistakes = 0
             if count >= retries:
                 print('\nDHT info still wrong after %d retries, currently see %d suppliers, but expected %d' % (
                     count, num_suppliers, expected_suppliers_number))
