@@ -29,39 +29,24 @@ services:
   id-a:
     image: bitdust/app
     ports:
-      - "10101:22"
-
-  id-b:
-    image: bitdust/app
-    ports:
-      - "10102:22"
-
-  id-c:
-    image: bitdust/app
-    ports:
-      - "10103:22"
-
-  id-dead:
-    image: bitdust/app
-    ports:
-      - "10104:22"
+      - "11001:22"
 
   dht-1:
     image: bitdust/app
     ports:
-      - "10111:22"
+      - "11011:22"
 
   dht-2:
     image: bitdust/app
     ports:
-      - "10112:22"
+      - "11012:22"
     links:
       - dht-1
 
   dht-3:
     image: bitdust/app
     ports:
-      - "10113:22"
+      - "11013:22"
     links:
       - dht-1
       - dht-2
@@ -69,7 +54,7 @@ services:
   stun-1:
     image: bitdust/app
     ports:
-      - "10121:22"
+      - "11021:22"
     links:
       - dht-2
       - dht-3
@@ -77,7 +62,7 @@ services:
   stun-2:
     image: bitdust/app
     ports:
-      - "10122:22"
+      - "11022:22"
     links:
       - dht-2
       - dht-3
@@ -85,134 +70,125 @@ services:
   proxy-1:
     image: bitdust/app
     ports:
-      - "10131:22"
+      - "11031:22"
     links:
       - dht-2
       - dht-3
-      - stun-1
-      - stun-2
       - id-a
-      - id-b
-      - id-c
-      - id-dead
 
   proxy-2:
     image: bitdust/app
     ports:
-      - "10132:22"
+      - "11032:22"
     links:
       - dht-2
       - dht-3
-      - stun-1
-      - stun-2
       - id-a
-      - id-b
-      - id-c
-      - id-dead
 
   supplier-1:
     image: bitdust/app
     ports:
-      - "10141:22"
+      - "11041:22"
     links:
       - dht-2
       - dht-3
-      - stun-1
-      - stun-2
       - id-a
-      - id-b
-      - id-c
-      - id-dead
 
   supplier-2:
     image: bitdust/app
     ports:
-      - "10142:22"
+      - "11042:22"
     links:
       - dht-2
       - dht-3
-      - stun-1
-      - stun-2
       - id-a
-      - id-b
-      - id-c
-      - id-dead
 
   supplier-3:
     image: bitdust/app
     ports:
-      - "10143:22"
+      - "11043:22"
     links:
       - dht-2
       - dht-3
-      - stun-1
-      - stun-2
       - id-a
-      - id-b
-      - id-c
-      - id-dead
 
   supplier-4:
     image: bitdust/app
     ports:
-      - "10144:22"
+      - "11044:22"
     links:
       - dht-2
       - dht-3
-      - stun-1
-      - stun-2
       - id-a
-      - id-b
-      - id-c
-      - id-dead
+
+  supplier-5:
+    image: bitdust/app
+    ports:
+      - "11045:22"
+    links:
+      - dht-2
+      - dht-3
+      - id-a
+
+  supplier-6:
+    image: bitdust/app
+    ports:
+      - "11046:22"
+    links:
+      - dht-2
+      - dht-3
+      - id-a
+
+  supplier-7:
+    image: bitdust/app
+    ports:
+      - "11047:22"
+    links:
+      - dht-2
+      - dht-3
+      - id-a
+
+  supplier-8:
+    image: bitdust/app
+    ports:
+      - "11048:22"
+    links:
+      - dht-2
+      - dht-3
+      - id-a
 
   customer-1:
     image: bitdust/app
     ports:
-      - "10151:22"
+      - "11051:22"
     volumes:
       - customer_1:/customer_1
     links:
       - dht-2
       - dht-3
-      - stun-1
-      - stun-2
       - id-a
-      - id-b
-      - id-c
-      - id-dead
 
   customer-2:
     image: bitdust/app
     ports:
-      - "10152:22"
+      - "11052:22"
     volumes:
       - customer_2:/customer_2
     links:
       - dht-2
       - dht-3
-      - stun-1
-      - stun-2
       - id-a
-      - id-b
-      - id-c
-      - id-dead
 
   customer-3:
     image: bitdust/app
     ports:
-      - "10153:22"
+      - "11053:22"
     volumes:
       - customer_3:/customer_3
     links:
       - dht-2
       - dht-3
-      - stun-1
-      - stun-2
       - id-a
-      - id-b
-      - id-c
-      - id-dead
 
 
 
@@ -230,13 +206,14 @@ services:
       - stun-1
       - stun-2
       - id-a
-      - id-b
-      - id-c
-      - id-dead
       - supplier-1
       - supplier-2
       - supplier-3
       - supplier-4
+      - supplier-5
+      - supplier-6
+      - supplier-7
+      - supplier-8
       - customer-1
       - customer-2
       - customer-3
