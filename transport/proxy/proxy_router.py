@@ -648,7 +648,7 @@ class ProxyRouter(automat.Automat):
             dl.append(identitycache.immediatelyCaching(receiver_idurl))
         d = DeferredList(dl, consumeErrors=True)
         d.addCallback(lambda _: self._do_send_routed_data(newpacket, info, sender_idurl, receiver_idurl, routed_data, wide))
-        d.addErrback(lg.errback)
+        d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='_do_forward_outbox_packet')
 
     def _do_send_routed_data(self, newpacket, info, sender_idurl, receiver_idurl, routed_data, wide):
         # those must be already cached
@@ -668,7 +668,11 @@ class ProxyRouter(automat.Automat):
             lg.err('failed to unserialize incoming packet from %s' % newpacket.RemoteID)
             p2p_service.SendFail(newpacket, 'invalid packet', remote_idurl=sender_idurl)
             return
-        if not routed_packet.Valid(raise_signature_invalid=True):
+        try:
+            is_signature_valid = routed_packet.Valid(raise_signature_invalid=False)
+        except:
+            is_signature_valid = False
+        if not is_signature_valid:
             lg.err('new packet from %s is NOT VALID:\n\n%r\n\n\n%r\n' % (
                 sender_idurl, routed_data, routed_packet.Serialize()))
             p2p_service.SendFail(newpacket, 'invalid packet', remote_idurl=sender_idurl)

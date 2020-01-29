@@ -196,14 +196,18 @@ class FamilyMember(automat.Automat):
                 self.state = 'CONNECTED'
                 self.Attempts=0
                 self.doNotifyConnected(*args, **kwargs)
-            elif ( event == 'dht-value-exist' and self.isMyPositionOK(*args, **kwargs) and self.isLeaving(*args, **kwargs) ) or event == 'shutdown':
-                self.state = 'CLOSED'
-                self.doDestroyMe(*args, **kwargs)
             elif event == 'dht-value-not-exist' or ( event == 'dht-value-exist' and not self.isMyPositionOK(*args, **kwargs) ):
                 self.state = 'SUPPLIERS'
                 self.Attempts+=1
                 self.doRebuildFamily(*args, **kwargs)
                 self.doRequestSuppliersReview(*args, **kwargs)
+            elif event == 'shutdown':
+                self.state = 'CLOSED'
+                self.doDestroyMe(*args, **kwargs)
+            elif event == 'dht-value-exist' and self.isMyPositionOK(*args, **kwargs) and self.isLeaving(*args, **kwargs):
+                self.state = 'DHT_WRITE'
+                self.doRebuildFamily(*args, **kwargs)
+                self.doDHTWrite(*args, **kwargs)
         #---SUPPLIERS---
         elif self.state == 'SUPPLIERS':
             if event == 'shutdown':
@@ -225,21 +229,21 @@ class FamilyMember(automat.Automat):
                 self.doRequestSuppliersReview(*args, **kwargs)
         #---DHT_WRITE---
         elif self.state == 'DHT_WRITE':
-            if event == 'shutdown':
-                self.state = 'CLOSED'
-                self.doDestroyMe(*args, **kwargs)
-            elif event == 'family-refresh' or event == 'family-join' or event == 'family-leave':
+            if event == 'family-refresh' or event == 'family-join' or event == 'family-leave':
                 self.doPush(event, *args, **kwargs)
             elif event == 'contacts-received':
                 self.doCheckReply(*args, **kwargs)
-            elif event == 'dht-write-fail' and self.Attempts>3:
+            elif event == 'dht-write-fail' and not self.isLeaving(*args, **kwargs) and self.Attempts>3:
                 self.state = 'DISCONNECTED'
                 self.Attempts=0
                 self.doNotifyDisconnected(*args, **kwargs)
-            elif event == 'dht-write-fail' and self.Attempts<=3:
+            elif event == 'dht-write-fail' and not self.isLeaving(*args, **kwargs) and self.Attempts<=3:
                 self.state = 'DHT_READ'
                 self.doDHTRead(*args, **kwargs)
-            elif event == 'dht-write-ok':
+            elif event == 'shutdown' or ( ( event == 'dht-write-fail' or event == 'dht-write-ok' ) and self.isLeaving(*args, **kwargs) ):
+                self.state = 'CLOSED'
+                self.doDestroyMe(*args, **kwargs)
+            elif event == 'dht-write-ok' and not self.isLeaving(*args, **kwargs):
                 self.state = 'CONNECTED'
                 self.Attempts=0
                 self.doNotifyConnected(*args, **kwargs)
@@ -694,9 +698,13 @@ class FamilyMember(automat.Automat):
         if self.dht_info:
             if self.dht_info['suppliers'] == possible_transaction['suppliers']:
                 if self.dht_info['ecc_map'] == possible_transaction['ecc_map']:
-                    if _Debug:
-                        lg.out(_DebugLevel, 'family_member._do_increment_revision did not found any changes, skip transaction')
-                    return None
+                    if self.current_request and self.current_request['command'] == 'family-leave':
+                        if _Debug:
+                            lg.out(_DebugLevel, 'family_member._do_increment_revision will re-publish latest DHT info because processing "family-leave" request')
+                    else:
+                        if _Debug:
+                            lg.out(_DebugLevel, 'family_member._do_increment_revision did not found any changes, skip transaction')
+                        return None
         possible_transaction['revision'] += 1
         possible_transaction['publisher_idurl'] = my_id.getLocalID()
         return possible_transaction
@@ -795,11 +803,40 @@ class FamilyMember(automat.Automat):
             existing_position = merged_info['suppliers'].index(current_request['supplier_idurl'])
         except ValueError:
             existing_position = -1
-        if existing_position < 0:
-            lg.warn('skip "family-leave" request, did not found supplier %r in customer family %r' % (
-                current_request['supplier_idurl'], self.customer_idurl, ))
+
+        if current_request.get('ecc_map'):
+            if merged_info['ecc_map'] and current_request.get('ecc_map') and current_request.get('ecc_map') != merged_info['ecc_map']:
+                lg.info('from "family-leave" request, detected ecc_map change %s -> %s for customer %s' % (
+                    merged_info['ecc_map'], current_request['ecc_map'], self.customer_idurl))
+                merged_info['ecc_map'] = current_request['ecc_map']
+            if not merged_info['ecc_map'] and current_request['ecc_map']:
+                lg.info('from "family-leave" request, detected ecc_map was set to %s for the first time for customer %s' % (
+                    current_request['ecc_map'], self.customer_idurl))
+                merged_info['ecc_map'] = current_request['ecc_map']
+
+        if not merged_info['ecc_map']:
+            lg.warn('still did not found actual ecc_map from DHT or from the request')
             return None
-        merged_info['suppliers'][existing_position] = b''
+
+        expected_suppliers_count = eccmap.GetEccMapSuppliersNumber(merged_info['ecc_map'])
+        if not merged_info['suppliers']:
+            merged_info['suppliers'] = [b'', ] * expected_suppliers_count
+
+        if len(merged_info['suppliers']) < expected_suppliers_count:
+            merged_info['suppliers'] += [b'', ] * (expected_suppliers_count - len(merged_info['suppliers']))
+        else:
+            merged_info['suppliers'] = merged_info['suppliers'][:expected_suppliers_count]
+
+        if existing_position < 0:
+            if _Debug:
+                lg.dbg(_DebugLevel, 'supplier %r not found in customer family %r, probably already left' % (
+                       current_request['supplier_idurl'], self.customer_idurl, ))
+        else:
+            if existing_position < expected_suppliers_count:
+                merged_info['suppliers'][existing_position] = b''
+                if _Debug:
+                    lg.info('erasing supplier %r from customer family %r' % (
+                        current_request['supplier_idurl'], self.customer_idurl, ))
         return merged_info
 
     def _do_process_family_refresh_request(self, merged_info):
@@ -870,6 +907,8 @@ class FamilyMember(automat.Automat):
         return None
 
     def _do_write_transaction(self, retries):
+        if _Debug:
+            lg.out(_DebugLevel, 'family_member._do_write_transaction   retries=%d' % retries)
         d = dht_relations.write_customer_suppliers(
             customer_idurl=self.customer_idurl,
             suppliers_list=self.transaction['suppliers'],
@@ -913,6 +952,8 @@ class FamilyMember(automat.Automat):
         self.automat('dht-write-ok', dht_result)
 
     def _on_dht_write_failed(self, err, retries):
+        if _Debug:
+            lg.out(_DebugLevel, 'family_member._on_dht_write_failed  err: %r' % err)
         try:
             errmsg = err.value.subFailure.getErrorMessage()
         except:
