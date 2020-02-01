@@ -82,7 +82,7 @@ class EntangledDHTService(LocalService):
         }
 
     def start(self):
-        from twisted.internet.defer import Deferred
+        from twisted.internet.defer import Deferred, succeed
         from logs import lg
         from dht import dht_records
         from dht import dht_service
@@ -106,7 +106,7 @@ class EntangledDHTService(LocalService):
         )
         d.addCallback(self._on_connected)
         d.addErrback(self._on_connect_failed)
-        return self.starting_deferred
+        return self.starting_deferred or succeed(True)
 
     def stop(self):
         from dht import dht_records
@@ -146,11 +146,6 @@ class EntangledDHTService(LocalService):
                         connect_now=True,
                         attach=True,
                     ))
-                    # dl.append(dht_service.connect(
-                    #     seed_nodes=known_seeds,
-                    #     layer_id=int(layer_id.strip()),
-                    #     attach=True,
-                    # ))
         if dl:
             d = DeferredList(dl)
             d.addCallback(self._on_layers_attached)
