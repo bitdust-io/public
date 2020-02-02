@@ -65,7 +65,7 @@ from system import local_fs
 
 from main import settings
 
-from lib.txrestapi.txrestapi.json_resource import JsonAPIResource, _to_json, _JsonResource
+from lib.txrestapi.txrestapi.json_resource import JsonAPIResource, _JsonResource
 from lib.txrestapi.txrestapi.methods import GET, POST, PUT, DELETE, ALL
 
 #------------------------------------------------------------------------------
@@ -282,17 +282,16 @@ class BitDustRESTHTTPServer(JsonAPIResource):
         else:
             _args = {k : (v[0] if (v and isinstance(v, list)) else v) for k, v in _args.items()}
         if _Debug:
-            if _Debug:
-                if uri not in [
-                    '/v1/event/listen/electron',
-                    '/v1/network/connected',
-                    '/v1/process/health',
-                    '/event/listen/electron/v1',
-                    '/network/connected/v1',
-                    '/process/health/v1',
-                ] or _DebugLevel > 10:
-                    lg.out(_DebugLevel, '*** %s:%s  API REST  %s(%r)' % (
-                        request.method.decode(), uri, func_name, _args))
+            if uri not in [
+                '/v1/event/listen/electron',
+                '/v1/network/connected',
+                '/v1/process/health',
+                '/event/listen/electron/v1',
+                '/network/connected/v1',
+                '/process/health/v1',
+            ] or _DebugLevel > 10:
+                lg.out(_DebugLevel, '*** %s:%s  API HTTP  %s(%r)' % (
+                    request.method.decode(), uri, func_name, _args))
         if _APILogFileEnabled:
             lg.out(0, '*** %s:%s  HTTP  %s(%r)' % (
                 request.method.decode(), uri, func_name, _args), log_name='api', showtime=True)
