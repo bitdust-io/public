@@ -430,7 +430,7 @@ def ListFiles(request, info):
             request.RemoteID, request.OwnerID, request.CreatorID))
 
 
-def SendListFiles(target_supplier, customer_idurl=None, key_id=None, wide=False, callbacks={}):
+def SendListFiles(target_supplier, customer_idurl=None, key_id=None, query_items=[], wide=False, callbacks={}, timeout=None):
     """
     This is used as a request method from your supplier : if you send him a ListFiles() packet
     he will reply you with a list of stored files in a Files() packet.
@@ -457,10 +457,12 @@ def SendListFiles(target_supplier, customer_idurl=None, key_id=None, wide=False,
         lg.warn('key %r not exist or public, my "master" key to be used with ListFiles() packet' % key_id)
         key_id = my_id.getGlobalID(key_alias='master')
     PacketID = "%s:%s" % (key_id, packetid.UniqueID(), )
-    Payload = settings.ListFilesFormat()
+    if not query_items:
+        query_items = ['*', ]
+    Payload = serialization.DictToBytes({'items': query_items, })
     if _Debug:
-        lg.out(_DebugLevel, "p2p_service.SendListFiles %r to %s with %d bytes" % (
-            PacketID, nameurl.GetName(RemoteID), len(Payload), ))
+        lg.out(_DebugLevel, "p2p_service.SendListFiles %r to %s with query : %r" % (
+            PacketID, nameurl.GetName(RemoteID), query_items, ))
     result = signed.Packet(
         Command=commands.ListFiles(),
         OwnerID=MyID,
@@ -469,7 +471,7 @@ def SendListFiles(target_supplier, customer_idurl=None, key_id=None, wide=False,
         Payload=Payload,
         RemoteID=RemoteID,
     )
-    gateway.outbox(result, wide=wide, callbacks=callbacks)
+    gateway.outbox(result, wide=wide, callbacks=callbacks, response_timeout=timeout)
     return result
 
 #------------------------------------------------------------------------------
@@ -865,18 +867,24 @@ def Event(request, info):
 
 
 def SendEvent(remote_idurl, event_id, payload=None,
-              producer_id=None, message_id=None, created=None,
-              packet_id=None, wide=False, callbacks={}, response_timeout=5):
+              producer_id=None, consumer_id=None, queue_id=None,
+              message_id=None, created=None, packet_id=None,
+              wide=False, callbacks={}, response_timeout=5):
     if packet_id is None:
         packet_id = packetid.UniqueID()
     e_json = {
         'event_id': event_id,
         'payload': payload,
     }
-    if producer_id and message_id:
+    if producer_id is not None:
         e_json['producer_id'] = producer_id
+    if consumer_id is not None:
+        e_json['consumer_id'] = consumer_id
+    if queue_id is not None:
+        e_json['queue_id'] = queue_id
+    if message_id is not None:
         e_json['message_id'] = message_id
-    if created:
+    if created is not None:
         e_json['created'] = created
     e_json_src = serialization.DictToBytes(e_json)
     if _Debug:
@@ -902,6 +910,23 @@ def Message(request, info):
         lg.out(_DebugLevel, 'p2p_service.Message %d bytes in [%s]' % (len(request.Payload), request.PacketID))
         lg.out(_DebugLevel, '  from remoteID=%s  ownerID=%s  creatorID=%s' % (
             request.RemoteID, request.OwnerID, request.CreatorID))
+
+
+def SendMessage(remote_idurl, packet_id=None, payload=None, wide=True, callbacks={}, response_timeout=None):
+    """
+    """
+    if packet_id is None:
+        packet_id = packetid.UniqueID()
+    outpacket = signed.Packet(
+        Command=commands.Message(),
+        OwnerID=my_id.getLocalID(),
+        CreatorID=my_id.getLocalID(),
+        PacketID=packet_id,
+        Payload=payload,
+        RemoteID=remote_idurl,
+    )
+    result = gateway.outbox(outpacket, wide=wide, callbacks=callbacks, response_timeout=response_timeout)
+    return result, outpacket
 
 #------------------------------------------------------------------------------
 

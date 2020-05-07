@@ -84,18 +84,19 @@ def run_ssh_command_and_wait(host, cmd, verbose=False) -> object:
 
 #------------------------------------------------------------------------------
 
-def request_get(node, url, timeout=None):
+def request_get(node, url, timeout=None, attempts=3, verbose=True):
     resp = None
     err = None
     count = 0
     while True:
-        if count > 3:
-            print('\nGET request failed after few attempts :  node=%r   url=%r   err=%r\n' % (node, url, err))
+        if count > attempts:
+            if verbose:
+                print('\nGET request failed after few attempts :  node=%r   url=%r   err=%r\n' % (node, url, err))
             assert False, 'GET request failed after few attempts :  node=%r   url=%r    err=%r' % (node, url, err)
             break
         try:
             resp = requests.get(
-                tunnel_url(node, url),
+                tunnel_url(node, url, verbose=verbose),
                 timeout=timeout,
                 # cert=(f'/app/certificates/{node}/apiclientcert', f'/app/certificates/{node}/apiclientcertkey'),
                 # verify=f'/app/certificates/{node}/apiservercert',
@@ -109,18 +110,19 @@ def request_get(node, url, timeout=None):
     return resp
 
 
-def request_post(node, url, json={}, timeout=None):
+def request_post(node, url, json={}, timeout=None, attempts=3, verbose=True):
     resp = None
     err = None
     count = 0
     while True:
-        if count > 3:
-            print('\nPOST request failed after few attempts :  node=%r   url=%r   json=%r   err=%r\n' % (node, url, json, err))
+        if count > attempts:
+            if verbose:
+                print('\nPOST request failed after few attempts :  node=%r   url=%r   json=%r   err=%r\n' % (node, url, json, err))
             assert False, 'POST request failed after few attempts :  node=%r   url=%r   json=%r   err=%r' % (node, url, json, err)
             break
         try:
             resp = requests.post(
-                url=tunnel_url(node, url),
+                url=tunnel_url(node, url, verbose=verbose),
                 json=json,
                 timeout=timeout,
                 # cert=(f'/app/certificates/{node}/apiclientcert', f'/app/certificates/{node}/apiclientcertkey'),
@@ -135,18 +137,46 @@ def request_post(node, url, json={}, timeout=None):
     return resp
 
 
-def request_put(node, url, json={}, timeout=None):
+def request_put(node, url, json={}, timeout=None, attempts=3, verbose=True):
     resp = None
     err = None
     count = 0
     while True:
-        if count > 3:
-            print('\nPUT request failed after few attempts :  node=%r   url=%r   json=%r   err=%r\n' % (node, url, json, err))
+        if count > attempts:
+            if verbose:
+                print('\nPUT request failed after few attempts :  node=%r   url=%r   json=%r   err=%r\n' % (node, url, json, err))
             assert False, 'PUT request failed after few attempts :  node=%r   url=%r   json=%r   err=%r' % (node, url, json, err)
             break
         try:
             resp = requests.put(
-                url=tunnel_url(node, url),
+                url=tunnel_url(node, url, verbose=verbose),
+                json=json,
+                timeout=timeout,
+                # cert=(f'/app/certificates/{node}/apiclientcert', f'/app/certificates/{node}/apiclientcertkey'),
+                # verify=f'/app/certificates/{node}/apiservercert',
+            )
+        except Exception as exc:
+            resp = None
+            err = exc
+        if resp:
+            break
+        count += 1
+    return resp
+
+
+def request_delete(node, url, json={}, timeout=None, attempts=3, verbose=True):
+    resp = None
+    err = None
+    count = 0
+    while True:
+        if count > attempts:
+            if verbose:
+                print('\nDELETE request failed after few attempts :  node=%r   url=%r   json=%r   err=%r\n' % (node, url, json, err))
+            assert False, 'DELETE request failed after few attempts :  node=%r   url=%r   json=%r   err=%r' % (node, url, json, err)
+            break
+        try:
+            resp = requests.delete(
+                url=tunnel_url(node, url, verbose=verbose),
                 json=json,
                 timeout=timeout,
                 # cert=(f'/app/certificates/{node}/apiclientcert', f'/app/certificates/{node}/apiclientcertkey'),
@@ -262,37 +292,42 @@ def tunnel_port(node):
     return _NodeTunnelPort[node]
 
 
-def tunnel_url(node, endpoint):
-    print('\n%s [%s]   /%s   %s' % (
-        datetime.datetime.now().strftime("%H:%M:%S.%f"), node, endpoint,
-        os.environ['PYTEST_CURRENT_TEST'].replace(' (setup)', '').replace(' (call)', ''), ))
+def tunnel_url(node, endpoint, verbose=True):
+    if verbose:
+        print('\n%s [%s]   /%s   %s' % (
+            datetime.datetime.now().strftime("%H:%M:%S.%f"), node, endpoint,
+            os.environ['PYTEST_CURRENT_TEST'].replace(' (setup)', '').replace(' (call)', ''), ))
     return f'http://127.0.0.1:{tunnel_port(node)}/{endpoint.lstrip("/")}'
 
 #------------------------------------------------------------------------------
 
-def start_daemon(node):
+def start_daemon(node, verbose=False):
     run_ssh_command_and_wait(node, 'mkdir -pv /root/.bitdust/metadata/')
     if os.environ.get('_DEBUG', '0') == '0':
         run_ssh_command_and_wait(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = False/_Debug = False/g' {} +")
     bitdust_daemon = run_ssh_command_and_wait(node, 'BITDUST_LOG_USE_COLORS=0 COVERAGE_PROCESS_START=/app/bitdust/.coverage_config bitdust daemon')
-    print('\n' + bitdust_daemon[0].strip())
+    if verbose:
+        print('\n' + bitdust_daemon[0].strip())
     assert (
         bitdust_daemon[0].strip().startswith('main BitDust process already started') or
         bitdust_daemon[0].strip().startswith('new BitDust process will be started in daemon mode')
     )
-    print(f'\nstart_daemon [{node}] OK\n')
+    if verbose:
+        print(f'\nstart_daemon [{node}] OK\n')
 
-async def start_daemon_async(node, loop):
+async def start_daemon_async(node, loop, verbose=False):
     await run_ssh_command_and_wait_async(node, 'mkdir -pv /root/.bitdust/metadata/', loop)
     if os.environ.get('_DEBUG', '0') == '0':
         await run_ssh_command_and_wait_async(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = False/_Debug = False/g' {} +", loop)
     bitdust_daemon = await run_ssh_command_and_wait_async(node, 'BITDUST_LOG_USE_COLORS=0 COVERAGE_PROCESS_START=/app/bitdust/.coverage_config bitdust daemon', loop)
-    print('\n' + bitdust_daemon[0].strip())
+    if verbose:
+        print('\n' + bitdust_daemon[0].strip())
     assert (
         bitdust_daemon[0].strip().startswith('main BitDust process already started') or
         bitdust_daemon[0].strip().startswith('new BitDust process will be started in daemon mode')
     )
-    print(f'\nstart_daemon_async [{node}] OK\n')
+    if verbose:
+        print(f'\nstart_daemon_async [{node}] OK\n')
 
 #------------------------------------------------------------------------------
 
@@ -365,7 +400,7 @@ def health_check(node, verbose=False):
         if count > 60:
             assert False, f'node {node} is not healthy after many attempts'
         try:
-            response = request_get(node, 'process/health/v1')
+            response = request_get(node, 'process/health/v1', verbose=verbose)
         except Exception as exc:
             response = None
             if verbose:
@@ -376,32 +411,37 @@ def health_check(node, verbose=False):
             print(f'\nnode {node} process not started yet, try again after 1 sec.\n')
         time.sleep(1)
         count += 1
-    print(f'\nprocess/health/v1 [{node}] : OK')
+    if verbose:
+        print(f'\nprocess/health/v1 [{node}] : OK')
 
 
-async def health_check_async(node, event_loop):
+async def health_check_async(node, event_loop, verbose=False):
     async with aiohttp.ClientSession(loop=event_loop, connector=ssl_connection(node)) as client:
         count = 0
         while True:
-            print(f'health_check_async {node}  with count={count}\n')
+            if verbose:
+                print(f'health_check_async {node}  with count={count}\n')
             if count > 60:
                 print(f'node {node} is not healthy after many attempts')
                 assert False, f'node {node} is not healthy after many attempts'
             try:
-                response = await client.get(tunnel_url(node, 'process/health/v1'))
+                response = await client.get(tunnel_url(node, 'process/health/v1', verbose=verbose))
                 response_json = await response.json()
             except (
                 aiohttp.ServerDisconnectedError,
                 aiohttp.client_exceptions.ClientOSError,
             ) as exc:
-                print(f'node {node} is not started yet, count={count} : {exc}\n')
+                if verbose:
+                    print(f'node {node} is not started yet, count={count} : {exc}\n')
             else:
                 if response.status == 200 and response_json['status'] == 'OK':
                     break
-                print(f'node {node} process not started yet, try again after 1 sec.\n')
+                if verbose:
+                    print(f'node {node} process not started yet, try again after 1 sec.\n')
             await asyncio.sleep(1)
             count += 1
-    print(f'process/health/v1 [{node}] : OK\n')
+    if verbose:
+        print(f'process/health/v1 [{node}] : OK\n')
 
 #------------------------------------------------------------------------------
 
@@ -420,47 +460,52 @@ def create_identity(node, identity_name):
         ):
             count += 1
             continue
+        print('\nidentity/create/v1 : %s\n' % pprint.pformat(response.json()))
         assert False, f'[{node}] bad response from /identity/create/v1'
     print(f'identity/create/v1 [{node}] with name {identity_name} : OK\n')
 
 
-async def create_identity_async(node, identity_name, event_loop):
+async def create_identity_async(node, identity_name, event_loop, verbose=False):
     async with aiohttp.ClientSession(loop=event_loop, connector=ssl_connection(node)) as client:
         for i in range(60):
-            response_identity = await client.post(tunnel_url(node, 'identity/create/v1'), json={'username': identity_name})
+            response_identity = await client.post(tunnel_url(node, 'identity/create/v1', verbose=verbose), json={'username': identity_name})
             assert response_identity.status == 200
             response_json = await response_identity.json()
             if response_json['status'] == 'OK':
                 break
             else:
                 assert response_json['errors'] == ['network connection error'], response_json
-            print('[%s] retry %d   POST:identity/create/v1  username=%s  after 1 sec.' % (
-                node, i + 1, identity_name,))
+            if verbose:
+                print('[%s] retry %d   POST:identity/create/v1  username=%s  after 1 sec.' % (
+                    node, i + 1, identity_name,))
             await asyncio.sleep(1)
         else:
-            print(f'identity/create/v1 [{node}] with name {identity_name} : FAILED\n')
+            if verbose:
+                print(f'identity/create/v1 [{node}] with name {identity_name} : FAILED\n')
             assert False
-    print(f'identity/create/v1 [{node}] with name {identity_name} : OK\n')
+    if verbose:
+        print(f'identity/create/v1 [{node}] with name {identity_name} : OK\n')
 
 
-def connect_network(node):
+def connect_network(node, verbose=False):
     count = 0
-    response = request_get(node, 'network/connected/v1?wait_timeout=1')
+    response = request_get(node, 'network/connected/v1?wait_timeout=1', verbose=verbose)
     assert response.json()['status'] == 'ERROR'
     while True:
         if count > 60:
             assert False, f'node {node} failed to connect to the network after many retries'
-        response = request_get(node, 'network/connected/v1?wait_timeout=5')
+        response = request_get(node, 'network/connected/v1?wait_timeout=5', verbose=verbose)
         if response.json()['status'] == 'OK':
             break
         count += 1
         time.sleep(1)
-    print(f'network/connected/v1 [{node}] : OK\n')
+    if verbose:
+        print(f'network/connected/v1 [{node}] : OK\n')
 
 
 async def connect_network_async(node, loop, attempts=30, delay=1, timeout=10, verbose=False):
     async with aiohttp.ClientSession(loop=loop, connector=ssl_connection(node)) as client:
-        response = await client.get(tunnel_url(node, 'network/connected/v1?wait_timeout=1'), timeout=timeout)
+        response = await client.get(tunnel_url(node, 'network/connected/v1?wait_timeout=1', verbose=verbose), timeout=timeout)
         response_json = await response.json()
         if verbose:
             print(f'\nnetwork/connected/v1 [{node}] : %s' % pprint.pformat(response_json))
@@ -470,19 +515,21 @@ async def connect_network_async(node, loop, attempts=30, delay=1, timeout=10, ve
         counter = 0
         for i in range(attempts):
             counter += 1
-            response = await client.get(tunnel_url(node, 'network/connected/v1?wait_timeout=1'), timeout=timeout)
+            response = await client.get(tunnel_url(node, 'network/connected/v1?wait_timeout=1', verbose=verbose), timeout=timeout)
             response_json = await response.json()
             if verbose:
                 print(f'\nnetwork/connected/v1 [{node}] : %s' % pprint.pformat(response_json))
             if response_json['status'] == 'OK':
-                print(f"network/connected/v1 {node}: got status OK\n")
+                if verbose:
+                    print(f"network/connected/v1 {node}: got status OK\n")
                 break
             if verbose:
                 print(f"connect network attempt {counter} at {node}: sleep 1 sec\n")
             await asyncio.sleep(delay)
         else:
-            print(f"connect network {node}: FAILED\n")
-            assert False
+            if verbose:
+                print(f"connect network {node}: FAILED\n")
+            assert False, f'connect network {node}: FAILED'
 
 
 async def service_started_async(node, service_name, loop, expected_state='ON', attempts=60, delay=3, verbose=False):
@@ -490,10 +537,10 @@ async def service_started_async(node, service_name, loop, expected_state='ON', a
         current_state = None
         count = 0
         while current_state is None or current_state != expected_state:
-            response = await client.get(tunnel_url(node, f'service/info/{service_name}/v1'))
+            response = await client.get(tunnel_url(node, f'service/info/{service_name}/v1', verbose=verbose))
             response_json = await response.json()
             assert response_json['status'] == 'OK', response_json
-            current_state = response_json['result'][0]['state']
+            current_state = response_json['result']['state']
             if verbose:
                 print(f'\nservice/info/{service_name}/v1 [{node}] : %s' % pprint.pformat(response_json))
             if current_state == expected_state:
@@ -503,13 +550,14 @@ async def service_started_async(node, service_name, loop, expected_state='ON', a
                 assert False, f"service {service_name} is not {expected_state} after {attempts} attempts"
                 return
             await asyncio.sleep(delay)
-        print(f'service/info/{service_name}/v1 [{node}] : OK\n')
+        if verbose:
+            print(f'service/info/{service_name}/v1 [{node}] : OK\n')
 
 
 async def packet_list_async(node, loop, wait_all_finish=True, attempts=60, delay=3, verbose=False):
     async with aiohttp.ClientSession(loop=loop, connector=ssl_connection(node)) as client:
         for i in range(attempts):
-            response = await client.get(tunnel_url(node, 'packet/list/v1'), timeout=20)
+            response = await client.get(tunnel_url(node, 'packet/list/v1', verbose=verbose), timeout=20)
             response_json = await response.json()
             if verbose:
                 print('\npacket/list/v1 [%s] : %s\n' % (node, pprint.pformat(response_json), ))
@@ -540,24 +588,63 @@ def stop_daemon(node, skip_checks=False):
     # print(f'stop_daemon [{node}] OK\n')
 
 
-async def stop_daemon_async(node, loop, skip_checks=False):
-    bitdust_stop = await run_ssh_command_and_wait_async(node, 'bitdust stop', loop, verbose=False)
+async def stop_daemon_async(node, loop, skip_checks=False, verbose=False):
+    bitdust_stop = await run_ssh_command_and_wait_async(node, 'bitdust stop', loop, verbose=verbose)
     # print('\n' + bitdust_stop[0].strip())
     if not skip_checks:
-        assert (
+        resp = bitdust_stop[0].strip()
+        if not (
             (
-                bitdust_stop[0].strip().startswith('BitDust child processes found') and
-                bitdust_stop[0].strip().endswith('BitDust stopped')
+                resp.startswith('BitDust child processes found') and
+                resp.endswith('BitDust stopped')
             ) or (
-                bitdust_stop[0].strip().startswith('found main BitDust process:') and
-                bitdust_stop[0].strip().endswith('BitDust process finished correctly')
+                resp.startswith('found main BitDust process:') and
+                resp.endswith('BitDust process finished correctly')
             ) or (
-                bitdust_stop[0].strip() == 'BitDust is not running at the moment'
+                resp == 'BitDust is not running at the moment'
             )
-        )
+        ):
+            print('process finished with unexpected response: %r' % resp)
+            assert False, resp
     # print(f'stop_daemon [{node}] OK\n')
 
 #------------------------------------------------------------------------------
+
+def start_dht_seed(node, wait_seconds=0, dht_seeds='', attached_layers=''):
+    print(f'\nNEW DHT SEED (with STUN SERVER) at [{node}]\n')
+    cmd = ''
+    cmd += 'bitdust set logs/debug-level 18;'
+    cmd += 'bitdust set logs/api-enabled true;'
+    cmd += 'bitdust set logs/automat-events-enabled true;'
+    cmd += 'bitdust set logs/automat-transitions-enabled true;'
+    cmd += 'bitdust set logs/packet-enabled true;'
+    # use shorter key to run tests faster
+    cmd += 'bitdust set personal/private-key-size 1024;'
+    # disable unrelated services
+    cmd += 'bitdust set services/customer/enabled false;'
+    cmd += 'bitdust set services/supplier/enabled false;'
+    cmd += 'bitdust set services/message-broker/enabled false;'
+    cmd += 'bitdust set services/proxy-transport/enabled false;'
+    cmd += 'bitdust set services/proxy-server/enabled false;'
+    cmd += 'bitdust set services/private-messages/enabled false;'
+    cmd += 'bitdust set services/nodes-lookup/enabled false;'
+    cmd += 'bitdust set services/identity-propagate/enabled false;'
+    # configure DHT udp port and seed nodes
+    cmd += 'bitdust set services/entangled-dht/udp-port "14441";'
+    if dht_seeds:
+        cmd += f'bitdust set services/entangled-dht/known-nodes "{dht_seeds}";'
+    if attached_layers:
+        cmd += f'bitdust set services/entangled-dht/attached-layers "{attached_layers}";'
+    # enable Stun server
+    cmd += 'bitdust set services/ip-port-responder/enabled true;'
+    run_ssh_command_and_wait(node, cmd)
+    # start BitDust daemon
+    time.sleep(wait_seconds)
+    start_daemon(node)
+    # get_client_certificate(node)
+    health_check(node)
+    print(f'\nSTARTED DHT SEED (with STUN SERVER) [{node}]\n')
+
 
 async def start_identity_server_async(node, loop):
     print(f'\nNEW IDENTITY SERVER at [{node}]\n')
@@ -570,6 +657,7 @@ async def start_identity_server_async(node, loop):
     cmd += 'bitdust set personal/private-key-size 1024;'
     cmd += 'bitdust set services/customer/enabled false;'
     cmd += 'bitdust set services/supplier/enabled false;'
+    cmd += 'bitdust set services/message-broker/enabled false;'
     cmd += 'bitdust set services/proxy-transport/enabled false;'
     cmd += 'bitdust set services/proxy-server/enabled false;'
     cmd += 'bitdust set services/private-messages/enabled false;'
@@ -586,42 +674,6 @@ async def start_identity_server_async(node, loop):
     print(f'\nSTARTED IDENTITY SERVER [{node}]\n')
 
 
-def start_dht_seed(node, wait_seconds=0, dht_seeds='', attached_layers=''):
-    print(f'\nNEW DHT SEED (with STUN SERVER) at [{node}]\n')
-    cmd = ''
-    cmd += 'bitdust set logs/debug-level 18;'
-    cmd += 'bitdust set logs/api-enabled true;'
-    cmd += 'bitdust set logs/automat-events-enabled true;'
-    cmd += 'bitdust set logs/automat-transitions-enabled true;'
-    cmd += 'bitdust set logs/packet-enabled true;'
-    # use shorter key to run tests faster
-    cmd += 'bitdust set personal/private-key-size 1024;'
-    # disable unrelated services
-    cmd += 'bitdust set services/customer/enabled false;'
-    cmd += 'bitdust set services/supplier/enabled false;'
-    cmd += 'bitdust set services/proxy-transport/enabled false;'
-    cmd += 'bitdust set services/proxy-server/enabled false;'
-    cmd += 'bitdust set services/private-messages/enabled false;'
-    cmd += 'bitdust set services/nodes-lookup/enabled false;'
-    cmd += 'bitdust set services/identity-propagate/enabled false;'
-    # configure DHT udp port and seed nodes
-    cmd += 'bitdust set services/entangled-dht/udp-port "14441";'
-    if dht_seeds:
-        cmd += f'bitdust set services/entangled-dht/known-nodes "{dht_seeds}";'
-    if attached_layers:
-        cmd += f'bitdust set services/entangled-dht/attached-layers "{attached_layers}";'
-    # enable Stun server
-    cmd += 'bitdust set services/ip-port-responder/enabled true;'
-    run_ssh_command_and_wait(node, cmd)
-    # start BitDust daemon
-    print(f'sleep {wait_seconds} seconds')
-    time.sleep(wait_seconds)
-    start_daemon(node)
-    # get_client_certificate(node)
-    health_check(node)
-    print(f'\nSTARTED DHT SEED (with STUN SERVER) [{node}]\n')
-
-
 async def start_stun_server_async(node, loop, dht_seeds=''):
     print(f'\nNEW STUN SERVER at [{node}]\n')
     cmd = ''
@@ -635,6 +687,7 @@ async def start_stun_server_async(node, loop, dht_seeds=''):
     # disable unrelated services
     cmd += 'bitdust set services/customer/enabled false;'
     cmd += 'bitdust set services/supplier/enabled false;'
+    cmd += 'bitdust set services/message-broker/enabled false;'
     cmd += 'bitdust set services/proxy-transport/enabled false;'
     cmd += 'bitdust set services/proxy-server/enabled false;'
     cmd += 'bitdust set services/private-messages/enabled false;'
@@ -679,6 +732,8 @@ async def start_proxy_server_async(node, identity_name, loop, known_servers='', 
         cmd += f'bitdust set services/entangled-dht/known-nodes "{dht_seeds}";'
     # enable ProxyServer service
     cmd += 'bitdust set services/proxy-server/enabled true;'
+    # disable message broker service
+    cmd += 'bitdust set services/message-broker/enabled false;'
     await run_ssh_command_and_wait_async(node, cmd, loop)
     # start BitDust daemon and create new identity for proxy server
     await start_daemon_async(node, loop)
@@ -722,6 +777,8 @@ async def start_supplier_async(node, identity_name, loop, join_network=True,
         cmd += f'bitdust set services/proxy-transport/preferred-routers "{preferred_routers}";'
     # enable supplier service
     cmd += 'bitdust set services/supplier/enabled true;'
+    # disable message broker service
+    cmd += 'bitdust set services/message-broker/enabled false;'
     await run_ssh_command_and_wait_async(node, cmd, loop)
     # start BitDust daemon and create new identity for supplier
     await start_daemon_async(node, loop)
@@ -735,12 +792,60 @@ async def start_supplier_async(node, identity_name, loop, join_network=True,
     print(f'\nSTARTED SUPPLIER [{node}]\n')
 
 
+async def start_message_broker_async(node, identity_name, loop, join_network=True,
+                                     min_servers=1, max_servers=1, known_servers='', dht_seeds='',
+                                     preferred_servers='', preferred_routers=''):
+    print(f'\nNEW MESSAGE BROKER {identity_name} at [{node}]\n')
+    cmd = ''
+    cmd += 'bitdust set logs/debug-level 18;'
+    cmd += 'bitdust set logs/api-enabled true;'
+    cmd += 'bitdust set logs/automat-events-enabled true;'
+    cmd += 'bitdust set logs/automat-transitions-enabled true;'
+    cmd += 'bitdust set logs/packet-enabled true;'
+    # use short key to run tests faster
+    cmd += 'bitdust set personal/private-key-size 1024;'
+    # disable unrelated services
+    cmd += 'bitdust set services/customer/enabled false;'
+    cmd += 'bitdust set services/supplier/enabled false;'
+    cmd += 'bitdust set services/proxy-server/enabled false;'
+    # configure ID servers
+    if min_servers is not None:
+        cmd += f'bitdust set services/identity-propagate/min-servers "{min_servers}";'
+    if max_servers is not None:
+        cmd += f'bitdust set services/identity-propagate/max-servers "{max_servers}";'
+    if known_servers:
+        cmd += f'bitdust set services/identity-propagate/known-servers "{known_servers}";'
+    if preferred_servers:
+        cmd += f'bitdust set services/identity-propagate/preferred-servers "{preferred_servers}";'
+    # configure DHT udp port and node ID
+    cmd += 'bitdust set services/entangled-dht/udp-port "14441";'
+    if dht_seeds:
+        cmd += f'bitdust set services/entangled-dht/known-nodes "{dht_seeds}";'
+    # set desired Proxy router
+    if preferred_routers:
+        cmd += f'bitdust set services/proxy-transport/preferred-routers "{preferred_routers}";'
+    # enable message broker service
+    cmd += 'bitdust set services/message-broker/enabled true;'
+    cmd += 'bitdust set services/message-broker/archive-chunk-size 3;'
+    await run_ssh_command_and_wait_async(node, cmd, loop)
+    # start BitDust daemon and create new identity for supplier
+    await start_daemon_async(node, loop)
+    # await get_client_certificate_async(node, loop)
+    await health_check_async(node, loop)
+    if join_network:
+        await create_identity_async(node, identity_name, loop)
+        await connect_network_async(node, loop)
+        await service_started_async(node, 'service_message_broker', loop)
+        await packet_list_async(node, loop)
+    print(f'\nSTARTED MESSAGE BROKER [{node}]\n')
+
+
 async def start_customer_async(node, identity_name, loop, join_network=True, num_suppliers=2, block_size=None,
                                min_servers=1, max_servers=1, known_servers='', preferred_servers='', dht_seeds='',
                                supplier_candidates='', preferred_routers='', health_check_interval_seconds=None,
                                sleep_before_start=None, ):
     if sleep_before_start:
-        print('\nsleep %d seconds before start customer %r\n' % (sleep_before_start, identity_name))
+        # print('\nsleep %d seconds before start customer %r\n' % (sleep_before_start, identity_name))
         await asyncio.sleep(sleep_before_start)
     print('\nNEW CUSTOMER %r at [%s]\n' % (identity_name, node, ))
     cmd = ''
@@ -753,6 +858,7 @@ async def start_customer_async(node, identity_name, loop, join_network=True, num
     cmd += 'bitdust set personal/private-key-size 1024;'
     # disable unrelated services
     cmd += 'bitdust set services/supplier/enabled false;'
+    cmd += 'bitdust set services/message-broker/enabled false;'
     cmd += 'bitdust set services/proxy-server/enabled false;'
     # configure ID servers
     if min_servers is not None:
@@ -775,6 +881,8 @@ async def start_customer_async(node, identity_name, loop, join_network=True, num
     # enable customer service and prepare tests
     cmd += 'bitdust set services/customer/enabled true;'
     cmd += f'bitdust set services/customer/suppliers-number "{num_suppliers}";'
+    # decrease message timeout for group communications
+    cmd += 'bitdust set services/private-groups/message-ack-timeout 5;'
     if block_size:
         cmd += f'bitdust set services/backups/block-size "{block_size}";'
     if supplier_candidates:
@@ -793,20 +901,19 @@ async def start_customer_async(node, identity_name, loop, join_network=True, num
 
 #------------------------------------------------------------------------------
 
-
-async def start_one_identity_server_async(identity_server, loop):
-    await start_identity_server_async(
-        node=identity_server['name'],
-        loop=loop,
-    )
-
-
 def start_one_dht_seed(dht_seed, wait_seconds):
     start_dht_seed(
         node=dht_seed['name'],
         dht_seeds=dht_seed.get('known_dht_seeds', ''),
         attached_layers=dht_seed.get('attached_layers', '2,3'),
         wait_seconds=wait_seconds,
+    )
+
+
+async def start_one_identity_server_async(identity_server, loop):
+    await start_identity_server_async(
+        node=identity_server['name'],
+        loop=loop,
     )
 
 
@@ -861,17 +968,47 @@ async def start_one_customer_async(customer, loop, sleep_before_start=None):
     )
 
 
+async def start_one_message_broker_async(supplier, loop):
+    await start_message_broker_async(
+        node=supplier['name'],
+        identity_name=supplier['name'],
+        join_network=supplier.get('join_network', True),
+        min_servers=supplier.get('min_servers'),
+        max_servers=supplier.get('max_servers'),
+        known_servers=supplier.get('known_id_servers', ''),
+        dht_seeds=supplier.get('known_dht_seeds', ''),
+        preferred_routers=supplier.get('preferred_routers', ''),
+        loop=loop,
+    )
+
+
 #------------------------------------------------------------------------------
 
 def report_one_node(node):
     main_log = run_ssh_command_and_wait(node, 'cat /root/.bitdust/logs/main.log', verbose=False)[0].strip()
-    num_warnings = main_log.count('WARNING')
+    num_infos = main_log.count('  INFO ')
+    num_warnings = main_log.count('  WARNING ')
     num_errors = main_log.count('ERROR!!!')
     num_exceptions = main_log.count('Exception:')
     num_tracebacks = main_log.count('Traceback')
     num_failures = main_log.count('Failure')
-    print(f'[{node}]  Warnings: {num_warnings}     Errors: {num_errors}    Tracebacks: {num_tracebacks}     '
-          f'Failures: {num_failures}    Exceptions: {num_exceptions}')
+    api_log = run_ssh_command_and_wait(node, 'cat /root/.bitdust/logs/api.log', verbose=False)[0].strip()
+    num_apis = api_log.count(' *** ')
+    packet_log = run_ssh_command_and_wait(node, 'cat /root/.bitdust/logs/packet.log', verbose=False)[0].strip()
+    num_packet_out = packet_log.count('OUTBOX ')
+    num_packet_in = packet_log.count('INBOX ')
+    num_packet_relay_out = packet_log.count('RELAY OUT')
+    num_packet_relay_in = packet_log.count('RELAY IN')
+    num_packet_route_out = packet_log.count('ROUTE OUT')
+    num_packet_route_in = packet_log.count('ROUTE IN')
+    event_log = run_ssh_command_and_wait(node, 'cat /root/.bitdust/logs/event.log', verbose=False)[0].strip()
+    num_events = event_log.count('\n')
+    print(f'[{node:>18}]  api: {num_apis:<4} evt: {num_events:<4}'
+          f' out: {num_packet_out:<4} in: {num_packet_in:<4}'
+          f' prox-out: {num_packet_relay_out:<4} prox-in: {num_packet_relay_in:<4}'
+          f' re-out: {num_packet_route_out:<4} re-in: {num_packet_route_in:<4}'
+          f' inf: {num_infos:<4} warn: {num_warnings:<4} err: {num_errors:<4}'
+          f' trcbk: {num_tracebacks:<4} fails: {num_failures:<4} excepts: {num_exceptions:<4}')
     return num_exceptions
 
 

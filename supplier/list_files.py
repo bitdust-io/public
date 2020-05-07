@@ -30,7 +30,7 @@ from io import StringIO
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 6
+_DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
@@ -62,7 +62,9 @@ from userid import global_id
 
 #------------------------------------------------------------------------------
 
-def send(customer_idurl, packet_id, format_type, key_id, remote_idurl):
+def send(customer_idurl, packet_id, format_type, key_id, remote_idurl, query_items=[]):
+    if not query_items:
+        query_items = ['*', ]
     parts = global_id.ParseGlobalID(key_id)
     if parts['key_alias'] == 'master' and parts['idurl'] != my_id.getLocalID():
         # lg.warn('incoming ListFiles() request with customer "master" key: %r' % key_id)
@@ -76,20 +78,21 @@ def send(customer_idurl, packet_id, format_type, key_id, remote_idurl):
             customer_idurl, key_id, ))
         return p2p_service.SendFailNoRequest(customer_idurl, packet_id, response='key not registered')
     if _Debug:
-        lg.out(_DebugLevel, "list_files.send to %s, customer_idurl=%s, key_id=%s" % (
-            remote_idurl, customer_idurl, key_id, ))
+        lg.out(_DebugLevel, "list_files.send to %s, customer_idurl=%s, key_id=%s, query_items=%r" % (
+            remote_idurl, customer_idurl, key_id, query_items, ))
     ownerdir = settings.getCustomerFilesDir(customer_idurl)
     plaintext = ''
     if os.path.isdir(ownerdir):
-        for key_alias in os.listdir(ownerdir):
-            if not misc.ValidKeyAlias(str(key_alias)):
-                continue
-            key_alias_dir = os.path.join(ownerdir, key_alias)
-            plaintext += TreeSummary(key_alias_dir, key_alias)
+        try:
+            for query_path in query_items:
+                plaintext += process_query_item(query_path, parts['key_alias'], ownerdir)
+        except:
+            lg.exc()
+            return p2p_service.SendFailNoRequest(customer_idurl, packet_id, response='list files query processing error')
     else:
-        lg.warn('did not found customer dir: %s' % ownerdir)
+        lg.warn('did not found customer folder: %s' % ownerdir)
     if _Debug:
-        lg.out(_DebugLevel + 8, '\n%s' % plaintext)
+        lg.out(_DebugLevel, '\n%s' % plaintext)
     raw_list_files = PackListFiles(plaintext, format_type)
     block = encrypted.Block(
         CreatorID=my_id.getLocalID(),
@@ -111,6 +114,33 @@ def send(customer_idurl, packet_id, format_type, key_id, remote_idurl):
         },
     )
     return newpacket
+
+
+def process_query_item(query_path, key_alias, ownerdir):
+    ret = ''
+    ret += 'Q%s\n' % query_path
+    if query_path == '*':
+        for one_key_alias in os.listdir(ownerdir):
+            if not misc.ValidKeyAlias(strng.to_text(one_key_alias)):
+                continue
+            key_alias_dir = os.path.join(ownerdir, one_key_alias)
+            ret += TreeSummary(key_alias_dir, key_alias=one_key_alias)
+        if _Debug:
+            lg.args(_DebugLevel, query_path=query_path, result_bytes=len(ret))
+        return ret
+    # TODO: more validations to be added
+    clean_path = query_path.replace('.', '').replace('~', '').replace(':', '').replace('\\', '/').lstrip('/')
+    path_items = clean_path.split('/')
+    path_items.insert(0, ownerdir)
+    local_path = os.path.join(*path_items)
+    if not os.path.exists(local_path):
+        lg.warn('local file or folder not exist: %r' % local_path)
+        return ''
+    if os.path.isdir(local_path):
+        ret += TreeSummary(local_path, key_alias=key_alias)
+    if _Debug:
+        lg.args(_DebugLevel, query_path=query_path, local_path=local_path, result_bytes=len(ret))
+    return ret
 
 #------------------------------------------------------------------------------
 
@@ -145,9 +175,10 @@ def UnpackListFiles(payload, method):
 
 #------------------------------------------------------------------------------
 
-def TreeSummary(ownerdir, key_alias):
+def TreeSummary(ownerdir, key_alias=None):
     out = StringIO()
-    out.write('K%s\n' % key_alias)
+    if key_alias is not None:
+        out.write('K%s\n' % key_alias)
 
     def cb(result, realpath, subpath, name):
         if not os.access(realpath, os.R_OK):
@@ -160,7 +191,15 @@ def TreeSummary(ownerdir, key_alias):
             result.write('F%s %d\n' % (subpath, filesz))
             return False
         if not packetid.IsCanonicalVersion(name):
-            result.write('D%s\n' % subpath)
+            found_some_versions = False
+            for sub_path in os.listdir(realpath):
+                if packetid.IsCanonicalVersion(sub_path):
+                    found_some_versions = True
+                    break
+            if found_some_versions:
+                result.write('F%s -1\n' % subpath)
+            else:
+                result.write('D%s\n' % subpath)
             return True
         maxBlock = -1
         versionSize = {}
@@ -171,17 +210,17 @@ def TreeSummary(ownerdir, key_alias):
         for filename in os.listdir(realpath):
             packetID = subpath + '/' + filename
             pth = os.path.join(realpath, filename)
+            if os.path.isdir(pth):
+                result.write('D%s\n' % packetID)
+                continue
             try:
                 filesz = os.path.getsize(pth)
             except:
                 filesz = -1
-            if os.path.isdir(pth):
-                result.write('D%s\n' % packetID)
-                continue
             if not packetid.Valid(packetID):
                 result.write('F%s %d\n' % (packetID, filesz))
                 continue
-            customer, pathID, versionName, blockNum, supplierNum, dataORparity = packetid.SplitFull(packetID)
+            _, pathID, versionName, blockNum, supplierNum, dataORparity = packetid.SplitFull(packetID)
             if None in [pathID, versionName, blockNum, supplierNum, dataORparity]:
                 result.write('F%s %d\n' % (packetID, filesz))
                 continue

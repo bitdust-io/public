@@ -256,7 +256,7 @@ class NicknameHolder(automat.Automat):
             self.dht_read_defer.pause()
             self.dht_read_defer.cancel()
             self.dht_read_defer = None
-        d = dht_records.get_nickname(self.key)
+        d = dht_records.get_nickname(self.key, use_cache=False)
         d.addCallback(self._dht_read_result, self.key)
         d.addErrback(self._dht_read_failed)
         self.dht_read_defer = d
@@ -356,6 +356,7 @@ def main():
     dht_service.init(settings.getDHTPort())
     reactor.callWhenRunning(A, 'init', sys.argv[1])  # @UndefinedVariable
     reactor.run()  # @UndefinedVariable
+    settings.shutdown()
 
 
 if __name__ == "__main__":

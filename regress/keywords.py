@@ -20,13 +20,16 @@
 #
 # Please contact us if you have any questions at bitdust.io@gmail.com
 
-
+import os
 import time
 import requests
 import pprint
+import base64
+import threading
 
-from testsupport import request_get, request_post, request_put
+from testsupport import request_get, request_post, request_put, request_delete
 
+#------------------------------------------------------------------------------
 
 def supplier_list_v1(customer: str, expected_min_suppliers=None, expected_max_suppliers=None, attempts=40, delay=3, extract_suppliers=True):
     count = 0
@@ -167,13 +170,56 @@ def share_create_v1(customer: str, key_size=1024):
     assert response.status_code == 200
     print('\nshare/create/v1 [%s] : %s\n' % (customer, pprint.pformat(response.json())))
     assert response.json()['status'] == 'OK', response.json()
-    return response.json()['result'][0]['key_id']
+    return response.json()['result']['key_id']
 
 
 def share_open_v1(customer: str, key_id):
-    response = request_post(customer, 'share/open/v1', json={'key_id': key_id, }, timeout=20)
+    response = request_post(customer, 'share/open/v1', json={'key_id': key_id, }, timeout=60)
     assert response.status_code == 200
     print('\nshare/open/v1 [%s] key_id=%r : %s\n' % (customer, key_id, pprint.pformat(response.json())))
+    assert response.json()['status'] == 'OK', response.json()
+    return response.json()
+
+
+def group_create_v1(customer: str, key_size=1024, label=''):
+    response = request_post(customer, 'group/create/v1', json={'key_size': key_size, 'label': label, }, timeout=20)
+    assert response.status_code == 200
+    print('\ngroup/create/v1 [%s] : %s\n' % (customer, pprint.pformat(response.json())))
+    assert response.json()['status'] == 'OK', response.json()
+    return response.json()['result']['group_key_id']
+
+
+def group_info_v1(customer: str, group_key_id):
+    response = request_get(customer, 'group/info/v1?group_key_id=%s' % group_key_id, timeout=20)
+    assert response.status_code == 200
+    print('\ngroup/info/v1 [%s] : %s\n' % (customer, pprint.pformat(response.json())))
+    assert response.json()['status'] == 'OK', response.json()
+    return response.json()
+
+
+def group_join_v1(customer: str, group_key_id, attempts=1):
+    response = request_post(customer, 'group/join/v1', json={'group_key_id': group_key_id, }, timeout=60, attempts=attempts)
+    assert response.status_code == 200
+    print('\ngroup/join/v1 [%s] group_key_id=%r : %s\n' % (customer, group_key_id, pprint.pformat(response.json())))
+    assert response.json()['status'] == 'OK', response.json()
+    return response.json()
+
+
+def group_leave_v1(customer: str, group_key_id):
+    response = request_delete(customer, 'group/leave/v1', json={'group_key_id': group_key_id, }, timeout=20)
+    assert response.status_code == 200
+    print('\ngroup/leave/v1 [%s] group_key_id=%r : %s\n' % (customer, group_key_id, pprint.pformat(response.json())))
+    assert response.json()['status'] == 'OK', response.json()
+    return response.json()
+
+
+def group_share_v1(customer: str, group_key_id, trusted_id):
+    response = request_put(customer, 'group/share/v1', json={
+        'group_key_id': group_key_id,
+        'trusted_id': trusted_id,
+    }, timeout=60)
+    assert response.status_code == 200
+    print('\ngroup/share/v1 [%s] group_key_id=%r trusted_id=%r : %s\n' % (customer, group_key_id, trusted_id, pprint.pformat(response.json())))
     assert response.json()['status'] == 'OK', response.json()
     return response.json()
 
@@ -338,22 +384,22 @@ def dht_value_get_v1(node, key, expected_data, record_type='skip_validation', re
             print('\ndht/value/get/v1 [%s] : %s\n' % (node, pprint.pformat(response.json()), ))
             assert response.json()['status'] == 'OK', response.json()
             assert len(response.json()['result']) > 0, response.json()
-            assert response.json()['result'][0]['key'] == key, response.json()
+            assert response.json()['result']['key'] == key, response.json()
             if expected_data == 'not_exist':
-                assert response.json()['result'][0]['read'] == 'failed', response.json()
-                assert 'value' not in response.json()['result'][0], response.json()
-                assert len(response.json()['result'][0]['closest_nodes']) > 0, response.json()
+                assert response.json()['result']['read'] == 'failed', response.json()
+                assert 'value' not in response.json()['result'], response.json()
+                assert len(response.json()['result']['closest_nodes']) > 0, response.json()
             else:
-                if response.json()['result'][0]['read'] == 'failed':
+                if response.json()['result']['read'] == 'failed':
                     print('first request failed, retry one more time')
                     response = request_get(node, 'dht/value/get/v1?record_type=%s&key=%s' % (record_type, key, ), timeout=20)
                     assert response.status_code == 200
                     assert response.json()['status'] == 'OK', response.json()
-                assert response.json()['result'][0]['read'] == 'success', response.json()
-                assert 'value' in response.json()['result'][0], response.json()
-                assert response.json()['result'][0]['value']['data'] in expected_data, response.json()
-                assert response.json()['result'][0]['value']['key'] == key, response.json()
-                assert response.json()['result'][0]['value']['type'] == record_type, response.json()
+                assert response.json()['result']['read'] == 'success', response.json()
+                assert 'value' in response.json()['result'], response.json()
+                assert response.json()['result']['value']['data'] in expected_data, response.json()
+                assert response.json()['result']['value']['key'] == key, response.json()
+                assert response.json()['result']['value']['type'] == record_type, response.json()
         except:
             time.sleep(2)
             if i == retries - 1:
@@ -378,12 +424,12 @@ def dht_value_set_v1(node, key, new_data, record_type='skip_validation', ):
     print('\ndht/value/set/v1 [%s] key=%s : %s\n' % (node, key, pprint.pformat(response.json()), ))
     assert response.json()['status'] == 'OK', response.json()
     assert len(response.json()['result']) > 0, response.json()
-    assert response.json()['result'][0]['write'] == 'success', response.json()
-    assert response.json()['result'][0]['key'] == key, response.json()
-    assert response.json()['result'][0]['value']['data'] == new_data, response.json()
-    assert response.json()['result'][0]['value']['key'] == key, response.json()
-    assert response.json()['result'][0]['value']['type'] == record_type, response.json()
-    assert len(response.json()['result'][0]['closest_nodes']) > 0, response.json()
+    assert response.json()['result']['write'] == 'success', response.json()
+    assert response.json()['result']['key'] == key, response.json()
+    assert response.json()['result']['value']['data'] == new_data, response.json()
+    assert response.json()['result']['value']['key'] == key, response.json()
+    assert response.json()['result']['value']['type'] == record_type, response.json()
+    assert len(response.json()['result']['closest_nodes']) > 0, response.json()
     return response.json()
 
 
@@ -412,13 +458,43 @@ def message_send_v1(node, recipient, data, timeout=30):
     return response.json()
 
 
-def message_receive_v1(node, expected_data, consumer='test_consumer',):
-    response = request_get(node, f'message/receive/{consumer}/v1', timeout=20)
+def message_send_group_v1(node, group_key_id, data, timeout=20):
+    print('\nmessage/send/group/v1 [%s] data=%r' % (node, data, ))
+    response = request_post(node, 'message/send/group/v1',
+        json={
+            'group_key_id': group_key_id,
+            'data': data,
+        },
+        timeout=timeout,
+    )
+    assert response.status_code == 200
+    print(f'\nmessage/send/group/v1 [%s] : %s\n' % (
+        node, pprint.pformat(response.json())))
+    assert response.json()['status'] == 'OK', response.json()
+    return response.json()
+
+
+def message_receive_v1(node, expected_data=None, consumer='test_consumer', get_result=None, timeout=15, polling_timeout=10, attempts=1):
+    response = request_get(node, f'message/receive/{consumer}/v1?polling_timeout=%d' % polling_timeout, timeout=timeout, attempts=attempts)
     assert response.status_code == 200
     print(f'\nmessage/receive/{consumer}/v1 [%s] : %s\n' % (
         node, pprint.pformat(response.json())))
+    if get_result is not None:
+        if response.json()['status'] == 'OK':
+            get_result[0] = response.json()
+        return get_result
     assert response.json()['status'] == 'OK', response.json()
-    assert response.json()['result'][0]['data'] == expected_data, response.json()
+    if expected_data is not None:
+        assert response.json()['result'][0]['data'] == expected_data, response.json()
+    return response.json()
+
+
+def message_history_v1(node, recipient_id, message_type='private_message', timeout=15):
+    response = request_get(node, f'message/history/v1?id={recipient_id}&type={message_type}', timeout=timeout)
+    assert response.status_code == 200
+    print('\nmessage/history/v1 [%s] recipient_id=%s : %s\n' % (node, recipient_id, pprint.pformat(response.json()), ))
+    assert response.json()['status'] == 'OK', response.json()
+    return response.json()
 
 
 def user_ping_v1(node, remote_node_id, timeout=95, ack_timeout=30, retries=2):
@@ -441,7 +517,7 @@ def service_info_v1(node, service_name, expected_state, attempts=30, delay=3):
         response = request_get(node, f'service/info/{service_name}/v1', timeout=20)
         assert response.status_code == 200
         assert response.json()['status'] == 'OK', response.json()
-        current_state = response.json()['result'][0]['state']
+        current_state = response.json()['result']['state']
         print(f'\nservice/info/{service_name}/v1 [{node}] : %s' % pprint.pformat(response.json()))
         if current_state == expected_state:
             break
@@ -451,6 +527,22 @@ def service_info_v1(node, service_name, expected_state, attempts=30, delay=3):
             return
         time.sleep(delay)
     print(f'service/info/{service_name}/v1 [{node}] : OK\n')
+
+
+def service_start_v1(node, service_name, timeout=10):
+    response = request_post(node, 'service/start/%s/v1' % service_name, json={}, timeout=timeout)
+    assert response.status_code == 200
+    print('\nservice/start/%s/v1 [%s]: %s\n' % (service_name, node, pprint.pformat(response.json()), ))
+    assert response.json()['status'] == 'OK', response.json()
+    return response.json()
+
+
+def service_stop_v1(node, service_name, timeout=10):
+    response = request_post(node, 'service/stop/%s/v1' % service_name, json={}, timeout=timeout)
+    assert response.status_code == 200
+    print('\nservice/stop/%s/v1 [%s]: %s\n' % (service_name, node, pprint.pformat(response.json()), ))
+    assert response.json()['status'] == 'OK', response.json()
+    return response.json()
 
 
 def event_listen_v1(node, expected_event_id, consumer_id='regression_tests_wait_event', attempts=3, timeout=10,):
@@ -474,9 +566,10 @@ def event_listen_v1(node, expected_event_id, consumer_id='regression_tests_wait_
 
 
 def packet_list_v1(node, wait_all_finish=False, attempts=60, delay=3, verbose=False):
-    print('\npacket/list/v1 [%s]\n' % node)
+    if verbose:
+        print('\npacket/list/v1 [%s]\n' % node)
     for _ in range(attempts):
-        response = request_get(node, 'packet/list/v1', timeout=20)
+        response = request_get(node, 'packet/list/v1', timeout=20, verbose=verbose)
         assert response.status_code == 200
         if verbose:
             print('\npacket/list/v1 [%s] : %s\n' % (node, pprint.pformat(response.json()), ))
@@ -490,9 +583,10 @@ def packet_list_v1(node, wait_all_finish=False, attempts=60, delay=3, verbose=Fa
 
 
 def transfer_list_v1(node, wait_all_finish=False, attempts=60, delay=3, verbose=False):
-    print('\ntransfer/list/v1 [%s]\n' % node)
+    if verbose:
+        print('\ntransfer/list/v1 [%s]\n' % node)
     for _ in range(attempts):
-        response = request_get(node, 'transfer/list/v1', timeout=20)
+        response = request_get(node, 'transfer/list/v1', timeout=20, verbose=verbose)
         assert response.status_code == 200
         if verbose:
             print('\ntransfer/list/v1 [%s] : %s\n' % (node, pprint.pformat(response.json()), ))
@@ -579,3 +673,86 @@ def friend_list_v1(node, extract_idurls=False):
     if not extract_idurls:
         return response.json()
     return [f['idurl'] for f in response.json()['result']]
+
+
+def queue_list_v1(node, extract_ids=False):
+    response = request_get(node, 'queue/list/v1', timeout=20)
+    assert response.status_code == 200
+    print('\nqueue/list/v1 [%s] : %s\n' % (node, pprint.pformat(response.json()), ))
+    assert response.json()['status'] == 'OK', response.json()
+    if not extract_ids:
+        return response.json()
+    return [f['queue_id'] for f in response.json()['result']]
+
+
+def queue_consumer_list_v1(node, extract_ids=False):
+    response = request_get(node, 'queue/consumer/list/v1', timeout=20)
+    assert response.status_code == 200
+    print('\nqueue/consumer/list/v1 [%s] : %s\n' % (node, pprint.pformat(response.json()), ))
+    assert response.json()['status'] == 'OK', response.json()
+    if not extract_ids:
+        return response.json()
+    return [f['consumer_id'] for f in response.json()['result']]
+
+
+def queue_producer_list_v1(node, extract_ids=False):
+    response = request_get(node, 'queue/producer/list/v1', timeout=20)
+    assert response.status_code == 200
+    print('\nqueue/producer/list/v1 [%s] : %s\n' % (node, pprint.pformat(response.json()), ))
+    assert response.json()['status'] == 'OK', response.json()
+    if not extract_ids:
+        return response.json()
+    return [f['producer_id'] for f in response.json()['result']]
+
+#------------------------------------------------------------------------------
+
+def wait_packets_finished(nodes):
+    for node in nodes:
+        packet_list_v1(node, wait_all_finish=True)
+
+
+def verify_message_sent_received(group_key_id, producer_id, consumers_ids, message_label='A',
+                                 expected_results={}, expected_last_sequence_id={},
+                                 receive_timeout=15, polling_timeout=10):
+    sample_message = {
+        'random_message': 'MESSAGE_%s_%s' % (message_label, base64.b32encode(os.urandom(20)).decode(), ),
+    }
+    consumer_results = {}
+    consumer_threads = {}
+
+    for consumer_id in consumers_ids:
+        consumer_results[consumer_id] = [None, ]
+        consumer_threads[consumer_id] = threading.Timer(0, message_receive_v1, [
+            consumer_id, sample_message, 'test_consumer', consumer_results[consumer_id], receive_timeout, polling_timeout, ])
+
+    producer_thread = threading.Timer(0.2, message_send_group_v1, [
+        producer_id, group_key_id, sample_message, ])
+
+    for consumer_id in consumers_ids:
+        consumer_threads[consumer_id].start()
+
+    producer_thread.start()
+
+    for consumer_id in consumers_ids:
+        consumer_threads[consumer_id].join()
+
+    producer_thread.join()
+
+    if expected_results:
+        for consumer_id, expected_result in expected_results.items():
+            if expected_result:
+                if not consumer_results[consumer_id][0] or not consumer_results[consumer_id][0]['result']:
+                    assert False, 'consumer %r did not received expected message %r' % (consumer_id, sample_message)
+                if consumer_results[consumer_id][0]['result'][0]['data'] != sample_message:
+                    assert False, 'consumer %r received message %r, but expected is %r' % (
+                        consumer_id, consumer_results[consumer_id][0]['result'][0]['data'], sample_message)
+            else:
+                assert consumer_results[consumer_id][0]['result'] == [], 'consumer %r received message while should not: %r' % (
+                    consumer_id, consumer_results[consumer_id])
+            if consumer_id in expected_last_sequence_id:
+                consumer_last_sequence_id = group_info_v1(consumer_id, group_key_id)['result']['last_sequence_id']
+                assert consumer_last_sequence_id == expected_last_sequence_id[consumer_id], \
+                    'consumer %r last_sequence_id is %r but expected is %r' % (
+                        consumer_id, consumer_last_sequence_id, expected_last_sequence_id[consumer_id])
+
+    return sample_message

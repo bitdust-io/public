@@ -1,6 +1,6 @@
 env:
   global:
-    - DOCKER_COMPOSE_VERSION=1.24.1
+    - DOCKER_COMPOSE_VERSION=1.25.5
 
 services: docker
 
@@ -21,16 +21,18 @@ matrix:
         - REGRESSION_PY_VER=3.6
         - VENV_PYTHON_VERSION=python3.6
 
+
 before_install:
   - set -e
   - make -v
+  - docker-compose -v
   - sudo rm /usr/local/bin/docker-compose
   - curl -L https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-`uname -s`-`uname -m` > docker-compose
   - chmod +x docker-compose
   - sudo mv docker-compose /usr/local/bin
-
   - docker -v
   - docker-compose -v
+
 
 script:
   - make test_unit

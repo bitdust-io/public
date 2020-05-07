@@ -28,22 +28,35 @@ from six.moves import range
 
 #------------------------------------------------------------------------------
 
-import os
-import traceback
+_Debug = False
 
 #------------------------------------------------------------------------------
+
+import os
+import sys
+
+#------------------------------------------------------------------------------
+
+if __name__ == '__main__':
+    dirpath = os.path.dirname(os.path.abspath(sys.argv[0]))
+    sys.path.insert(0, os.path.abspath(os.path.join(dirpath, '..')))
+    sys.path.insert(0, os.path.abspath(os.path.join(dirpath, '..', '..')))
+
+#------------------------------------------------------------------------------
+
+import logs.lg
 
 import raid.read
 import raid.eccmap
 
 #------------------------------------------------------------------------------
 
-_Debug = False
-
-#------------------------------------------------------------------------------
-
 def rebuild(backupID, blockNum, eccMap, availableSuppliers, remoteMatrix, localMatrix, localBackupsDir, threshold_control=None):
     try:
+        if _Debug:
+            with open('/tmp/raid.log', 'a') as logfile:
+                logfile.write(u'rebuild backupID=%r blockNum=%r eccMap=%r\n' % (backupID, blockNum, eccMap, ))
+
         customer, _, localPath = backupID.rpartition(':')
         if '$' not in customer:
             customer = 'master$' + customer
@@ -85,8 +98,11 @@ def rebuild(backupID, blockNum, eccMap, availableSuppliers, remoteMatrix, localM
                 missingParity[supplierNum] = 1
 
         if _Debug:
-            open('/tmp/raid.log', 'a').write(u'missingData=%r missingParity=%r\n' % (missingData, missingParity))
-            open('/tmp/raid.log', 'a').write(u'localData=%r localParity=%r\n' % (localData, localParity))
+            with open('/tmp/raid.log', 'a') as logfile:
+                logfile.write(u'missingData=%r\n' % missingData)
+                logfile.write(u'missingParity=%r\n' % missingParity)
+                logfile.write(u'localData=%r\n' % localData)
+                logfile.write(u'localParity=%r\n' % localParity)
 
         # This made an attempt to rebuild the missing pieces
         # from pieces we have on hands.
@@ -153,9 +169,13 @@ def rebuild(backupID, blockNum, eccMap, availableSuppliers, remoteMatrix, localM
                 # self.outstandingFilesList.append((parityFileName, self.BuildFileName(supplierNum, 'Parity'), supplierNum))
                 # self.paritySent[supplierNum] = 1
         # lg.out(14, 'block_rebuilder.AttemptRebuild END')
+
+        if _Debug:
+            with open('/tmp/raid.log', 'a') as logfile:
+                logfile.write(u'newData=%r\n' % newData)
+
         return (newData, localData, localParity, reconstructedData, reconstructedParity, )
 
     except:
-        # lg.exc()
-        traceback.print_exc()
+        logs.lg.exc()
         return None

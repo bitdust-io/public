@@ -82,7 +82,6 @@ _BackupMaxBlockSize = None
 #---INIT-----------------------------------------------------------------------
 #------------------------------------------------------------------------------
 
-
 def init(base_dir=None):
     """
     Must be called before all other things.
@@ -101,20 +100,25 @@ def init(base_dir=None):
     _InitDone = True
     deploy.init_base_dir(base_dir)
     if _Debug:
-        lg.out(_DebugLevel, 'settings.init data location: ' + BaseDir())
+        lg.out(_DebugLevel, 'settings.init data location is %r' % BaseDir())
     _checkMetaDataDirectory()
     _checkConfigDirectory()
-    # TODO: keep that here as an example solution for possible manual migrations
-    # migration from uconfig() to config.conf()
-    # if not os.path.isdir(ConfigDir()):
-    #     uconfig()
-    #     bpio._dir_make(ConfigDir())
-    #     convert_configs()
     _setUpDefaultSettings()
     _checkRandomizePortNumbers()
     _createNotExisingSettings()
     _checkStaticDirectories()
     _checkCustomDirectories()
+
+
+def shutdown():
+    """
+    """
+    global _InitDone
+    _InitDone = False
+    if _Debug:
+        lg.out(_DebugLevel, 'settings.shutdown data location was %r' % deploy.current_base_dir())
+    deploy.set_base_dir(None)
+    config.shutdown()
 
 #------------------------------------------------------------------------------
 #---USER CONFIG----------------------------------------------------------------
@@ -898,11 +902,16 @@ def APICertificatesDir():
     return os.path.join(BaseDir(), 'blockchain')
 
 
-def DHTDataDir():
+def ServicesDataDir():
     """
     """
-    return os.path.join(BaseDir(), 'dht')
+    return os.path.join(BaseDir(), 'servicedata')
 
+
+def ServiceDir(service_name):
+    """
+    """
+    return os.path.join(ServicesDataDir(), service_name.replace('service_', ''))
 
 #------------------------------------------------------------------------------
 #--- FILES --------------------------------------------------------------------
@@ -1270,12 +1279,6 @@ def ChatMessagesHistoryDatabaseFile():
     """
     """
     return os.path.join(ChatMessagesDir(), 'local.db')
-
-
-def DHTDataLayerFile(layer_index):
-    """
-    """
-    return os.path.join(DHTDataDir(), 'db_%d' % layer_index)
 
 #------------------------------------------------------------------------------
 #--- BINARY FILES -------------------------------------------------------------
@@ -2531,10 +2534,6 @@ def _checkStaticDirectories():
         if _Debug:
             lg.out(_DebugLevel, 'settings.init want to create folder: ' + BlockchainDir())
         os.makedirs(BlockchainDir())
-    if not os.path.exists(DHTDataDir()):
-        if _Debug:
-            lg.out(_DebugLevel, 'settings.init want to create folder: ' + DHTDataDir())
-        os.makedirs(DHTDataDir())
 
 
 def _checkCustomDirectories():

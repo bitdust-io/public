@@ -135,14 +135,8 @@ class KeysSynchronizer(automat.Automat):
         """
         Method to catch the moment when `keys_synchronizer()` state were changed.
         """
-        if newstate == 'NO_INFO':
+        if newstate == 'NO_INFO' and event != 'instant':
             self.automat('instant')
-
-    def state_not_changed(self, curstate, event, *args, **kwargs):
-        """
-        This method intended to catch the moment when some event was fired in the `keys_synchronizer()`
-        but automat state was not changed.
-        """
 
     def A(self, event, *args, **kwargs):
         """
@@ -264,33 +258,34 @@ class KeysSynchronizer(automat.Automat):
         self.keys_to_erase = {}
         self.keys_to_rename = {}
         lookup = backup_fs.ListChildsByPath(path='.keys', recursive=False, )
-        minimum_reliable_percent = eccmap.GetCorrectablePercent(eccmap.Current().suppliers_number)
-        for i in lookup:
-            if i['path'].endswith('.public'):
-                stored_key_id = i['path'].replace('.public', '').replace('.keys/', '')
-                is_private = False
-            else:
-                stored_key_id = i['path'].replace('.private', '').replace('.keys/', '')
-                is_private = True
-            is_reliable = False
-            for v in i['versions']:
-                try:
-                    reliable = float(v['reliable'].replace('%', ''))
-                except:
-                    lg.exc()
-                    reliable = 0.0
-                if reliable > minimum_reliable_percent:
-                    is_reliable = True
-                    break
-            if is_reliable:
-                self.stored_keys[stored_key_id] = is_private
-            else:
-                if is_private and my_keys.is_key_private(stored_key_id):
-                    self.not_stored_keys[stored_key_id] = is_private
-                elif not is_private and my_keys.is_key_registered(stored_key_id):
-                    self.not_stored_keys[stored_key_id] = is_private
+        if isinstance(lookup, list):
+            minimum_reliable_percent = eccmap.GetCorrectablePercent(eccmap.Current().suppliers_number)
+            for i in lookup:
+                if i['path'].endswith('.public'):
+                    stored_key_id = i['path'].replace('.public', '').replace('.keys/', '')
+                    is_private = False
                 else:
-                    self.unreliable_keys[stored_key_id] = is_private
+                    stored_key_id = i['path'].replace('.private', '').replace('.keys/', '')
+                    is_private = True
+                is_reliable = False
+                for v in i['versions']:
+                    try:
+                        reliable = float(v['reliable'].replace('%', ''))
+                    except:
+                        lg.exc()
+                        reliable = 0.0
+                    if reliable > minimum_reliable_percent:
+                        is_reliable = True
+                        break
+                if is_reliable:
+                    self.stored_keys[stored_key_id] = is_private
+                else:
+                    if is_private and my_keys.is_key_private(stored_key_id):
+                        self.not_stored_keys[stored_key_id] = is_private
+                    elif not is_private and my_keys.is_key_registered(stored_key_id):
+                        self.not_stored_keys[stored_key_id] = is_private
+                    else:
+                        self.unreliable_keys[stored_key_id] = is_private
         if _Debug:
             lg.args(_DebugLevel,
                     stored_keys=len(self.stored_keys),
