@@ -120,6 +120,8 @@ def reset(conf_obj):
 
     conf_obj.setDefaultValue('services/customer-support/enabled', 'true')
 
+    conf_obj.setDefaultValue('services/data-disintegration/enabled', 'true')
+
     conf_obj.setDefaultValue('services/data-motion/enabled', 'true')
     conf_obj.setDefaultValue('services/data-motion/supplier-request-queue-size', 4)            
     conf_obj.setDefaultValue('services/data-motion/supplier-sending-queue-size', 4)            
@@ -164,6 +166,7 @@ def reset(conf_obj):
     conf_obj.setDefaultValue('services/list-files/enabled', 'true')
 
     conf_obj.setDefaultValue('services/message-broker/enabled', 'true')
+    conf_obj.setDefaultValue('services/message-broker/archive-chunk-size', 100)
 
     conf_obj.setDefaultValue('services/message-history/enabled', 'true')
 
@@ -190,9 +193,10 @@ def reset(conf_obj):
     conf_obj.setDefaultValue('services/p2p-notifications/enabled', 'true')
 
     conf_obj.setDefaultValue('services/private-groups/enabled', 'true')
+    conf_obj.setDefaultValue('services/private-groups/message-ack-timeout', 10)
 
     conf_obj.setDefaultValue('services/private-messages/enabled', 'true')
-
+    
     conf_obj.setDefaultValue('services/proxy-server/enabled', 'false')
     conf_obj.setDefaultValue('services/proxy-server/routes-limit', 10)
     conf_obj.setDefaultValue('services/proxy-server/current-routes', '{}')

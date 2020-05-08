@@ -45,10 +45,16 @@ _FORMAT_GLOBAL_ID_USER = '{username}@{host}'
 _FORMAT_GLOBAL_ID_USER_KEY = '{user}!{key_alias}'
 _FORMAT_GLOBAL_ID_KEY_USER = '{key_alias}${user}'
 _FORMAT_GLOBAL_ID_QUEUE_ID = '{queue_alias}&{owner_id}&{supplier_id}'
+_FORMAT_GLOBAL_CUSTOMER_QUEUE_ID = '{queue_alias}&{customer_id}&{position}'
 
 _REGEX_GLOBAL_ID_USER_KEY = '^(?P<user>[a-z0-9-_]+)\!(?P<key_alias>[a-z0-9-_]+)$'
 _REGEX_GLOBAL_ID_KEY_USER = '^(?P<key_alias>[a-z0-9-_]+)\$(?P<user>[a-z0-9-_]+)$'
 _REGEX_GLOBAL_ID_QUEUE_ID = '^(?P<queue_alias>[a-z0-9-_]+)\&(?P<owner_id>[a-z0-9-_\@\.]+)\&(?P<supplier_id>[a-z0-9-_\@\.]+)$'
+_REGEX_GLOBAL_CUSTOMER_QUEUE_ID = '^(?P<queue_alias>[a-z0-9-_]+)\&(?P<customer_id>[a-z0-9-_\@\.]+)\&(?P<position>[0-9]+)$'
+
+#------------------------------------------------------------------------------
+
+_REGEX_OBJ_GLOBAL_ID_QUEUE_ID = None
 
 #------------------------------------------------------------------------------
 
@@ -59,11 +65,11 @@ def idurl2glob(idurl):
     return UrlToGlobalID(idurl)
 
 
-def glob2idurl(glob_id):
+def glob2idurl(glob_id, as_field=True):
     """
     Alias.
     """
-    return GlobalUserToIDURL(glob_id)
+    return GlobalUserToIDURL(glob_id, as_field=as_field)
 
 #------------------------------------------------------------------------------
 
@@ -170,6 +176,11 @@ def ParseGlobalID(inp, detect_version=False, as_field=True):
     if not inp:
         return result
     inp = strng.to_text(inp)
+    if inp.count('&') == 2:
+        # this is GLOBAL_ID_QUEUE_ID format : just need to get rid of the last supplier_id part and
+        # translate it into GLOBAL_ID_KEY_USER format
+        inp, _, _ = inp.strip().rpartition('&')
+        inp = inp.replace('&', '$')
     if inp.count(':'):
         user, _, path = inp.strip().rpartition(':')
     else:
@@ -184,9 +195,9 @@ def ParseGlobalID(inp, detect_version=False, as_field=True):
         if not user_and_key or not idhost:
             return result
         try:
-            user_key = re.match(_REGEX_GLOBAL_ID_USER_KEY, user_and_key)
+            user_key = re.match(_REGEX_GLOBAL_ID_KEY_USER, user_and_key)
             if not user_key:
-                user_key = re.match(_REGEX_GLOBAL_ID_KEY_USER, user_and_key)
+                user_key = re.match(_REGEX_GLOBAL_ID_USER_KEY, user_and_key)
             if user_key:
                 result['user'] = user_key.group('user')
                 result['key_alias'] = user_key.group('key_alias')
@@ -290,7 +301,7 @@ def UrlToGlobalID(url, include_key=False):
     if not url:
         return url
     from lib import nameurl
-    _, host, port, filename = nameurl.UrlParse(url)
+    _, host, port, _, filename = nameurl.UrlParseFast(url)
     if filename.count('.'):
         username = filename.split('.')[0]
     else:
@@ -313,6 +324,7 @@ def GlobalUserToIDURL(inp, as_field=True):
         return None
     _, _, user = user.strip().rpartition('$')
     if idhost.count('_'):
+        # we can do that because domain names never use "_" symbol
         _pos = idhost.rfind('_')
         port = idhost[_pos + 1:]
         try:
@@ -360,7 +372,7 @@ def IsFullGlobalID(inp):
 
 #------------------------------------------------------------------------------
 
-def MakeGlobalQueueID(queue_alias, owner_id=None, supplier_id=None):
+def MakeGlobalQueueID(queue_alias, owner_id, supplier_id):
     """
     """
     global _FORMAT_GLOBAL_ID_QUEUE_ID
@@ -370,14 +382,17 @@ def MakeGlobalQueueID(queue_alias, owner_id=None, supplier_id=None):
         supplier_id=strng.to_text(supplier_id),
     )
 
-def ParseGlobalQueueID(inp):
+def ParseGlobalQueueID(queue_id):
     global _REGEX_GLOBAL_ID_QUEUE_ID
+    global _REGEX_OBJ_GLOBAL_ID_QUEUE_ID
+    if _REGEX_OBJ_GLOBAL_ID_QUEUE_ID is None:
+        _REGEX_OBJ_GLOBAL_ID_QUEUE_ID = re.compile(_REGEX_GLOBAL_ID_QUEUE_ID)
     ret = {
         'queue_alias': '',
         'owner_id': '',
         'supplier_id': '',
     }
-    result = re.match(_REGEX_GLOBAL_ID_QUEUE_ID, inp)
+    result = _REGEX_OBJ_GLOBAL_ID_QUEUE_ID.match(queue_id)
     if not result:
         return ret
     ret['queue_alias'] = strng.to_text(result.group('queue_alias'))
@@ -385,4 +400,27 @@ def ParseGlobalQueueID(inp):
     ret['supplier_id'] = strng.to_text(result.group('supplier_id'))
     return ret
 
-#------------------------------------------------------------------------------
+
+def SplitGlobalQueueID(queue_id, split_queue_alias=True):
+    queue_alias_owner_id, _, supplier_id = queue_id.rpartition('&')
+    if not split_queue_alias:
+        return queue_alias_owner_id, supplier_id
+    queue_alias, _, owner_id = queue_alias_owner_id.partition('&')
+    return queue_alias, owner_id, supplier_id
+
+
+def GetGlobalQueueOwnerIDURL(queue_id, as_field=True):
+    queue_alias_owner_id, _, _ = queue_id.rpartition('&')
+    _, _, owner_id = queue_alias_owner_id.partition('&')
+    owner_idurl = glob2idurl(owner_id, as_field=as_field)
+    return owner_idurl
+
+
+def GetGlobalQueueKeyID(queue_id):
+    queue_alias_owner_id, _, _ = queue_id.rpartition('&')
+    queue_alias, _, owner_id = queue_alias_owner_id.partition('&')
+    key_id = _FORMAT_GLOBAL_ID_KEY_USER.format(
+        key_alias=queue_alias,
+        user=owner_id,
+    )
+    return key_id

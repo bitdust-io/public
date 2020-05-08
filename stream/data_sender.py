@@ -88,7 +88,8 @@ from main import settings
 
 from p2p import online_status
 
-from customer import io_throttle
+from stream import io_throttle
+
 from customer import list_files_orator
 
 #------------------------------------------------------------------------------
@@ -124,10 +125,6 @@ class DataSender(automat.Automat):
         'timer-1min': (60, ['READY']),
         'timer-1sec': (1.0, ['SENDING']),
     }
-
-
-    def state_changed(self, oldstate, newstate, event, *args, **kwargs):
-        global_state.set_global_state('DATASEND ' + newstate)
 
     def A(self, event, *args, **kwargs):
         #---READY---
@@ -293,7 +290,7 @@ class DataSender(automat.Automat):
                             filename,
                             packetID,
                             supplier_idurl,
-                            my_id.getLocalID(),
+                            my_id.getIDURL(),
                             self._packetAcked,
                             self._packetFailed,
                         ):

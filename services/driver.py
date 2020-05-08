@@ -39,7 +39,7 @@ from six.moves import range
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 6
+_DebugLevel = 12
 
 #------------------------------------------------------------------------------
 
@@ -48,7 +48,7 @@ import sys
 import importlib
 
 from twisted.internet import reactor  # @UnresolvedImport
-from twisted.internet.defer import Deferred, DeferredList, succeed, failure  # @UnresolvedImport
+from twisted.internet.defer import Deferred, DeferredList, succeed  # @UnresolvedImport
 
 #------------------------------------------------------------------------------
 
@@ -731,6 +731,7 @@ def main():
     init()
     # print '\n'.join(_BootUpOrder)
     shutdown()
+    settings.shutdown()
 
 
 if __name__ == '__main__':

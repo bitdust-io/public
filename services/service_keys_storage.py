@@ -141,10 +141,10 @@ class KeysStorageService(LocalService):
         global_keys_folder_path = global_id.MakeGlobalID(
             key_alias='master', customer=my_id.getGlobalID(), path='.keys')
         res = api.file_exists(global_keys_folder_path)
-        if res['status'] != 'OK' or not res['result']:
+        if res['status'] != 'OK' or not res['result'] or not res['result'].get('exist'):
             res = api.file_create(global_keys_folder_path, as_folder=True)
             if res['status'] != 'OK':
-                lg.err('failed to create keys folder "%s" in the catalog: %r' % (global_keys_folder_path, res))
+                lg.err('failed to create ".keys" folder "%s" in the catalog: %r' % (global_keys_folder_path, res))
                 result.errback(Exception('failed to create keys folder "%s" in the catalog: %r' % (global_keys_folder_path, res)))
                 return
             lg.info('created new remote folder ".keys" in the catalog: %r' % global_keys_folder_path)

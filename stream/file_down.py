@@ -90,7 +90,7 @@ from p2p import commands
 
 from transport import packet_out
 
-from customer import io_throttle
+from stream import io_throttle
 
 #------------------------------------------------------------------------------
 
@@ -133,23 +133,6 @@ class FileDown(automat.Automat):
             publish_events=publish_events,
             **kwargs
         )
-
-    def init(self):
-        """
-        Method to initialize additional variables and flags
-        at creation phase of `file_down()` machine.
-        """
-
-    def state_changed(self, oldstate, newstate, event, *args, **kwargs):
-        """
-        Method to catch the moment when `file_down()` state were changed.
-        """
-
-    def state_not_changed(self, curstate, event, *args, **kwargs):
-        """
-        This method intended to catch the moment when some event was fired in the `file_down()`
-        but automat state was not changed.
-        """
 
     def A(self, event, *args, **kwargs):
         """

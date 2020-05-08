@@ -73,7 +73,7 @@ _one_prepare:
 	@echo "PREPARE ${TEST_NAME}"; python3 prepare_test.py ${TEST_NAME};
 
 _one_up:
-	@echo "UP ${TEST_NAME}"; docker-compose --file tests/${TEST_NAME}/docker-compose.yml up -d --no-deps --build tester 1> /dev/null 2> /dev/null && docker-compose --file tests/${TEST_NAME}/docker-compose.yml up -d 1> /dev/null 2> /dev/null
+	@echo "UP ${TEST_NAME}"; docker-compose --file tests/${TEST_NAME}/docker-compose.yml up -d --no-deps --build tester 1> /dev/null 2> logs/container.${TEST_NAME}.err && docker-compose --file tests/${TEST_NAME}/docker-compose.yml up -d 1> /dev/null 2>> logs/container.${TEST_NAME}.err
 
 _one_down:
 	@echo "DOWN ${TEST_NAME}"; docker-compose --file tests/${TEST_NAME}/docker-compose.yml down -v -t 1 1> /dev/null 2> /dev/null
@@ -81,7 +81,7 @@ _one_down:
 _one_test:
 	@echo "TEST ${TEST_NAME} DEBUG=${_DEBUG}";
 	@mkdir -p logs;
-	@docker-compose --file tests/${TEST_NAME}/docker-compose.yml exec -T tester sh -c "TEST_NAME=${TEST_NAME} _DEBUG=${_DEBUG} python -u -m pytest /app/tests/${TEST_NAME}/ -v -s"  2> logs/${TEST_NAME}.stderr || (echo "test ${TEST_NAME} FAILED !!!" && echo "FAIL" > logs/${TEST_NAME}.fail && exit 1)
+	@docker-compose --file tests/${TEST_NAME}/docker-compose.yml exec -T tester sh -c "TEST_NAME=${TEST_NAME} _DEBUG=${_DEBUG} python -u -m pytest /app/tests/${TEST_NAME}/ -v -s" 2> logs/container.${TEST_NAME}.stderr || (echo "test ${TEST_NAME} FAILED !!!" && echo "FAIL" > logs/container.${TEST_NAME}.fail && exit 1)
 
 _one_coverage:
 	@echo "COVERAGE ${TEST_NAME}";
@@ -90,7 +90,7 @@ _one_coverage:
 
 _one_log:
 	@echo "LOG ${TEST_NAME}";
-	@/bin/bash fetch_logs.sh ${TEST_NAME} > /dev/null;
+	@/bin/bash fetch_logs.sh ${TEST_NAME} ;
 
 _one_post_report:
 	@echo "LOG ${TEST_NAME}";

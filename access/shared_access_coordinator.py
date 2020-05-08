@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # shared_access_coordinator.py
 #
-# Copyright (C) 2008-2016 Veselin Penev, http://bitdust.io
+# Copyright (C) 2008 Veselin Penev, http://bitdust.io
 #
 # This file (shared_access_coordinator.py) is part of BitDust Software.
 #
@@ -25,7 +25,7 @@
 .. module:: shared_access_coordinator
 .. role:: red
 
-BitPie.NET shared_access_coordinator() Automat
+BitDust shared_access_coordinator() Automat
 
 EVENTS:
     * :red:`ack`
@@ -171,6 +171,7 @@ class SharedAccessCoordinator(automat.Automat):
         self.customer_idurl = self.glob_id['idurl']
         self.known_suppliers_list = []
         self.known_ecc_map = None
+        self.dht_lookup_use_cache = True
         super(SharedAccessCoordinator, self).__init__(
             name="%s$%s" % (self.glob_id['key_alias'][:10], self.glob_id['customer']),
             state='AT_STARTUP',
@@ -205,17 +206,6 @@ class SharedAccessCoordinator(automat.Automat):
         """
         self.result_defer = None
         self.connected_callbacks = {}
-
-    def state_changed(self, oldstate, newstate, event, *args, **kwargs):
-        """
-        Method to catch the moment when shared_access_coordinator() state were changed.
-        """
-
-    def state_not_changed(self, curstate, event, *args, **kwargs):
-        """
-        This method intended to catch the moment when some event was fired in the shared_access_coordinator()
-        but its state was not changed.
-        """
 
     def register(self):
         """
@@ -355,7 +345,7 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
-        # TODO : put in a seprate state in the state machine
+        # TODO : put in a separate state in the state machine
         self.result_defer = kwargs.get('result_defer', None) 
         identitycache.immediatelyCaching(self.customer_idurl)
 
@@ -363,7 +353,7 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
-        d = dht_relations.read_customer_suppliers(self.customer_idurl)
+        d = dht_relations.read_customer_suppliers(self.customer_idurl, use_cache=self.dht_lookup_use_cache)
         # TODO: add more validations of dht_result
         d.addCallback(self._on_read_customer_suppliers)
         d.addErrback(lambda err: self.automat('fail', err))
@@ -444,6 +434,7 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
+        self.dht_lookup_use_cache = True
         events.send('share-connected', dict(self.to_json()))
         if self.result_defer:
             self.result_defer.callback(True)
@@ -456,6 +447,7 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
+        self.dht_lookup_use_cache = False
         events.send('share-disconnected', dict(self.to_json()))
         if self.result_defer:
             self.result_defer.errback(Exception('disconnected'))
@@ -473,11 +465,13 @@ class SharedAccessCoordinator(automat.Automat):
 
     def _on_read_customer_suppliers(self, dht_value):
         if _Debug:
-            lg.args(_DebugLevel, dht_value)
+            lg.args(_DebugLevel, dht_value=dht_value)
         if dht_value and isinstance(dht_value, dict) and len(dht_value.get('suppliers', [])) > 0:
+            self.dht_lookup_use_cache = True
             self.automat('dht-lookup-ok', dht_value)
         else:
-            self.automat('fail', Exception('customers suppliers not found in DHT'))
+            self.dht_lookup_use_cache = False
+            self.automat('fail', Exception('customer suppliers not found in DHT'))
 
     def _on_supplier_connector_state_changed(self, idurl, newstate, **kwargs):
         if _Debug:

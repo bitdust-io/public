@@ -33,6 +33,7 @@ module:: api_rest_http_server
 #------------------------------------------------------------------------------
 
 from __future__ import absolute_import
+from six import PY2
 
 #------------------------------------------------------------------------------
 
@@ -44,6 +45,7 @@ _APILogFileEnabled = False
 #------------------------------------------------------------------------------
 
 import os
+import sys
 import time
 
 #------------------------------------------------------------------------------
@@ -89,8 +91,17 @@ def init(port=None):
         port = 8180
 
     read_api_secret()
+
+    current_recursionlimit = None
+    if PY2:
+        current_recursionlimit = sys.getrecursionlimit()
+        sys.setrecursionlimit(2000)
+
     serve_http(port)
     # serve_https(port)
+
+    if PY2:
+        sys.setrecursionlimit(current_recursionlimit)
 
     lg.out(4, 'api_rest_http_server.init')
 
@@ -165,6 +176,7 @@ def serve_https(port):
         _APIListener = reactor.listenSSL(port, site, cert.options(auth), interface='127.0.0.1')  # @UndefinedVariable
     except:
         lg.exc()
+        os._exit(1)
 
 
 def serve_http(port):
@@ -175,6 +187,7 @@ def serve_http(port):
         _APIListener = reactor.listenTCP(port, site)  # @UndefinedVariable
     except:
         lg.exc()
+        os._exit(1)
 
 #------------------------------------------------------------------------------
 
@@ -275,6 +288,8 @@ class BitDustRESTHTTPServer(JsonAPIResource):
         return JsonAPIResource.getChild(self, name, request)
 
     def log_request(self, request, callback, args):
+        if not callback:
+            return None
         uri = request.uri.decode()
         try:
             func_name = callback.im_func.func_name
@@ -681,6 +696,15 @@ class BitDustRESTHTTPServer(JsonAPIResource):
             label=data.get('label', ''),
         )
 
+    @DELETE('^/sh/d$')
+    @DELETE('^/v1/share/delete$')
+    @DELETE('^/share/delete/v1$')
+    def share_delete_v1(self, request):
+        data = _request_data(request, mandatory_keys=['key_id', ])
+        return api.share_delete(
+            key_id=data['key_id'],
+        )
+
     @PUT('^/sh/g$')
     @PUT('^/v1/share/grant$')
     @PUT('^/share/grant/v1$')
@@ -701,7 +725,7 @@ class BitDustRESTHTTPServer(JsonAPIResource):
             key_id=data['key_id'],
         )
 
-    @DELETE('^/sh/c$')
+    @DELETE('^/sh/cl$')
     @DELETE('^/v1/share/close$')
     @DELETE('^/share/close/v1$')
     def share_close_v1(self, request):
@@ -715,6 +739,59 @@ class BitDustRESTHTTPServer(JsonAPIResource):
     @GET('^/share/history/v1$')
     def share_history_v1(self, request):
         return api.share_history()
+
+    #------------------------------------------------------------------------------
+
+    @GET('^/gr/l$')
+    @GET('^/v1/group/list$')
+    @GET('^/group/list/v1$')
+    def group_list_v1(self, request):
+        return api.group_list()
+
+    @GET('^/gr/i$')
+    @GET('^/v1/group/info$')
+    @GET('^/group/info/v1$')
+    def group_info_v1(self, request):
+        return api.group_info(group_key_id=_request_arg(request, 'group_key_id'))
+
+    @POST('^/gr/c$')
+    @POST('^/v1/group/create$')
+    @POST('^/group/create/v1$')
+    def group_create_v1(self, request):
+        data = _request_data(request)
+        return api.group_create(
+            creator_id=data.get('creator_id', None),
+            key_size=int(data.get('key_size', '2048')),
+            label=data.get('label', ''),
+        )
+
+    @POST('^/gr/j$')
+    @POST('^/v1/group/join$')
+    @POST('^/group/join/v1$')
+    def group_join_v1(self, request):
+        data = _request_data(request, mandatory_keys=['group_key_id', ])
+        return api.group_join(group_key_id=data['group_key_id'])
+
+    @DELETE('^/gr/lv$')
+    @DELETE('^/v1/group/leave$')
+    @DELETE('^/group/leave/v1$')
+    def group_leave_v1(self, request):
+        data = _request_data(request, mandatory_keys=['group_key_id', ])
+        return api.group_leave(
+            group_key_id=data['group_key_id'],
+            erase_key=data.get('erase_key', False),
+        )
+
+    @PUT('^/gr/sh$')
+    @PUT('^/v1/group/share$')
+    @PUT('^/group/share/v1$')
+    def group_share_v1(self, request):
+        data = _request_data(request, mandatory_keys=[('trusted_global_id', 'trusted_idurl', 'trusted_id', ), 'group_key_id', ])
+        return api.group_share(
+            trusted_remote_user=data.get('trusted_global_id') or data.get('trusted_idurl') or data.get('trusted_id'),
+            group_key_id=data['group_key_id'],
+            timeout=data.get('timeout', 30),
+        )
 
     #------------------------------------------------------------------------------
 
@@ -905,14 +982,22 @@ class BitDustRESTHTTPServer(JsonAPIResource):
     @GET('^/v1/message/history$')
     @GET('^/message/history/v1$')
     def message_history_v1(self, request):
-        user_identity = _request_arg(request, 'id', None, True)
-        return api.message_history(user=user_identity)
+        return api.message_history(
+            recipient_id=_request_arg(request, 'id', None, True),
+            sender_id=_request_arg(request, 'sender_id', None, False),
+            message_type=_request_arg(request, 'type', 'private_message'),
+        )
 
     @GET('^/msg/r/(?P<consumer_id>[^/]+)/$')
-    @GET('^/v1/message/receive/(?P<consumer_id>[^/]+)$')
-    @GET('^/message/receive/(?P<consumer_id>[^/]+)/v1$')
-    def message_receive_v1(self, request, consumer_id):
-        return api.message_receive(consumer_id=consumer_id)
+    @GET('^/v1/message/receive/(?P<consumer_callback_id>[^/]+)$')
+    @GET('^/message/receive/(?P<consumer_callback_id>[^/]+)/v1$')
+    def message_receive_v1(self, request, consumer_callback_id):
+        return api.message_receive(
+            consumer_callback_id=consumer_callback_id,
+            direction=_request_arg(request, 'direction', 'incoming'),
+            message_types=_request_arg(request, 'message_types', 'private_message,group_message'),
+            polling_timeout=int(_request_arg(request, 'polling_timeout', 60, False))
+        )
 
     @POST('^/msg/s$')
     @POST('^/v1/message/send$')
@@ -924,6 +1009,16 @@ class BitDustRESTHTTPServer(JsonAPIResource):
             json_data=data['data'],
             ping_timeout=data.get('ping_timeout', 30),
             message_ack_timeout=data.get('message_ack_timeout', 15),
+        )
+
+    @POST('^/msg/sg$')
+    @POST('^/v1/message/send/group$')
+    @POST('^/message/send/group/v1$')
+    def message_send_group_v1(self, request):
+        data = _request_data(request, mandatory_keys=['group_key_id', 'data', ])
+        return api.message_send_group(
+            group_key_id=data.get('group_key_id'),
+            json_payload=data['data'],
         )
 
     #------------------------------------------------------------------------------
@@ -1020,6 +1115,18 @@ class BitDustRESTHTTPServer(JsonAPIResource):
     @GET('^/queue/list/v1$')
     def queue_list_v1(self, request):
         return api.queue_list()
+
+    @GET('^/qu/c/l$')
+    @GET('^/v1/queue/consumer/list$')
+    @GET('^/queue/consumer/list/v1$')
+    def queue_consumer_list_v1(self, request):
+        return api.queue_consumer_list()
+
+    @GET('^/qu/p/l$')
+    @GET('^/v1/queue/producer/list$')
+    @GET('^/queue/producer/list/v1$')
+    def queue_producer_list_v1(self, request):
+        return api.queue_producer_list()
 
     #------------------------------------------------------------------------------
 
@@ -1147,6 +1254,10 @@ class BitDustRESTHTTPServer(JsonAPIResource):
 
     @ALL('^/*')
     def zzz_not_found(self, request):
+        """
+        This method is intended to return an error message when requested method was not found.
+        Started with "zzz" because stuff is sorted alphabetically - so just to be able to put the regex on last place.
+        """
         return api.ERROR('method %s:%s was not found' % (request.method, request.path))
 
     #------------------------------------------------------------------------------

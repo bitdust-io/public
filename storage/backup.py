@@ -83,7 +83,7 @@ from io import BytesIO
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 10
+_DebugLevel = 12
 
 #------------------------------------------------------------------------------
 
@@ -147,10 +147,14 @@ class backup(automat.Automat):
                  pipe,
                  finishCallback=None,
                  blockResultCallback=None,
+                 notifyNewDataCallback=None,
                  blockSize=None,
                  sourcePath=None,
-                 keyID=None, ):
+                 keyID=None,
+                 ecc_map=None,
+                 creatorIDURL=None,):
         self.backupID = backupID
+        self.creatorIDURL = creatorIDURL or my_id.getIDURL()
         _parts = packetid.SplitBackupID(self.backupID)
         self.customerGlobalID = _parts[0]
         self.pathID = _parts[1]
@@ -158,7 +162,7 @@ class backup(automat.Automat):
         self.customerIDURL = global_id.GlobalUserToIDURL(self.customerGlobalID)
         self.sourcePath = sourcePath
         self.keyID = keyID
-        self.eccmap = eccmap.Current()
+        self.eccmap = ecc_map or eccmap.Current()
         self.pipe = pipe
         self.blockSize = blockSize
         if self.blockSize is None:
@@ -178,6 +182,7 @@ class backup(automat.Automat):
         self.resultDefer = Deferred()
         self.finishCallback = finishCallback
         self.blockResultCallback = blockResultCallback
+        self.notifyNewDataCallback = notifyNewDataCallback
         automat.Automat.__init__(self, name='backup_%s' % self.version, state='AT_STARTUP',
                                  debug_level=_DebugLevel, log_events=_Debug, log_transitions=_Debug, )
 
@@ -187,7 +192,6 @@ class backup(automat.Automat):
         self.log_transitions = _Debug
 
     def A(self, event, *args, **kwargs):
-        from customer import data_sender
         #---AT_STARTUP---
         if self.state == 'AT_STARTUP':
             if event == 'start':
@@ -209,14 +213,14 @@ class backup(automat.Automat):
             elif event == 'block-raid-done' and not self.isAborted(*args, **kwargs):
                 self.doPopBlock(*args, **kwargs)
                 self.doBlockReport(*args, **kwargs)
-                data_sender.A('new-data')
+                self.doNotifyNewData(*args, **kwargs)
         #---RAID---
         elif self.state == 'RAID':
             if event == 'block-raid-done' and not self.isMoreBlocks(*args, **kwargs) and not self.isAborted(*args, **kwargs):
                 self.state = 'DONE'
                 self.doPopBlock(*args, **kwargs)
                 self.doBlockReport(*args, **kwargs)
-                data_sender.A('new-data')
+                self.doNotifyNewData(*args, **kwargs)
                 self.doClose(*args, **kwargs)
                 self.doReport(*args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
@@ -227,7 +231,7 @@ class backup(automat.Automat):
             elif event == 'block-raid-done' and self.isMoreBlocks(*args, **kwargs) and not self.isAborted(*args, **kwargs):
                 self.doPopBlock(*args, **kwargs)
                 self.doBlockReport(*args, **kwargs)
-                data_sender.A('new-data')
+                self.doNotifyNewData(*args, **kwargs)
             elif event == 'fail' or ( ( event == 'timer-01sec' or event == 'block-raid-done' or event == 'block-raid-started' ) and self.isAborted(*args, **kwargs) ):
                 self.state = 'ABORTED'
                 self.doClose(*args, **kwargs)
@@ -246,7 +250,7 @@ class backup(automat.Automat):
             elif event == 'block-raid-done' and not self.isAborted(*args, **kwargs):
                 self.doPopBlock(*args, **kwargs)
                 self.doBlockReport(*args, **kwargs)
-                data_sender.A('new-data')
+                self.doNotifyNewData(*args, **kwargs)
         #---DONE---
         elif self.state == 'DONE':
             pass
@@ -259,8 +263,8 @@ class backup(automat.Automat):
         """
         Return current value of ``ask4abort`` flag.
         """
-        if _Debug:
-            lg.args(_DebugLevel, ask4abort=self.ask4abort)
+        # if _Debug:
+        #     lg.args(_DebugLevel, ask4abort=self.ask4abort)
         return self.ask4abort
 
     def isPipeReady(self, *args, **kwargs):
@@ -366,7 +370,7 @@ class backup(automat.Automat):
             dt = time.time()
             raw_bytes = self.currentBlockData.getvalue()
             block = encrypted.Block(
-                CreatorID=my_id.getLocalID(),
+                CreatorID=self.creatorIDURL,
                 BackupID=self.backupID,
                 BlockNumber=self.blockNumber,
                 SessionKey=key.NewSessionKey(session_key_type=key.SessionKeyType()),
@@ -455,6 +459,13 @@ class backup(automat.Automat):
         BlockNumber, result = args[0]
         if self.blockResultCallback:
             self.blockResultCallback(self.backupID, BlockNumber, result)
+
+    def doNotifyNewData(self, *args, **kwargs):
+        """
+        Action method.
+        """
+        if self.notifyNewDataCallback:
+            self.notifyNewDataCallback()
 
     def doClose(self, *args, **kwargs):
         """
@@ -610,6 +621,7 @@ def main():
 
     reactor.callLater(0, _bk_start)  # @UndefinedVariable
     reactor.run()  # @UndefinedVariable
+    settings.shutdown()
 
 
 if __name__ == "__main__":

@@ -162,7 +162,7 @@ class ListFilesOrator(automat.Automat):
             # TODO: rebuild using "list-files-orator-state-changed" event
             from storage import backup_monitor
             backup_monitor.A('list_files_orator.state', newstate)
-        if newstate == 'SAW_FILES' and oldstate != newstate:
+        if newstate == 'SAW_FILES':
             if A().last_time_saw_files > 0 and time.time() - A().last_time_saw_files < 20:
                 if _Debug:
                     lg.dbg(_DebugLevel, 'already saw files %r seconds ago' % (time.time() - A().last_time_saw_files))
@@ -251,7 +251,9 @@ class ListFilesOrator(automat.Automat):
         supplier_idurl = args[0]
         if _Debug:
             lg.out(_DebugLevel, 'list_files_orator.doRequestFilesOneSupplier from %s' % supplier_idurl)
-        outpacket = p2p_service.SendListFiles(target_supplier=supplier_idurl)
+        outpacket = p2p_service.SendListFiles(
+            target_supplier=supplier_idurl,
+        )
         if outpacket:
             _RequestedListFilesPacketIDs.add(outpacket.PacketID)
         else:
@@ -267,7 +269,9 @@ class ListFilesOrator(automat.Automat):
                 if online_status.isOnline(idurl):
                     if _Debug:
                         lg.out(_DebugLevel, 'list_files_orator._do_request  ListFiles() from my supplier %s' % idurl)
-                    outpacket = p2p_service.SendListFiles(target_supplier=idurl)
+                    outpacket = p2p_service.SendListFiles(
+                        target_supplier=idurl,
+                    )
                     if outpacket:
                         _RequestedListFilesPacketIDs.add(outpacket.PacketID)
                     else:

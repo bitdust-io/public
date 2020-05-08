@@ -157,7 +157,6 @@ class IdRestorer(automat.Automat):
         return text, color
 
     def state_changed(self, oldstate, newstate, event, *args, **kwargs):
-        global_state.set_global_state('ID_RESTORE ' + newstate)
         from main import installer
         installer.A('id_restorer.state', newstate)
 
@@ -363,7 +362,7 @@ class IdRestorer(automat.Automat):
             lg.warn('skip reading my suppliers from DHT, currently known %d suppliers already' % known_suppliers)
             self.automat('suppliers-read-ok')
             return
-        d = dht_relations.read_customer_suppliers(my_id.getLocalID())
+        d = dht_relations.read_customer_suppliers(my_id.getLocalID(), use_cache=False)
         d.addCallback(self._on_my_dht_relations_discovered)
         d.addErrback(self._on_my_dht_relations_failed)
 
