@@ -51,7 +51,6 @@ _DebugLevel = 10
 #------------------------------------------------------------------------------
 
 from twisted.internet.defer import Deferred
-from twisted.python import failure
 
 #------------------------------------------------------------------------------
 
@@ -72,7 +71,6 @@ from transport import packet_out
 from transport import gateway
 
 from userid import global_id
-from userid import id_url
 from userid import my_id
 
 #------------------------------------------------------------------------------
