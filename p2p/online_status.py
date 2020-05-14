@@ -93,8 +93,6 @@ from automats import automat
 
 from lib import strng
 
-from interface import api_web_socket
-
 from contacts import contactsdb
 
 from main import events
