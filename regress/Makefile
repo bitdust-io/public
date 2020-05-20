@@ -81,7 +81,7 @@ _one_down:
 _one_clean_test:
 	@echo "DOCKER COMPOSE EXEC ${TEST_NAME} DEBUG=${_DEBUG}";
 	@mkdir -p logs;
-	@docker-compose --file tests/${TEST_NAME}/docker-compose.yml exec -T tester sh -c "TEST_NAME=${TEST_NAME} _DEBUG=${_DEBUG} STOP_NODES=1 CLEAN_NODES=1 python -u -m pytest /app/tests/${TEST_NAME}/ -v -s" 1> logs/container.${TEST_NAME}.out 2> logs/container.${TEST_NAME}.err
+	@docker-compose --file tests/${TEST_NAME}/docker-compose.yml exec -T tester sh -c "TEST_NAME=${TEST_NAME} _DEBUG=${_DEBUG} STOP_NODES=1 CLEAN_NODES=1 python -u -m pytest /app/tests/${TEST_NAME}/ -v -s" 2> logs/container.${TEST_NAME}.err
 
 _one_test:
 	@echo "TEST ${TEST_NAME} DEBUG=${_DEBUG}";
@@ -140,7 +140,7 @@ run_log/%:
 	@$(MAKE) --no-print-directory --output-sync=line TEST_NAME=$* _DEBUG=1 _one_up_test_log_down
 
 spawn_run_log/%:
-	@echo "running $*"
+	@echo "STARTING $*"
 	@$(MAKE) --no-print-directory --output-sync=recurse TEST_NAME=$* _DEBUG=1 _one_up_test_log_down_parallel
 
 run_log_up/%:
