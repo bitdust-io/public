@@ -364,8 +364,7 @@ def IncomingSupplierListFiles(newpacket, list_files_global_id):
         block = encrypted.Unserialize(newpacket.Payload, decrypt_key=target_key_id, )
         input_data = block.Data()
     except:
-        lg.exc()
-        lg.err('failed decrypting data from %s' % newpacket)
+        lg.err('failed decrypting data from packet %r received from %r' % (newpacket, supplier_idurl))
         return False
     list_files_raw = list_files.UnpackListFiles(input_data, settings.ListFilesFormat())
     remote_files_changed, backups2remove, paths2remove, missed_backups = backup_matrix.process_raw_list_files(
@@ -430,7 +429,7 @@ def IncomingSupplierBackupIndex(newpacket):
         except:
             pass
         return None
-    if revision() >= supplier_revision:
+    if revision() > supplier_revision:
         inpt.close()
         if _Debug:
             lg.out(_DebugLevel, 'backup_control.IncomingSupplierBackupIndex SKIP, supplier %s revision=%d, local revision=%d' % (

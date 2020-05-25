@@ -64,6 +64,12 @@ def read_customer_suppliers(customer_idurl, as_fields=True, use_cache=True):
         customer_idurl = id_url.field(customer_idurl)
     else:
         customer_idurl = id_url.to_bin(customer_idurl)
+
+    rotated_idurls = id_url.list_known_idurls(customer_idurl, num_revisions=3)
+
+    if _Debug:
+        lg.args(_DebugLevel, customer_idurl=customer_idurl, rotated_idurls=rotated_idurls, as_fields=as_fields, use_cache=use_cache)
+
     result = Deferred()
 
     def _do_identity_cache(ret):
@@ -91,7 +97,9 @@ def read_customer_suppliers(customer_idurl, as_fields=True, use_cache=True):
         id_cache_story.addErrback(result.errback)
         return id_cache_story
 
-    def _do_verify(dht_value):
+    def _do_verify(dht_value, customer_idurl_bin):
+        if customer_idurl_bin in rotated_idurls:
+            rotated_idurls.remove(customer_idurl_bin)
         ret = {
             'suppliers': [],
             'ecc_map': None,
@@ -101,7 +109,14 @@ def read_customer_suppliers(customer_idurl, as_fields=True, use_cache=True):
             'timestamp': None,
         }
         if not dht_value or not isinstance(dht_value, dict):
-            result.callback(ret)
+            if not rotated_idurls:
+                result.callback(ret)
+                return ret
+            another_customer_idurl_bin = rotated_idurls.pop(0)
+            lg.warn('found another rotated idurl %r and re-try reading customer suppliers' % another_customer_idurl_bin)
+            d = dht_records.get_suppliers(another_customer_idurl_bin, return_details=True, use_cache=use_cache)
+            d.addCallback(_do_verify, another_customer_idurl_bin)
+            d.addErrback(_on_error)
             return ret
         try:
             _ecc_map = strng.to_text(dht_value['ecc_map'])
@@ -161,8 +176,11 @@ def read_customer_suppliers(customer_idurl, as_fields=True, use_cache=True):
         result.errback(err)
         return None
 
-    d = dht_records.get_suppliers(id_url.to_bin(customer_idurl), return_details=True, use_cache=use_cache)
-    d.addCallback(_do_verify)
+    customer_idurl_bin = id_url.to_bin(customer_idurl)
+#     if customer_idurl_bin in rotated_idurls:
+#         rotated_idurls.remove(customer_idurl_bin)
+    d = dht_records.get_suppliers(customer_idurl_bin, return_details=True, use_cache=use_cache)
+    d.addCallback(_do_verify, customer_idurl_bin)
     d.addErrback(_on_error)
     return result
 
@@ -195,15 +213,18 @@ def read_customer_message_brokers(customer_idurl, positions=[0, ], return_detail
     result = Deferred()
 
     def _do_broker_identity_cache(dht_record, position, broker_result):
+        if _Debug:
+            lg.args(_DebugLevel, position=position, broker_idurl=dht_record['broker_idurl'])
         one_broker_task = identitycache.GetLatest(dht_record['broker_idurl'])
         if _Debug:
             one_broker_task.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='read_customer_message_brokers._do_broker_identity_cache')
         one_broker_task.addCallback(lambda xmlsrc: broker_result.callback(dht_record))
+        one_broker_task.addErrback(broker_result.errback)
         return None
 
     def _do_verify(dht_value, position, broker_result):
         if _Debug:
-            lg.args(_DebugLevel, dht_value=dht_value, position=position, broker_result=broker_result)
+            lg.args(_DebugLevel, position=position, dht_value=dht_value)
         ret = {
             'timestamp': None,
             'revision': 0,
@@ -265,11 +286,14 @@ def read_customer_message_brokers(customer_idurl, positions=[0, ], return_detail
 
     def _do_collect_results(all_results):
         if _Debug:
-            lg.args(_DebugLevel, all_results=all_results)
+            lg.args(_DebugLevel, all_results=len(all_results))
         final_result = []
+        all_brokers = []
         for one_success, one_result in all_results:
             if one_success and one_result['broker_idurl']:
-                final_result.append(one_result)
+                if id_url.is_not_in(one_result['broker_idurl'], all_brokers, as_field=False):
+                    all_brokers.append(one_result['broker_idurl'])
+                    final_result.append(one_result)
         result.callback(final_result)
         return None
 

@@ -354,6 +354,10 @@ class RestoreWorker(automat.Automat):
         self._do_block_rebuilding()
         self.known_suppliers = [_f for _f in contactsdb.suppliers(customer_idurl=self.customer_idurl) if _f]
         if not self.EccMap:
+            if self.customer_idurl == my_id.getIDURL():
+                self.EccMap = eccmap.Current()
+                lg.info('ECC map %r set from local for my own suppliers' % self.EccMap)
+        if not self.EccMap:
             known_eccmap_dict = {}
             for supplier_idurl in self.known_suppliers:
                 known_ecc_map = contactsdb.get_supplier_meta_info(
