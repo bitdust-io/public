@@ -612,7 +612,7 @@ def identity_backup(destination_filepath):
     return OK(message='WARNING! keep your master key in a safe place and never ever publish it anywhere!')
 
 
-def identity_recover(private_key_source, known_idurl=None):
+def identity_recover(private_key_source, known_idurl=None, join_network=False):
     """
     Restores your identity from backup copy.
 
@@ -669,6 +669,9 @@ def identity_recover(private_key_source, known_idurl=None):
                 return ERROR('identity recovery FAILED', api_method='identity_recover')
             r = my_id.getLocalIdentity().serialize_json()
             r['xml'] = my_id.getLocalIdentity().serialize(as_text=True)
+            if join_network:
+                from p2p import network_service
+                network_service.connected(wait_timeout=0.1)
             ret.callback(OK(r, api_method='identity_recover'))
             return
 
@@ -3221,7 +3224,7 @@ def message_receive(consumer_callback_id, direction='incoming', message_types='p
             p2p_service.SendAckNoRequest(owner_idurl, packet_id)
         packets_to_ack.clear()
         if _Debug:
-            lg.out(_DebugLevel, 'api.message_receive._on_pending_messages returning : %r' % result)
+            lg.out(_DebugLevel, 'api.message_receive._on_pending_messages returning %d results' % len(result))
         ret.callback(RESULT(result, api_method='message_receive'))
         return len(result) > 0
 
