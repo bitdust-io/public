@@ -2,7 +2,7 @@
 # node.py
 #
 # Copyright (C) 2007-2008 Francois Aucamp, Meraka Institute, CSIR
-# See AUTHORS for all authors and contact information. 
+# See AUTHORS for all authors and contact information.
 # 
 # License: GNU Lesser General Public License, version 3 or later; see COPYING
 #          included in this archive for details.
@@ -1770,7 +1770,7 @@ class MultiLayerNode(Node):
 
     def _joinNetworkFailed(self, err, **kwargs):
         layerID = kwargs.get('layerID', 0)
-        self._joinDeferreds.pop(layerID)
+        self._joinDeferreds.pop(layerID, None)
         if _Debug:
             print('[DHT NODE]    failed joining DHT network layerID=%d ' % layerID, err)
 
