@@ -4,6 +4,14 @@ Change Log
 
 2020-08-03 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
+* bug fix while receiving json message but failing to store it in the history
+* relaxed critical dead-flow condition in keys_synchronizer()
+* fix to make automatic API docs working
+
+
+
+2020-08-03 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
 * try to fix issue with unreliable keys
 
 
