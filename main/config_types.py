@@ -27,7 +27,7 @@
 """
 ..
 
-module:: config_defaults
+module:: config_types
 """
 
 
@@ -89,7 +89,7 @@ def defaults():
         'logs/traffic-enabled': TYPE_BOOLEAN,
         'logs/traffic-port': TYPE_PORT_NUMBER,
 
-        'other/upnp-at-startup': TYPE_BOOLEAN,
+        # 'other/upnp-at-startup': TYPE_BOOLEAN,
 
         'paths/backups': TYPE_FOLDER_PATH,
         'paths/customers': TYPE_FOLDER_PATH,
@@ -97,12 +97,7 @@ def defaults():
         'paths/receipts': TYPE_FOLDER_PATH,
         'paths/restore': TYPE_FOLDER_PATH,
 
-        'personal/betatester': TYPE_BOOLEAN,
-        'personal/email': TYPE_STRING,
-        'personal/name': TYPE_STRING,
-        'personal/nickname': TYPE_STRING,
         'personal/private-key-size': TYPE_STRING,
-        'personal/surname': TYPE_STRING,
 
         'services/accountant/enabled': TYPE_BOOLEAN,
         'services/backup-db/enabled': TYPE_BOOLEAN,
@@ -183,6 +178,7 @@ def defaults():
         'services/nodes-lookup/enabled': TYPE_BOOLEAN,
         'services/p2p-hookups/enabled': TYPE_BOOLEAN,
         'services/p2p-notifications/enabled': TYPE_BOOLEAN,
+        'services/personal-messages/enabled': TYPE_BOOLEAN,
         'services/private-groups/enabled': TYPE_BOOLEAN,
         'services/private-groups/message-ack-timeout': TYPE_NON_ZERO_POSITIVE_INTEGER,
         'services/private-groups/preferred-brokers': TYPE_TEXT,
@@ -198,15 +194,13 @@ def defaults():
         'services/proxy-transport/my-original-identity': TYPE_TEXT,
         'services/proxy-transport/current-router': TYPE_STRING,
         'services/proxy-transport/preferred-routers': TYPE_TEXT,
-        'services/proxy-transport/router-lifetime-seconds': TYPE_POSITIVE_INTEGER,
+        # 'services/proxy-transport/router-lifetime-seconds': TYPE_POSITIVE_INTEGER,
         'services/rebuilding/enabled': TYPE_BOOLEAN,
-        'services/rebuilding/child-processes-enabled': TYPE_BOOLEAN,
         'services/restores/enabled': TYPE_BOOLEAN,
         'services/shared-data/enabled': TYPE_BOOLEAN,
         'services/supplier/donated-space': TYPE_DISK_SPACE,
         'services/supplier/enabled': TYPE_BOOLEAN,
         'services/supplier-contracts/enabled': TYPE_BOOLEAN,
-        'services/supplier-relations/enabled': TYPE_BOOLEAN,
         'services/tcp-connections/enabled': TYPE_BOOLEAN,
         'services/tcp-connections/tcp-port': TYPE_PORT_NUMBER,
         'services/tcp-connections/upnp-enabled': TYPE_BOOLEAN,

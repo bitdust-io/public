@@ -560,6 +560,9 @@ def cmd_identity(opts, args, overDict, running, executablePath):
                 print_text('BitDust is running at the moment, need to stop the software first\n')
                 return 0
             oldname = my_id.getIDName()
+            if not oldname:
+                print_text('local identity is not exist\n')
+                return 0
             my_id.forgetLocalIdentity()
             my_id.eraseLocalIdentity()
             print_text('local identity [%s] is no longer exist\n' % oldname)
@@ -1011,10 +1014,6 @@ def cmd_automats(opts, args, overDict):
     if len(args) < 2 or args[1] == 'list':
         tpl = jsontemplate.Template(templ.TPL_AUTOMATS)
         return call_jsonrpc_method_template_and_stop('automats_list', tpl)
-        # return call_rest_http_method_and_stop('/automat/list/v1')
-#     if len(args) == 2 and args[1] in ['log', 'monitor', 'watch',]:\
-#         reactor.
-#         reactor.run()  # @UndefinedVariable
     return 2
 
 #------------------------------------------------------------------------------

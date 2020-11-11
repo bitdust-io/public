@@ -192,10 +192,6 @@ class BitDustWebSocketFactory(Factory):
         """
         Only accepting connections from local machine!
         """
-        global _WebSocketTransports
-        # if _WebSocketTransports:
-        #     lg.warn('refused connection to web socket - another connection already made')
-        #     return None
         if addr.host != '127.0.0.1':
             lg.err('refused connection from remote host: %r' % addr.host)
             return None
@@ -221,7 +217,7 @@ def do_process_incoming_message(json_data):
             return False
 
         if _Debug:
-            lg.out(0, '*** %s  API WS IN  %s(%r)' % (
+            lg.out(_DebugLevel, '*** %s  API WS IN  %s(%r)' % (
                 call_id, method, kwargs))
 
         if _APILogFileEnabled:
@@ -314,7 +310,7 @@ def push(json_data):
             lg.dbg(_DebugLevel, 'sent %d bytes to web socket %s: %r' % (
                 len(raw_bytes), '%s://%s:%s' % (_key[0], _key[1], _key[2]), json_data))
     if _Debug:
-        lg.out(0, '***   API WS PUSH  %d bytes : %r' % (len(json_data), json_data, ))
+        lg.out(_DebugLevel, '***   API WS PUSH  %d bytes : %r' % (len(json_data), json_data, ))
     if _APILogFileEnabled:
         lg.out(0, '*** WS PUSH  %d bytes : %r' % (len(json_data), json_data, ), log_name='api', showtime=True)
     return True

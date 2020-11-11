@@ -33,7 +33,6 @@ module:: config
 #------------------------------------------------------------------------------
 
 from __future__ import absolute_import
-from __future__ import print_function
 from io import open
 
 #------------------------------------------------------------------------------
@@ -175,7 +174,7 @@ class BaseConfig(object):
         data = self.getData(entryPath)
         if data is None:
             return default
-        return True if data.strip() == 'true' else False
+        return True if data.strip() in ['true', '1', 'on', ] else False
 
     def setBool(self, entryPath, value):
         return self._set(entryPath, 'true' if value else 'false')
@@ -430,7 +429,7 @@ class FixedTypesConfig(NotifiableConfig):
             return {}
         elif typ == config_types.TYPE_COMBO_BOX:
             if entryPath == 'services/customer/suppliers-number':
-                return {'possible_values': [2, 4, 7, 13, 18, 26, 64, ], }
+                return {'possible_values': ['2', '4', '7', '13', '18', '26', '64', ], }
             else:
                 raise TypeError('unexpected option type for %r' % entryPath)
         return {}
@@ -476,7 +475,7 @@ class FixedTypesConfig(NotifiableConfig):
             self.setData(entryPath, strng.text_type(value))
         elif typ in [config_types.TYPE_BOOLEAN, ]:
             if strng.is_string(value):
-                vl = strng.to_text(value).strip().lower() == 'true'
+                vl = strng.to_text(value).strip().lower() in ['true', '1', 'on', ]
             else:
                 vl = bool(value)
             self.setBool(entryPath, vl)
@@ -498,6 +497,7 @@ class FixedTypesConfig(NotifiableConfig):
 
 
 class CachedConfig(FixedTypesConfig):
+
     _cache = {}
 
     def _set(self, entryPath, data):
@@ -534,7 +534,9 @@ class CachedConfig(FixedTypesConfig):
 
 
 class DetailedConfig(CachedConfig):
+
     _labels = {}
+    _read_only = {}
     _infos = {}
 
     def __init__(self, configDir):
@@ -543,7 +545,7 @@ class DetailedConfig(CachedConfig):
             from . import config_details
             self._load_details(config_details.raw())
         except:
-            pass
+            lg.exc()
 
     def _load_details(self, src):
         """
@@ -552,7 +554,11 @@ class DetailedConfig(CachedConfig):
         for line in src.splitlines():
             if not line.strip():
                 continue
-            r = re.match('^{(.+?)}(.+?)$', line)
+            ro = re.match('^\[(.+?)\](.*?)$', line)
+            if ro:
+                self._read_only[ro.group(1).strip()] = True
+                line = line.replace('[', '{').replace(']', '}')
+            r = re.match('^\{(.+?)\}(.*?)$', line)
             if r:
                 current_option = r.group(1).strip()
                 self._labels[current_option] = r.group(2).strip()
@@ -563,20 +569,25 @@ class DetailedConfig(CachedConfig):
                     self._infos[current_option] += line.strip() + '\n'
 
     def getLabel(self, entryPath):
-        return self._labels.get(entryPath, '')
+        return self._labels.get(entryPath, '') or entryPath.split('/')[-1]
 
     def getInfo(self, entryPath):
-        return self._infos.get(entryPath, '')
+        return (self._infos.get(entryPath, '') or '').strip(' \n\t')
 
-    def toJson(self, entryPath):
+    def getReadOnly(self, entryPath):
+        return self._read_only.get(entryPath, False) or False
+
+    def toJson(self, entryPath, include_info=True):
         result = {
             'key': entryPath,
             'value': self.getValueOfType(entryPath),
             'type': self.getTypeLabel(entryPath),
             'label': self.getLabel(entryPath),
-            'info': self.getInfo(entryPath),
+            'readonly': self.getReadOnly(entryPath),
             'default': self.getDefaultValue(entryPath),
         }
+        if include_info:
+            result['info'] = self.getInfo(entryPath)
         result.update(self.getTypeMetaInfo(entryPath))
         return result
 

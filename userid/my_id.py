@@ -148,9 +148,9 @@ def setLocalIdentity(ident):
     new_json['revision'] = li_json['revision']
     new_json['contacts'] = li_json['contacts']
     if modified:
-        events.send('local-identity-modified', dict(old=old_json, new=new_json))
+        events.send('local-identity-modified', data=dict(old=old_json, new=new_json))
     else:
-        events.send('local-identity-set', new_json)
+        events.send('local-identity-set', data=new_json)
 
 
 def setLocalIdentityXML(idxml):
@@ -162,7 +162,7 @@ def setLocalIdentityXML(idxml):
 
 def getLocalIdentity():
     """
-    Return my identity object.
+    Returns my identity object.
     """
     global _LocalIdentity
     if not isLocalIdentityReady():
@@ -172,7 +172,7 @@ def getLocalIdentity():
 
 def getLocalID():
     """
-    Return my IDURL.
+    Returns my IDURL as a field.
     """
     global _LocalIDURL
     if _LocalIDURL is None:
@@ -184,7 +184,7 @@ def getLocalID():
 
 def getIDName():
     """
-    Return my account name, this is a filename part of IDURL without '.xml'.
+    Returns my account name, this is a filename part of IDURL without '.xml'.
     """
     global _LocalName
     if _LocalName is None:
@@ -196,7 +196,7 @@ def getIDName():
 
 def getGlobalID(key_alias=None):
     """
-    Return my global user id - according to my current IDURL.
+    Returns my global user id - according to my current IDURL.
     """
     global _LocalID
     if not key_alias and _LocalID is not None:
@@ -210,14 +210,14 @@ def getGlobalID(key_alias=None):
 
 def getIDURL():
     """
-    Return my IDURL.
+    Returns my IDURL as a field.
     """
     return getLocalID()
 
 
 def getID():
     """
-    Return my global ID.
+    Returns my global ID as a string.
     """
     return getGlobalID()
 
@@ -280,7 +280,7 @@ def saveLocalIdentity():
     filename = bpio.portablePath(settings.LocalIdentityFilename())
     bpio.WriteTextFile(filename, xmlid)
     setTransportOrder(getOrderFromContacts(_LocalIdentity))
-    events.send('local-identity-written', dict(idurl=_LocalIdentity.getIDURL(), filename=filename))
+    events.send('local-identity-written', data=dict(idurl=_LocalIdentity.getIDURL(), filename=filename))
     if _Debug:
         lg.out(_DebugLevel, "my_id.saveLocalIdentity %d bytes wrote to %s" % (len(xmlid), filename))
     return True
@@ -303,7 +303,7 @@ def forgetLocalIdentity():
     _LocalIDURL = None
     _LocalID = None
     _LocalName = None
-    events.send('local-identity-cleaned', dict())
+    events.send('local-identity-cleaned', data=dict())
     return True
 
 
@@ -330,7 +330,7 @@ def eraseLocalIdentity(do_backup=True):
     except:
         lg.exc()
         return False
-    events.send('local-identity-erased', dict())
+    events.send('local-identity-erased', data=dict())
     if _Debug:
         lg.out(_DebugLevel, "my_id.eraseLocalIdentity file %s was deleted" % filename)
     return True

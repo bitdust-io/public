@@ -354,38 +354,54 @@ class BitDustRESTHTTPServer(JsonAPIResource):
     @GET('^/v1/config/list$')
     @GET('^/config/list/v1$')
     def config_list_v1(self, request):
-        return api.configs_list(sort=True)
+        return api.configs_list(
+            sort=bool(_request_arg(request, 'sort', '0') in ['1', 'true', ]),
+            include_info=bool(_request_arg(request, 'include_info', '0') in ['1', 'true', ]),
+        )
 
     @GET('^/c/t$')
     @GET('^/v1/config/tree$')
     @GET('^/config/tree/v1$')
     def configs_tree_v1(self, request):
-        return api.configs_tree()
+        return api.configs_tree(
+            include_info=bool(_request_arg(request, 'include_info', '0') in ['1', 'true', ]),
+        )
 
     @GET('^/c/g/(?P<key1>[^/]+)/(?P<key2>[^/]+)/(?P<key3>[^/]+)/$')
     @GET('^/v1/config/get/(?P<key1>[^/]+)/(?P<key2>[^/]+)/(?P<key3>[^/]+)$')
     @GET('^/config/get/(?P<key1>[^/]+)/(?P<key2>[^/]+)/(?P<key3>[^/]+)/v1$')
     def config_get_l3_v1(self, request, key1, key2, key3):
-        return api.config_get(key=(key1 + '/' + key2 + '/' + key3))
+        return api.config_get(
+            key=(key1 + '/' + key2 + '/' + key3),
+            include_info=bool(_request_arg(request, 'include_info', '0') in ['1', 'true', ]),
+        )
 
     @GET('^/c/g/(?P<key1>[^/]+)/(?P<key2>[^/]+)/$')
     @GET('^/v1/config/get/(?P<key1>[^/]+)/(?P<key2>[^/]+)$')
     @GET('^/config/get/(?P<key1>[^/]+)/(?P<key2>[^/]+)/v1$')
     def config_get_l2_v1(self, request, key1, key2):
-        return api.config_get(key=(key1 + '/' + key2))
+        return api.config_get(
+            key=(key1 + '/' + key2),
+            include_info=bool(_request_arg(request, 'include_info', '0') in ['1', 'true', ]),
+        )
 
     @GET('^/c/g/(?P<key>[^/]+)/$')
     @GET('^/v1/config/get/(?P<key>[^/]+)$')
     @GET('^/config/get/(?P<key>[^/]+)/v1$')
     def config_get_l1_v1(self, request, key):
-        return api.config_get(key=key)
+        return api.config_get(
+            key=key,
+            include_info=bool(_request_arg(request, 'include_info', '0') in ['1', 'true', ]),
+        )
 
     @GET('^/c/g$')
     @GET('^/v1/config/get$')
     @GET('^/config/get/v1$')
     def config_get_v1(self, request):
-        # cgi.escape(dict({} or request.args).get('key', [''])[0]),)
-        return api.config_get(key=_request_arg(request, 'key', mandatory=True))
+        return api.config_get(
+            key=_request_arg(request, 'key', mandatory=True),
+            include_info=bool(_request_arg(request, 'include_info', '0') in ['1', 'true', ]),
+        )
 
     @POST('^/c/s/(?P<key1>[^/]+)/(?P<key2>[^/]+)/(?P<key3>[^/]+)/$')
     @POST('^/v1/config/set/(?P<key1>[^/]+)/(?P<key2>[^/]+)/(?P<key3>[^/]+)$')
@@ -906,6 +922,18 @@ class BitDustRESTHTTPServer(JsonAPIResource):
             recipient_id=_request_arg(request, 'id', None, True),
             sender_id=_request_arg(request, 'sender_id', None, False),
             message_type=_request_arg(request, 'message_type', 'private_message'),
+            offset=int(_request_arg(request, 'offset', '0')),
+            limit=int(_request_arg(request, 'limit', '100')),
+        )
+
+    @GET('^/msg/c?')
+    @GET('^/v1/message/conversation$')
+    @GET('^/message/conversation/v1$')
+    def message_conversation_v1(self, request):
+        return api.message_conversations_list(
+            message_types=list(filter(None, _request_arg(request, 'message_types', '').split(','))),
+            offset=int(_request_arg(request, 'offset', '0')),
+            limit=int(_request_arg(request, 'limit', '100')),
         )
 
     @GET('^/msg/r/(?P<consumer_callback_id>[^/]+)/$')

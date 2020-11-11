@@ -123,6 +123,7 @@ from p2p import online_status
 from p2p import propagate
 
 from stream import data_receiver
+from stream import io_throttle
 
 from raid import raid_worker
 from raid import eccmap
@@ -192,7 +193,7 @@ class RestoreWorker(automat.Automat):
             publish_events=publish_events,
             **kwargs
         )
-        events.send('restore-started', dict(backup_id=self.backup_id))
+        events.send('restore-started', data=dict(backup_id=self.backup_id))
 
     def set_packet_in_callback(self, cb):
         self.packetInCallback = cb
@@ -237,15 +238,15 @@ class RestoreWorker(automat.Automat):
                 self.doScanExistingPackets(*args, **kwargs)
                 self.doRequestPackets(*args, **kwargs)
                 self.Attempts+=1
-            elif ( event == 'instant' or event == 'request-finished' ) and not self.isBlockReceiving(*args, **kwargs) and self.isBlockFixable(*args, **kwargs):
-                self.state = 'RAID'
-                self.doReadRaid(*args, **kwargs)
             elif ( event == 'abort' or ( event == 'request-failed' and ( not self.isStillCorrectable(*args, **kwargs) or self.Attempts>=3 ) ) ) or ( ( event == 'instant' or event == 'request-finished' ) and not self.isBlockReceiving(*args, **kwargs) and not self.isBlockFixable(*args, **kwargs) ):
                 self.state = 'FAILED'
                 self.doDeleteAllRequests(*args, **kwargs)
                 self.doRemoveTempFile(*args, **kwargs)
                 self.doReportFailed(*args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
+            elif ( event == 'instant' or event == 'request-finished' ) and self.isBlockFixable(*args, **kwargs):
+                self.state = 'RAID'
+                self.doReadRaid(*args, **kwargs)
         #---RECEIVING---
         elif self.state == 'RECEIVING':
             if event == 'data-receiving-stopped' and self.isStillCorrectable(*args, **kwargs):
@@ -254,15 +255,15 @@ class RestoreWorker(automat.Automat):
                 self.doRequestPackets(*args, **kwargs)
             elif event == 'data-received':
                 self.doSavePacket(*args, **kwargs)
-            elif ( event == 'instant' or event == 'request-finished' ) and not self.isBlockReceiving(*args, **kwargs) and self.isBlockFixable(*args, **kwargs):
-                self.state = 'RAID'
-                self.doReadRaid(*args, **kwargs)
             elif ( event == 'abort' or ( ( event == 'request-failed' or event == 'data-receiving-stopped' ) and not self.isStillCorrectable(*args, **kwargs) ) ) or ( ( event == 'instant' or event == 'request-finished' ) and not self.isBlockReceiving(*args, **kwargs) and not self.isBlockFixable(*args, **kwargs) ):
                 self.state = 'FAILED'
                 self.doDeleteAllRequests(*args, **kwargs)
                 self.doRemoveTempFile(*args, **kwargs)
                 self.doReportFailed(*args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
+            elif ( event == 'instant' or event == 'request-finished' ) and self.isBlockFixable(*args, **kwargs):
+                self.state = 'RAID'
+                self.doReadRaid(*args, **kwargs)
         #---RAID---
         elif self.state == 'RAID':
             if event == 'raid-done':
@@ -585,7 +586,7 @@ class RestoreWorker(automat.Automat):
             lg.out(_DebugLevel, 'restore_worker.doReportDone')
         self.done_flag = True
         self.MyDeferred.callback('done')
-        # events.send('restore-done', dict(backup_id=self.backup_id))
+        # events.send('restore-done', data=dict(backup_id=self.backup_id))
 
     def doReportFailed(self, *args, **kwargs):
         """
@@ -599,7 +600,7 @@ class RestoreWorker(automat.Automat):
             lg.out(_DebugLevel, 'restore_worker.doReportFailed : %s' % reason)
         self.done_flag = True
         self.MyDeferred.callback(reason)
-        events.send('restore-failed', dict(
+        events.send('restore-failed', data=dict(
             backup_id=self.backup_id,
             block_number=self.block_number,
             args=args,
@@ -627,6 +628,7 @@ class RestoreWorker(automat.Automat):
     def _do_block_rebuilding(self):
         from storage import backup_rebuilder
         backup_rebuilder.BlockBackup(self.backup_id)
+        io_throttle.DeleteBackupRequests(self.backup_id)
 
     def _do_unblock_rebuilding(self):
         from storage import backup_rebuilder
@@ -734,6 +736,8 @@ class RestoreWorker(automat.Automat):
             self.automat('raid-done', filename)
 
     def _on_packet_request_result(self, NewPacketOrPacketID, result):
+        if self.block_requests is None:
+            return
         if _Debug:
             lg.args(_DebugLevel, packet=NewPacketOrPacketID, result=result)
         packet_id = None

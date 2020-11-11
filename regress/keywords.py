@@ -28,7 +28,7 @@ import pprint
 import base64
 import threading
 
-from testsupport import request_get, request_post, request_put, request_delete, run_ssh_command_and_wait
+from testsupport import request_get, request_post, request_put, request_delete, run_ssh_command_and_wait  # @UnresolvedImport
 
 #------------------------------------------------------------------------------
 
@@ -194,12 +194,28 @@ def group_create_v1(customer: str, key_size=1024, label='', attempts=1):
     return response.json()['result']['group_key_id']
 
 
-def group_info_v1(customer: str, group_key_id):
+def group_info_v1(customer: str, group_key_id, wait_state=None, validate_retries=30, delay=3, stop_state=None):
     response = request_get(customer, 'group/info/v1?group_key_id=%s' % group_key_id, timeout=20)
     assert response.status_code == 200
     print('group/info/v1 [%s] : %s\n' % (customer, pprint.pformat(response.json())))
     assert response.json()['status'] == 'OK', response.json()
-    return response.json()
+    if wait_state is None:
+        return response.json()
+    count = 0
+    while True:
+        if count >= validate_retries:
+            break
+        response = request_get(customer, 'group/info/v1?group_key_id=%s' % group_key_id, timeout=20)
+        assert response.status_code == 200
+        print('group/info/v1 [%s] attempt %d : %s\n' % (customer, count, pprint.pformat(response.json())))
+        assert response.json()['status'] == 'OK', response.json()
+        if response.json()['result']['state'] == wait_state:
+            return response.json()
+        if stop_state and response.json()['result']['state'] == stop_state:
+            return response.json()
+        count += 1
+        time.sleep(delay)
+    assert False, 'state %r was not detected for %r after %d retries' % (wait_state, group_key_id, count, )
 
 
 def group_join_v1(customer: str, group_key_id, attempts=1, timeout=120):
@@ -286,7 +302,7 @@ def file_create_v1(node, remote_path):
 
 def file_upload_start_v1(customer: str, remote_path: str, local_path: str,
                          open_share=True, wait_result=True,
-                         attempts=10, delay=5,
+                         wait_finish_attempts=20, delay=5,
                          wait_job_finish=True,
                          wait_packets_finish=True,
                          wait_transfers_finish=True,
@@ -305,7 +321,7 @@ def file_upload_start_v1(customer: str, remote_path: str, local_path: str,
         customer, remote_path, local_path, pprint.pformat(response.json()),))
     assert response.json()['status'] == 'OK', response.json()
     if wait_job_finish:
-        for _ in range(attempts):
+        for _ in range(wait_finish_attempts):
             response = request_get(customer, 'file/upload/v1', timeout=20)
             assert response.status_code == 200
             print('file/upload/v1 [%s] : %s\n' % (customer, pprint.pformat(response.json()), ))
@@ -324,9 +340,9 @@ def file_upload_start_v1(customer: str, remote_path: str, local_path: str,
 
 def file_download_start_v1(customer: str, remote_path: str, destination: str,
                            open_share=True, wait_result=True,
-                           attempts=10, delay=5,
+                           download_attempts=1, wait_finish_attempts=20, delay=5,
                            wait_tasks_finish=True):
-    for _ in range(attempts):
+    for _ in range(download_attempts):
         response = request_post(customer, 'file/download/start/v1',
             json={
                 'remote_path': remote_path,
@@ -354,7 +370,7 @@ def file_download_start_v1(customer: str, remote_path: str, destination: str,
     else:
         assert False, 'failed to start downloading uploaded file on [%r]: %r' % (customer, response.json(), )
     if wait_tasks_finish:
-        for _ in range(attempts):
+        for _ in range(wait_finish_attempts):
             response = request_get(customer, 'file/download/v1', timeout=20)
             assert response.status_code == 200
             print('file/download/v1 [%s] : %s\n' % (customer, pprint.pformat(response.json()), ))
@@ -507,6 +523,14 @@ def message_history_v1(node, recipient_id, message_type='private_message', timeo
     response = request_get(node, f'message/history/v1?id={recipient_id}&message_type={message_type}', timeout=timeout)
     assert response.status_code == 200
     print('message/history/v1 [%s] recipient_id=%s : %s\n' % (node, recipient_id, pprint.pformat(response.json()), ))
+    assert response.json()['status'] == 'OK', response.json()
+    return response.json()
+
+
+def message_conversation_v1(node, message_types='private_message,group_message', timeout=15):
+    response = request_get(node, f'message/conversation/v1?message_types={message_types}', timeout=timeout)
+    assert response.status_code == 200
+    print('message/conversation/v1 [%s] message_types=%s : %s\n' % (node, message_types, pprint.pformat(response.json()), ))
     assert response.json()['status'] == 'OK', response.json()
     return response.json()
 
