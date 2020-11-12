@@ -212,14 +212,13 @@ class NicknameHolder(automat.Automat):
         """
         Condition method.
         """
-        return args[0] == my_id.getLocalID()
+        return id_url.to_bin(args[0]) == my_id.getLocalID().to_bin()
 
     def doSetNickname(self, *args, **kwargs):
         """
         Action method.
         """
-        self.nickname = args[0] if (args and args[0]) else (settings.getNickName() or my_id.getLocalIdentity().getIDName())
-        settings.setNickName(self.nickname)
+        self.nickname = my_id.getLocalIdentity().getIDName()
 
     def doMakeKey(self, *args, **kwargs):
         """

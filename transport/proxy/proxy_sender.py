@@ -163,7 +163,7 @@ class ProxySender(automat.Automat):
             if event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doDestroyMe(*args, **kwargs)
-            elif event == 'start' and proxy_receiver.A().state is not 'LISTEN' and self.isSendingEnabled(*args, **kwargs):
+            elif event == 'start' and proxy_receiver.A().state != 'LISTEN' and self.isSendingEnabled(*args, **kwargs):
                 self.state = 'ROUTER?'
                 self.doStartFilterOutgoingTraffic(*args, **kwargs)
             elif ( ( event == 'proxy_receiver.state' and args[0] == 'LISTEN' ) or ( event == 'start' and proxy_receiver.A().state is 'LISTEN' ) ) and self.isSendingEnabled(*args, **kwargs):
@@ -190,7 +190,7 @@ class ProxySender(automat.Automat):
                 self.state = 'CLOSED'
                 self.doStopFilterOutgoingTraffic(*args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
-            elif event == 'proxy_receiver.state' is not 'LISTEN':
+            elif ( event == 'proxy_receiver.state' and args[0] != 'LISTEN' ):
                 self.state = 'ROUTER?'
             elif event == 'relay-failed':
                 self.doRetryCancelPacket(*args, **kwargs)
@@ -412,8 +412,8 @@ class ProxySender(automat.Automat):
         from_idurl = id_url.field(fail_info['from'])
         for p in packet_out.search_by_packet_id(fail_info['packet_id']):
             if p.outpacket.Command == fail_info['command']:
-                if p.outpacket.RemoteID == to_idurl:
-                    if p.outpacket.CreatorID == from_idurl or p.outpacket.OwnerID == from_idurl:
+                if id_url.to_bin(to_idurl) == p.outpacket.RemoteID.to_bin():
+                    if p.outpacket.CreatorID.to_bin() == id_url.to_bin(from_idurl) or p.outpacket.OwnerID.to_bin() == id_url.to_bin(from_idurl):
                         lg.warn('about to cancel %r because sending via proxy transport failed' % p)
                         p.automat('cancel')
 
@@ -443,8 +443,8 @@ class ProxySender(automat.Automat):
         d.addErrback(self._on_cache_retry_failed, fail_info)
 
     def _do_clean_sent_packet(self, info):
-        if _Debug:
-            lg.args(_DebugLevel, sent_packets=len(self.sent_packets), info=info)
+        # if _Debug:
+        #     lg.args(_DebugLevel, sent_packets=len(self.sent_packets), info=info)
         to_idurl = id_url.to_bin(info['to'])
         to_remove = []
         for _key in self.sent_packets.keys():
@@ -471,8 +471,8 @@ class ProxySender(automat.Automat):
             to_remove.append(_key)
         for _key in to_remove:
             routed_packet, outpacket = self.sent_packets.pop(_key, (None, None, ))
-            if _Debug:
-                lg.dbg(_DebugLevel, 'cleaned %r %r' % (routed_packet, outpacket, ))
+            # if _Debug:
+            #     lg.dbg(_DebugLevel, 'cleaned %r %r' % (routed_packet, outpacket, ))
 
     def _on_cache_retry_success(self, xmlsrc, fail_info):
         if _Debug:

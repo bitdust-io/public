@@ -375,7 +375,7 @@ def on_consumer_notify(message_info):
     payload = message_info['payload']
     consumer_id = message_info['consumer_id']
     queue_id = message_info['queue_id']
-    packet_id = 'queue_%s_%s' % (queue_id, packetid.UniqueID(), )
+    packet_id = packetid.MakeQueueMessagePacketID(queue_id, packetid.UniqueID())
     sequence_id = payload['sequence_id']
     last_sequence_id = get_latest_sequence_id(queue_id)
     producer_id = payload['producer_id']
@@ -1117,12 +1117,13 @@ class MessagePeddler(automat.Automat):
         try:
             group_key_id, key_object = my_keys.read_key_info(group_key_info)
         except Exception as exc:
+            lg.exc()
             p2p_service.SendFail(request_packet, strng.to_text(exc))
             result_defer.callback(False)
             return
         group_key_alias, group_creator_idurl = my_keys.split_key_id(group_key_id)
         if not group_key_alias or not group_creator_idurl:
-            lg.warn('wrong group_key_id')
+            lg.warn('wrong group_key_id: %r' % group_key_id)
             p2p_service.SendFail(request_packet, 'wrong group_key_id')
             result_defer.callback(False)
             return
@@ -1269,7 +1270,7 @@ class MessagePeddler(automat.Automat):
                 'last_sequence_id': get_latest_sequence_id(queue_id),
             },
             recipient_global_id=consumer_id,
-            packet_id='queue_%s_%s' % (queue_id, packetid.UniqueID(), ),
+            packet_id=packetid.MakeQueueMessagePacketID(queue_id, packetid.UniqueID()),
             skip_handshake=True,
             fire_callbacks=False,
         )
@@ -1279,13 +1280,13 @@ class MessagePeddler(automat.Automat):
             if queue_id not in streams():
                 continue
             if streams()[queue_id]['active']:
-                for consumer_id in streams()[queue_id]['consumers']:
+                for consumer_id in list(streams()[queue_id]['consumers']):
                     if consumer_id:
                         if not stop_consumer(queue_id, consumer_id):
                             lg.warn('failed to stop consumer %r in for queue %r' % (consumer_id, queue_id, ))
                         if not remove_consumer(queue_id, consumer_id):
                             lg.warn('consumer %r is not registered for queue %r' % (consumer_id, queue_id, ))
-                for producer_id in streams()[queue_id]['producers']:
+                for producer_id in list(streams()[queue_id]['producers']):
                     if producer_id:
                         if not stop_producer(queue_id, producer_id):
                             lg.warn('failed to stop producer %r in for queue %r' % (producer_id, queue_id, ))
@@ -1505,6 +1506,8 @@ class MessagePeddler(automat.Automat):
                     start_producer(queue_id, new_producer_id)
 
     def _on_group_creator_idurl_cache_failed(self, err, request_packet, result_defer):
+        if _Debug:
+            lg.args(_DebugLevel, err=err, request_packet=request_packet)
         p2p_service.SendFail(request_packet, 'group creator idurl cache failed')
         result_defer.callback(False)
         return None

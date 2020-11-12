@@ -75,11 +75,6 @@ def reset(conf_obj):
     conf_obj.setDefaultValue('paths/restore', '')
 
     conf_obj.setDefaultValue('personal/private-key-size', settings.DefaultPrivateKeySize())
-    conf_obj.setDefaultValue('personal/betatester', 'false')
-    conf_obj.setDefaultValue('personal/email', '')
-    conf_obj.setDefaultValue('personal/name', '')
-    conf_obj.setDefaultValue('personal/nickname', '')
-    conf_obj.setDefaultValue('personal/surname', '')
 
     conf_obj.setDefaultValue('services/accountant/enabled', 'false')
 
@@ -193,6 +188,8 @@ def reset(conf_obj):
 
     conf_obj.setDefaultValue('services/p2p-notifications/enabled', 'true')
 
+    conf_obj.setDefaultValue('services/personal-messages/enabled', 'true')
+
     conf_obj.setDefaultValue('services/private-groups/enabled', 'true')
     conf_obj.setDefaultValue('services/private-groups/message-ack-timeout', 10)
     conf_obj.setDefaultValue('services/private-groups/preferred-brokers', '')
@@ -209,7 +206,7 @@ def reset(conf_obj):
     conf_obj.setDefaultValue('services/proxy-transport/receiving-enabled', 'true')
     conf_obj.setDefaultValue('services/proxy-transport/priority', 100)
     conf_obj.setDefaultValue('services/proxy-transport/preferred-routers', '')
-    conf_obj.setDefaultValue('services/proxy-transport/router-lifetime-seconds', 600)
+    # conf_obj.setDefaultValue('services/proxy-transport/router-lifetime-seconds', 600)
     # TODO: those two settings needs to be removed.
     # if service require storing locally value which user should not modify be implemented
     # inside service (for example read/write to local file inside ~/.bitdust/*/ folder)
@@ -218,7 +215,6 @@ def reset(conf_obj):
     conf_obj.setDefaultValue('services/proxy-transport/current-router', '')
 
     conf_obj.setDefaultValue('services/rebuilding/enabled', 'true')
-    conf_obj.setDefaultValue('services/rebuilding/child-processes-enabled', 'false')
 
     conf_obj.setDefaultValue('services/restores/enabled', 'true')
 
@@ -228,8 +224,6 @@ def reset(conf_obj):
     conf_obj.setDefaultValue('services/supplier/donated-space', diskspace.MakeStringFromBytes(settings.DefaultDonatedBytes()))
 
     conf_obj.setDefaultValue('services/supplier-contracts/enabled', 'false')
-
-    conf_obj.setDefaultValue('services/supplier-relations/enabled', 'false')
 
     conf_obj.setDefaultValue('services/tcp-connections/enabled', 'true')
     conf_obj.setDefaultValue('services/tcp-connections/tcp-port', settings.DefaultTCPPort())

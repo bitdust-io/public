@@ -266,8 +266,8 @@ def LocalTesterLogFilename():
 def MinimumIdentitySources():
     """
     You need to host your identity (piblic key, signature and contacts) at least in one place.
-    By default you will use identiy servers hard-coded in BitDust source code.
-    But you can start your own identity server and host your identiy there.
+    By default you will use identity servers hard-coded in BitDust source code and maintained for you by enthusiasts.
+    But you can also start your own identity server and host your identity on your own host.
     Use those settings before you run identity register call:
 
         services/identity-propagate/known-servers
@@ -310,7 +310,7 @@ def MinimumSendingDelay():
     DO NOT SET TO 0 - the main process will be blocked.
     See ``lib.misc.LoopAttenuation`` method.
     """
-    return 0.01
+    return 0.03
 
 
 def MaximumSendingDelay():
@@ -327,7 +327,7 @@ def MinimumReceivingDelay():
     """
     Lower limit for receiving processes.
     """
-    return 0.05
+    return 0.08
 
 
 def MaximumReceivingDelay():
@@ -352,11 +352,11 @@ def SendingSpeedLimit():
     If sending below this speed - we count this supplier as failed.
     If we sending too slow to all nodes - it's our problems, not suppliers.
     """
-    return 3 * 1024
+    return 30 * 1024
 
 
 def ReceivingSpeedLimit():
-    return 3 * 1024
+    return 30 * 1024
 
 
 def DefaultBandwidthInLimit():
@@ -2092,110 +2092,6 @@ def getDonatedBytes():
     """
     """
     return diskspace.GetBytesFromString(getDonatedString())
-
-
-def getEmergencyEmail():
-    """
-    Get a user email address from settings.
-
-    User can set that to be able to receive email notification in case
-    of some troubles with his backups.
-    """
-    # return config.conf().getData('emergency/email')
-    # TODO: remove this after get rid of webcontrol.py
-    return ''
-
-
-def getEmergencyPhone():
-    """
-    Get a user phone number from settings.
-    """
-    # return config.conf().getData('emergency/phone')
-    # TODO: remove this after get rid of webcontrol.py
-    return ''
-
-
-def getEmergencyFax():
-    """
-    Get a user fax number from settings.
-    """
-    # return config.conf().getData('emergency/fax')
-    # TODO: remove this after get rid of webcontrol.py
-    return ''
-
-
-def getEmergencyOther():
-    """
-    Get a other address info from settings.
-    """
-    # return config.conf().getData('emergency/text')
-    # TODO: remove this after get rid of webcontrol.py
-    return ''
-
-
-def getEmergency(method):
-    """
-    Get a given user emergensy method from settings.
-    """
-    # if method not in getEmergencyMethods():
-    #     return ''
-    # return config.conf().getData('emergency/' + method)
-    # TODO: remove this after get rid of webcontrol.py
-    return ''
-
-
-def getEmergencyFirstMethod():
-    """
-    Get a first method to use when need to contact with user.
-    """
-    # return config.conf().getData('emergency/first')
-    # TODO: remove this after get rid of webcontrol.py
-    return ''
-
-
-def getEmergencySecondMethod():
-    """
-    Get a second method to use when need to contact with user.
-    """
-    # return config.conf().getData('emergency/second')
-    # TODO: remove this after get rid of webcontrol.py
-    return ''
-
-
-def getEmergencyMethods():
-    """
-    Return a list of available methods to contact with user.
-    """
-    # TODO: remove this after get rid of webcontrol.py
-    return (
-        'email',
-        'phone',
-        'fax',
-        'other',)
-
-
-def getNickName():
-    """
-    """
-    return config.conf().getData('personal/nickname')
-
-
-def setNickName(nickname):
-    """
-    """
-    config.conf().setData('personal/nickname', nickname.strip())
-
-
-def getEmail():
-    """
-    """
-    return config.conf().getData('personal/email')
-
-
-def setEmail(nickname):
-    """
-    """
-    config.conf().setData('personal/email', nickname.strip())
 
 
 def getUpdatesMode():

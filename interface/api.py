@@ -406,7 +406,7 @@ def process_debug():
 
 #------------------------------------------------------------------------------
 
-def config_get(key):
+def config_get(key, include_info=False):
     """
     Returns current key/value from the program settings.
 
@@ -420,22 +420,29 @@ def config_get(key):
         key = strng.to_text(key).strip('/')
     except:
         return ERROR('wrong key')
+    if not key:
+        return ERROR('empty key')
     if _Debug:
         lg.out(_DebugLevel, 'api.config_get [%s]' % key)
-    if key and not config.conf().exist(key):
+    if not config.conf().exist(key):
         return ERROR('option "%s" not exist' % key)
-
-    if key and not config.conf().hasChilds(key):
-        return RESULT([config.conf().toJson(key), ], )
+    if not config.conf().hasChilds(key):
+        return RESULT([config.conf().toJson(key, include_info=include_info), ], )
+    known_childs = sorted(config.conf().listEntries(key))
+    if key.startswith('services/') and key.count('/') == 1:
+        svc_enabled_key = key + '/enabled'
+        if svc_enabled_key in known_childs:
+            known_childs.remove(svc_enabled_key)
+            known_childs.insert(0, svc_enabled_key)
     childs = []
-    for child in config.conf().listEntries(key):
+    for child in known_childs:
         if config.conf().hasChilds(child):
             childs.append({
                 'key': child,
                 'childs': len(config.conf().listEntries(child)),
             })
         else:
-            childs.append(config.conf().toJson(child))
+            childs.append(config.conf().toJson(child, include_info=include_info))
     return RESULT(childs)
 
 
@@ -457,11 +464,11 @@ def config_set(key, value):
     if _Debug:
         lg.out(_DebugLevel, 'api.config_set [%s]=%s type is %s' % (key, value, typ_label))
     config.conf().setValueOfType(key, value)
-    v.update(config.conf().toJson(key))
+    v.update(config.conf().toJson(key, include_info=False))
     return RESULT([v, ])
 
 
-def configs_list(sort=False):
+def configs_list(sort=False, include_info=False):
     """
     Provide detailed info about all program settings.
 
@@ -474,13 +481,13 @@ def configs_list(sort=False):
     if _Debug:
         lg.out(_DebugLevel, 'api.configs_list')
     r = config.conf().cache()
-    r = [config.conf().toJson(key) for key in list(r.keys())]
+    r = [config.conf().toJson(key, include_info=include_info) for key in list(r.keys())]
     if sort:
         r = sorted(r, key=lambda i: i['key'])
     return RESULT(r)
 
 
-def configs_tree():
+def configs_tree(include_info=False):
     """
     Returns all options as a tree structure, can be more suitable for UI operations.
 
@@ -499,7 +506,7 @@ def configs_tree():
             if part not in cursor:
                 cursor[part] = {}
             cursor = cursor[part]
-        cursor.update(config.conf().toJson(key))
+        cursor.update(config.conf().toJson(key, include_info=include_info))
     return RESULT([r, ])
 
 #------------------------------------------------------------------------------
@@ -1456,7 +1463,7 @@ def file_delete(remote_path):
     Removes virtual file or folder from the catalog and also notifies your remote suppliers to clean up corresponding uploaded data.
 
     ###### HTTP
-        curl -X POST 'localhost:8180/file/delete/v1' -d '{"remote_path": "abcd1234$alice@server-a.com:cars/ferrari.gif"}'
+        curl -X DELETE 'localhost:8180/file/delete/v1' -d '{"remote_path": "abcd1234$alice@server-a.com:cars/ferrari.gif"}'
 
     ###### WebSocket
         websocket.send('{"command": "api_call", "method": "file_delete", "kwargs": {"remote_path": "abcd1234$alice@server-a.com:cars/ferrari.gif"} }');
@@ -2488,7 +2495,7 @@ def group_join(group_key_id):
     if not driver.is_on('service_private_groups'):
         return ERROR('service_private_groups() is not started')
     group_key_id = strng.to_text(group_key_id)
-    if not group_key_id.startswith('group_'):
+    if not group_key_id.startswith('group_') and not group_key_id.startswith('person$'):
         return ERROR('invalid group id')
     from crypt import my_keys
     from userid import id_url
@@ -2564,6 +2571,7 @@ def group_leave(group_key_id, erase_key=False):
     if not driver.is_on('service_private_groups'):
         return ERROR('service_private_groups() is not started')
     from access import group_member
+    from access import groups
     from crypt import my_keys
     group_key_id = strng.to_text(group_key_id)
     if not group_key_id.startswith('group_'):
@@ -2572,11 +2580,12 @@ def group_leave(group_key_id, erase_key=False):
         return ERROR('unknown group key')
     this_group_member = group_member.get_active_group_member(group_key_id)
     if not this_group_member:
-        if not erase_key:
-            lg.warn('active group_member() instance was not found for %r' % group_key_id)
-            return ERROR('active group_member() instance was not found for %r' % group_key_id)
-        my_keys.erase_key(group_key_id)
-        return OK(message='group key "%s" erased' % group_key_id)
+        groups.set_group_active(group_key_id, False)
+        groups.save_group_info(group_key_id)
+        if erase_key:
+            my_keys.erase_key(group_key_id)
+            return OK(message='group key "%s" erased' % group_key_id)
+        return OK(message='group "%s" deactivated' % group_key_id)
     this_group_member.automat('leave', erase_key=erase_key)
     if erase_key:
         OK(message='group "%s" deleted' % group_key_id)
@@ -2673,7 +2682,7 @@ def friends_list():
     return RESULT(result)
 
 
-def friend_add(trusted_user_id, alias=''):
+def friend_add(trusted_user_id, alias='', share_person_key=True):
     """
     Add user to the list of correspondents.
 
@@ -2693,6 +2702,7 @@ def friend_add(trusted_user_id, alias=''):
     from p2p import online_status
     from userid import global_id
     from userid import id_url
+    from userid import my_id
     idurl = strng.to_text(trusted_user_id)
     if global_id.IsValidGlobalUser(trusted_user_id):
         idurl = global_id.GlobalUserToIDURL(trusted_user_id, as_field=False)
@@ -2700,7 +2710,9 @@ def friend_add(trusted_user_id, alias=''):
     if not idurl:
         return ERROR('you must specify the global IDURL address of remote user')
 
-    def _add():
+    ret = Deferred()
+
+    def _add(idurl, result_defer):
         added = False
         if not contactsdb.is_correspondent(idurl):
             contactsdb.add_correspondent(idurl, alias)
@@ -2712,19 +2724,36 @@ def friend_add(trusted_user_id, alias=''):
                 alias=alias,
             ))
         d = online_status.handshake(idurl, channel='friend_add', keep_alive=True)
+        if share_person_key:
+            from access import key_ring
+            from crypt import my_keys
+            my_person_key_id = my_id.getGlobalID(key_alias='person')
+            if my_keys.is_key_registered(my_person_key_id):
+                d.addCallback(lambda *args: [
+                    key_ring.share_key(
+                        key_id=my_person_key_id,
+                        trusted_idurl=idurl,
+                        include_private=False,
+                        include_signature=True,
+                        timeout=15,
+                    ),
+                ])
+
         if _Debug:
             d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='api.friend_add')
         if added:
-            return OK(message='new friend has been added', api_method='friend_add')
-        return OK(message='this friend has been already added', api_method='friend_add')
+            result_defer.callback(OK(message='new friend has been added', api_method='friend_add'))
+        else:
+            result_defer.callback(OK(message='this friend has been already added', api_method='friend_add'))
+        return
 
     if id_url.is_cached(idurl):
-        return _add()
+        _add(idurl, ret)
+        return ret
 
-    ret = Deferred()
     d = identitycache.immediatelyCaching(idurl)
     d.addErrback(lambda *args: ret.callback(ERROR('failed caching user identity')))
-    d.addCallback(lambda *args: ret.callback(_add()))
+    d.addCallback(lambda *args: _add(idurl, ret))
     return ret
 
 
@@ -3033,29 +3062,27 @@ def message_history(recipient_id=None, sender_id=None, message_type=None, offset
     from chat import message_database
     from userid import my_id, global_id
     from crypt import my_keys
-    if recipient_id is None and sender_id is None:
+    if not recipient_id and not sender_id:
         return ERROR('recipient_id or sender_id is required')
-    if not recipient_id.count('@'):
-        from contacts import contactsdb
-        recipient_idurl = contactsdb.find_correspondent_by_nickname(recipient_id)
-        if not recipient_idurl:
-            return ERROR('recipient was not found')
-        recipient_id = global_id.UrlToGlobalID(recipient_idurl)
-    recipient_glob_id = global_id.ParseGlobalID(recipient_id)
-    if not recipient_glob_id['idurl']:
-        return ERROR('wrong recipient_id')
-    recipient_id = global_id.MakeGlobalID(**recipient_glob_id)
-    if not my_keys.is_valid_key_id(recipient_id):
-        return ERROR('invalid recipient_id: %s' % recipient_id)
+    if recipient_id:
+        if not recipient_id.count('@'):
+            from contacts import contactsdb
+            recipient_idurl = contactsdb.find_correspondent_by_nickname(recipient_id)
+            if not recipient_idurl:
+                return ERROR('recipient was not found')
+            recipient_id = global_id.UrlToGlobalID(recipient_idurl)
+        recipient_glob_id = global_id.ParseGlobalID(recipient_id)
+        if not recipient_glob_id['idurl']:
+            return ERROR('wrong recipient_id')
+        recipient_id = global_id.MakeGlobalID(**recipient_glob_id)
+        if not my_keys.is_valid_key_id(recipient_id):
+            return ERROR('invalid recipient_id: %s' % recipient_id)
     bidirectional = False
     if message_type in [None, 'private_message', ]:
         bidirectional = True
         if sender_id is None:
             sender_id = my_id.getGlobalID(key_alias='master')
-    if _Debug:
-        lg.out(_DebugLevel, 'api.message_history with recipient_id=%s sender_id=%s message_type=%s' % (
-            recipient_id, sender_id, message_type, ))
-    messages = [{'doc': m, } for m in message_database.query(
+    messages = [{'doc': m, } for m in message_database.query_messages(
         sender_id=sender_id,
         recipient_id=recipient_id,
         bidirectional=bidirectional,
@@ -3063,7 +3090,76 @@ def message_history(recipient_id=None, sender_id=None, message_type=None, offset
         offset=offset,
         limit=limit,
     )]
+    if _Debug:
+        lg.out(_DebugLevel, 'api.message_history with recipient_id=%s sender_id=%s message_type=%s found %d messages' % (
+            recipient_id, sender_id, message_type, len(messages), ))
     return RESULT(messages)
+
+
+def message_conversations_list(message_types=[], offset=0, limit=100):
+    """
+    Returns list of all known conversations with other users.
+    Parameter `message_types` can be used to select conversations of specific types: "group_message", "private_message", "personal_message".
+
+    ###### HTTP
+        curl -X GET 'localhost:8180/message/conversation/v1?message_types=group_message,private_message'
+
+    ###### WebSocket
+        websocket.send('{"command": "api_call", "method": "message_conversations_list", "kwargs": {"message_types" : ["group_message", "private_message"]} }');
+    """
+    if not driver.is_on('service_message_history'):
+        return ERROR('service_message_history() is not started')
+    from chat import message_database
+    from crypt import my_keys
+    from p2p import online_status
+    from access import group_member
+    from userid import global_id
+    from userid import id_url
+    from userid import my_id
+    conversations = []
+    for conv in list(message_database.list_conversations(
+        order_by_time=True,
+        message_types=message_types,
+        offset=offset,
+        limit=limit,
+    )):
+        conv['key_id'] = conv['conversation_id']
+        conv['label'] = conv['conversation_id']
+        conv['state'] = 'OFFLINE'
+        if conv['type'] == 'private_message':
+            usr1, _, usr2 = conv['conversation_id'].partition('&')
+            usr1 = usr1.replace('master$', '')
+            usr2 = usr2.replace('master$', '')
+            idurl1 = global_id.glob2idurl(usr1, as_field=True)
+            idurl2 = global_id.glob2idurl(usr2, as_field=True)
+            conv_key_id = None
+            conv_label = None
+            user_idurl = None
+            if (id_url.is_cached(idurl1) and idurl1 == my_id.getIDURL()) or usr1.split('@')[0] == my_id.getIDName():
+                user_idurl = idurl2
+                conv_key_id = global_id.UrlToGlobalID(idurl2, include_key=True)
+                conv_label = conv_key_id.replace('master$', '').split('@')[0]
+            if (id_url.is_cached(idurl2) and idurl2 == my_id.getIDURL()) or usr2.split('@')[0] == my_id.getIDName():
+                user_idurl = idurl1
+                conv_key_id = global_id.UrlToGlobalID(idurl1, include_key=True)
+                conv_label = conv_key_id.replace('master$', '').split('@')[0]
+            if conv_key_id:
+                conv['key_id'] = conv_key_id
+            if conv_label:
+                conv['label'] = conv_label
+            if user_idurl:
+                conv['state'] = online_status.getCurrentState(user_idurl) or 'OFFLINE'
+        elif conv['type'] == 'group_message' or conv['type'] == 'personal_message':
+            conv['key_id'] = my_keys.latest_key_id(conv['conversation_id'])
+            conv['label'] = my_keys.get_label(conv['conversation_id']) or conv['conversation_id']
+            gm = group_member.get_active_group_member(conv['conversation_id'])
+            if gm:
+                conv['state'] = gm.state or 'OFFLINE'
+        conversations.append(conv)
+    if _Debug:
+        lg.out(_DebugLevel, 'api.message_conversations with message_types=%s found %d conversations' % (
+            message_types, len(conversations), ))
+    return RESULT(conversations)
 
 
 def message_send(recipient_id, data, ping_timeout=30, message_ack_timeout=15):
@@ -3089,8 +3185,8 @@ def message_send(recipient_id, data, ping_timeout=30, message_ack_timeout=15):
         return ERROR('service_private_messages() is not started')
     from lib import packetid
     from stream import message
-    from userid import global_id
     from crypt import my_keys
+    from userid import global_id
     if not recipient_id.count('@'):
         from contacts import contactsdb
         recipient_idurl = contactsdb.find_correspondent_by_nickname(recipient_id)
@@ -3105,6 +3201,17 @@ def message_send(recipient_id, data, ping_timeout=30, message_ack_timeout=15):
     target_glob_id = global_id.MakeGlobalID(**glob_id)
     if not my_keys.is_valid_key_id(target_glob_id):
         return ERROR('invalid key_id: %s' % target_glob_id)
+    if recipient_id.startswith('person$'):
+        if not driver.is_on('service_personal_messages'):
+            return ERROR('service_personal_messages() is not started')
+        if _Debug:
+            lg.out(_DebugLevel, 'api.message_send to %r via message_producer' % recipient_id)
+        from stream import message_producer
+        ret = Deferred()
+        result = message_producer.push_message(recipient_id, data)
+        result.addCallback(lambda ok: ret.callback(OK(api_method='message_send')))
+        result.addErrback(lambda err: ret.callback(ERROR(err, api_method='message_send')))
+        return ret
     if _Debug:
         lg.out(_DebugLevel, 'api.message_send to "%s" ping_timeout=%d message_ack_timeout=%d' % (
             target_glob_id, ping_timeout, message_ack_timeout, ))
@@ -3566,7 +3673,7 @@ def customer_reject(customer_id):
     accounting.write_customers_quotas(space_dict, new_free_space)
     contactsdb.update_customers(current_customers)
     contactsdb.save_customers()
-    events.send('existing-customer-terminated', dict(
+    events.send('existing-customer-terminated', data=dict(
         idurl=customer_idurl,
         ecc_map=eccmap.Current().name,
     ))
@@ -3677,7 +3784,7 @@ def services_list(with_configs=False):
         if with_configs:
             svc_configs = []
             for child in config.conf().listEntries(svc.config_path.replace('/enabled', '')):
-                svc_configs.append(config.conf().toJson(child))
+                svc_configs.append(config.conf().toJson(child, include_info=False))
             svc_info['configs'] = svc_configs
         result.append(svc_info)
     if _Debug:
@@ -4836,6 +4943,7 @@ def automats_list():
         'index': a.index,
         'name': a.name,
         'state': a.state,
+        'repr': repr(a),
         'timers': (','.join(list(a.getTimers().keys()))),
     } for a in automat.objects().values()]
     if _Debug:

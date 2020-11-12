@@ -259,7 +259,8 @@ def search_by_response_packet(newpacket=None, proto=None, host=None, outgoing_co
             if another_packet_id not in matching_packet_ids:
                 matching_packet_ids.append(another_packet_id)
     if len(matching_packet_ids) > 1:
-        lg.warn('multiple packet IDs expecting to match for that packet: %r' % matching_packet_ids)
+        if _Debug:
+            lg.warn('multiple packet IDs expecting to match for that packet: %r' % matching_packet_ids)
     for p in queue():
         # TODO: investigate more
         if p.outpacket.PacketID.lower() not in matching_packet_ids:
@@ -414,7 +415,7 @@ class PacketOut(automat.Automat):
 
     def __repr__(self):
         """
-        Will print something like: "out_123_alice[Data(9999999999)](SENDING)".
+        Will return something like: "out_123_alice[Data(9999999999)](SENDING)".
         """
         packet_label = '?'
         if self.outpacket:
