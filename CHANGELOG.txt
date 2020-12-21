@@ -1,10 +1,24 @@
 Change Log
 ==========
 
+2020-12-21 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
+* IDURL fix in io_throttle
+* migrating to CircleCI
+
+
+
+2020-12-11 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
+* disabled few unused modules and skip creating some of the local folders
+* force utf-8 for the locale
+* fix for cmd line on Windows
+
+
 
 2020-12-04 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
-* fix few typos and small bugs on Windows
+* fixed few typos and small bugs on Windows
 
 
 
