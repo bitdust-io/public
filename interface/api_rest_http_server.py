@@ -520,6 +520,8 @@ class BitDustRESTHTTPServer(JsonAPIResource):
         return api.key_get(
             key_id=_request_arg(request, 'key_id', mandatory=True),
             include_private=bool(_request_arg(request, 'include_private', '0') in ['1', 'true', ]),
+            include_signature=bool(_request_arg(request, 'include_signature', '0') in ['1', 'true', ]),
+            generate_signature=bool(_request_arg(request, 'generate_signature', '0') in ['1', 'true', ]),
         )
 
     @POST('^/k/c$')
@@ -559,7 +561,9 @@ class BitDustRESTHTTPServer(JsonAPIResource):
         return api.key_share(
             key_id=data['key_id'],
             trusted_user_id=data['trusted_user_id'],
-            include_private=bool(data.get('include_private', '0') in ['1', 'true', ]), )
+            include_private=bool(data.get('include_private', '0') in ['1', 'true', ]),
+            include_signature=bool(data.get('include_signature', '0') in ['1', 'true', ]),
+        )
 
     @POST('^/k/a$')
     @POST('^/v1/key/audit$')
@@ -1044,6 +1048,7 @@ class BitDustRESTHTTPServer(JsonAPIResource):
         data = _request_data(request, mandatory_keys=[('customer_id', 'idurl', 'global_id', 'id', ), ])
         return api.customer_reject(
             customer_id=data.get('customer_id') or data.get('global_id') or data.get('idurl') or data.get('id'),
+            erase_customer_key=bool(_request_arg(request, 'erase_customer_key', '1') in ['1', 'true', ]),
         )
 
     @POST('^/cu/png$')
