@@ -766,7 +766,7 @@ def identity_cache_list():
 
 #------------------------------------------------------------------------------
 
-def key_get(key_id, include_private=False):
+def key_get(key_id, include_private=False, include_signature=False, generate_signature=False):
     """
     Returns details of the registered public or private key.
 
@@ -784,7 +784,12 @@ def key_get(key_id, include_private=False):
         lg.out(_DebugLevel, 'api.key_get')
     from crypt import my_keys
     try:
-        key_info = my_keys.get_key_info(key_id=key_id, include_private=include_private)
+        key_info = my_keys.get_key_info(
+            key_id=key_id,
+            include_private=include_private,
+            include_signature=include_signature,
+            generate_signature=generate_signature,
+        )
         key_info.pop('include_private', None)
     except Exception as exc:
         return ERROR(exc)
@@ -931,7 +936,7 @@ def key_erase(key_id):
     return OK(message='private key "%s" was erased successfully' % key_id)
 
 
-def key_share(key_id, trusted_user_id, include_private=False, timeout=10):
+def key_share(key_id, trusted_user_id, include_private=False, include_signature=False, timeout=10):
     """
     Connects to remote user and transfer given public or private key to that node.
     This way you can share access to files/groups/resources with other users in the network.
@@ -962,7 +967,7 @@ def key_share(key_id, trusted_user_id, include_private=False, timeout=10):
         idurl = global_id.GlobalUserToIDURL(idurl, as_field=False)
     from access import key_ring
     ret = Deferred()
-    d = key_ring.share_key(key_id=full_key_id, trusted_idurl=idurl, include_private=include_private, timeout=timeout)
+    d = key_ring.share_key(key_id=full_key_id, trusted_idurl=idurl, include_private=include_private, include_signature=include_signature, timeout=timeout)
     d.addCallback(lambda resp: ret.callback(OK(strng.to_text(resp), api_method='key_share')))
     d.addErrback(lambda err: ret.callback(ERROR(err, api_method='key_share')))
     return ret
@@ -2465,7 +2470,7 @@ def group_create(creator_id=None, key_size=None, label='', timeout=20):
     group_key_id = groups.create_new_group(creator_id=creator_id, label=label, key_size=key_size)
     if not group_key_id:
         return ERROR('failed to create new group')
-    key_info = my_keys.get_key_info(group_key_id, include_private=False)
+    key_info = my_keys.get_key_info(group_key_id, include_private=False, include_signature=False, generate_signature=False)
     key_info.pop('include_private', None)
     key_info['group_key_id'] = key_info.pop('key_id')
     ret = Deferred()
@@ -2678,7 +2683,7 @@ def group_share(group_key_id, trusted_user_id, timeout=30):
     d.addCallback(_on_group_access_donor_success)
     d.addErrback(_on_group_access_donor_failed)
     d.addTimeout(timeout, clock=reactor)
-    group_access_donor_machine = group_access_donor.GroupAccessDonor(log_events=True, publish_events=False, )
+    group_access_donor_machine = group_access_donor.GroupAccessDonor(log_events=True, publish_events=False)
     group_access_donor_machine.automat('init', trusted_idurl=remote_idurl, group_key_id=group_key_id, result_defer=d)
     return ret
 
@@ -2775,7 +2780,7 @@ def friend_add(trusted_user_id, alias='', share_person_key=True):
                         key_id=my_person_key_id,
                         trusted_idurl=idurl,
                         include_private=False,
-                        include_signature=True,
+                        include_signature=False,
                         timeout=15,
                     ),
                 ])
@@ -3707,7 +3712,7 @@ def customers_list(verbose=False):
     return RESULT(results)
 
 
-def customer_reject(customer_id):
+def customer_reject(customer_id, erase_customer_key=True):
     """
     Stop supporting given customer, remove all related files from local disc, close connections with that node.
 
@@ -3727,6 +3732,7 @@ def customer_reject(customer_id):
     from raid import eccmap
     from p2p import p2p_service
     from lib import packetid
+    from crypt import my_keys
     from userid import global_id
     from userid import id_url
     customer_idurl = customer_id
@@ -3750,6 +3756,12 @@ def customer_reject(customer_id):
     accounting.write_customers_quotas(space_dict, new_free_space)
     contactsdb.update_customers(current_customers)
     contactsdb.save_customers()
+    if erase_customer_key:
+        # erase customer key
+        customer_key_id = my_keys.make_key_id(alias='customer', creator_idurl=customer_idurl)
+        resp = key_erase(customer_key_id)
+        if resp['status'] != 'OK':
+            lg.warn('key %r removal failed' % customer_key_id)
     events.send('existing-customer-terminated', data=dict(
         idurl=customer_idurl,
         ecc_map=eccmap.Current().name,
