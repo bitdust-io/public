@@ -25,6 +25,7 @@ venv
 bitdust.egg-info/
 dist/
 tests/data/test_*
+.coverage
 
 # IDE specific
 .idea
