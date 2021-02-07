@@ -346,12 +346,13 @@ def load_groups():
                 continue
             existing_broker_id = known_brokers(latest_customer_id)[int(latest_broker_info['position'])]
             if existing_broker_id:
-                lg.err('found duplicated broker for customer %r on position %d, erasing file %r' % (
-                    latest_customer_id, int(latest_broker_info['position']), latest_broker_path, ))
-                try:
-                    os.remove(latest_broker_path)
-                except:
-                    lg.exc()
+                if os.path.isfile(latest_broker_path):
+                    lg.err('found duplicated broker for customer %r on position %d, erasing file %r' % (
+                        latest_customer_id, int(latest_broker_info['position']), latest_broker_path, ))
+                    try:
+                        os.remove(latest_broker_path)
+                    except:
+                        lg.exc()
                 continue
             known_brokers()[latest_customer_id][int(latest_broker_info['position'])] = latest_broker_id
             loaded_brokers += 1
@@ -450,24 +451,29 @@ def set_broker(customer_id, broker_id, position=0):
     brokers_dir = os.path.join(service_dir, 'brokers')
     customer_dir = os.path.join(brokers_dir, customer_id)
     broker_path = os.path.join(customer_dir, broker_id)
+    if not os.path.isdir(customer_dir):
+        bpio._dirs_make(customer_dir)
     if os.path.isfile(broker_path):
         if _Debug:
             lg.dbg(_DebugLevel, 'broker %r already exist for customer %r, overwriting' % (broker_id, customer_id, ))
-    if not os.path.isdir(customer_dir):
-        bpio._dirs_make(customer_dir)
     broker_info = {
         'position': position,
     }
     prev_borker_id = known_brokers(customer_id)[position]
     if prev_borker_id:
+        if prev_borker_id == broker_id:
+            if _Debug:
+                lg.args(_DebugLevel, customer_id=customer_id, position=position, broker_id=broker_id, prev_borker_id=prev_borker_id)
+            return True
         prev_broker_path = os.path.join(customer_dir, prev_borker_id)
-        try:
-            os.remove(prev_broker_path)
-        except:
-            lg.exc()
-            return False
-        lg.info('replacing existing broker for customer %r at position %d : %r -> %r' % (
-            customer_id, position, prev_borker_id, broker_id, ))
+        if os.path.isfile(prev_broker_path):
+            lg.info('replacing existing broker for customer %r at position %d : %r -> %r' % (
+                customer_id, position, prev_borker_id, broker_id, ))
+            try:
+                os.remove(prev_broker_path)
+            except:
+                lg.exc()
+                return False
     if not local_fs.WriteTextFile(broker_path, jsn.dumps(broker_info)):
         lg.err('failed to set broker %r at position %d for customer %r' % (broker_id, position, customer_id, ))
         return False
@@ -504,11 +510,12 @@ def clear_broker(customer_id, position):
     removed = []
     for broker_id in to_be_erased:
         broker_path = os.path.join(customer_dir, broker_id)
-        try:
-            os.remove(broker_path)
-        except:
-            lg.exc()
-            continue
+        if os.path.isfile(broker_path):
+            try:
+                os.remove(broker_path)
+            except:
+                lg.exc()
+                continue
         removed.append(broker_path)
     if _Debug:
         lg.args(_DebugLevel, customer_id=customer_id, position=position, removed=removed)
@@ -561,6 +568,10 @@ def on_identity_url_changed(evt):
                 continue
             active_groups()[latest_group_key_id] = active_groups().pop(group_key_id)
             group_member.rotate_active_group_memeber(group_key_id, latest_group_key_id)
+        gm = group_member.get_active_group_member(group_key_id)
+        if gm and gm.connected_brokers and id_url.is_in(old_idurl, gm.connected_brokers.values()):
+            lg.info('connected brokers %r was rotated, restarting %r' % (old_idurl, gm, ))
+            group_member.restart_active_group_member(group_key_id)
     known_customers = list(known_brokers().keys())
     for customer_id in known_customers:
         latest_customer_id = global_id.idurl2glob(new_idurl)
