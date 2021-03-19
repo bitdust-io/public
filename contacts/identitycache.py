@@ -79,16 +79,9 @@ _OverriddenIdentities = {}
 
 
 def init():
-    """
-    This should be called before all other things.
-
-    Call to initialize identitydb and cache several important IDs.
-    """
     if _Debug:
         lg.out(_DebugLevel, 'identitycache.init')
-    if False:
-        # TODO: add settings here
-        identitydb.clear()
+    identitydb.clear()
 
 
 def shutdown():
@@ -209,7 +202,7 @@ def GetLatest(idurl):
     else:
         d = immediatelyCaching(idurl)
         d.addCallback(lambda _: result.callback(FromCache(idurl)))
-        d.addErrback(lambda _: result.errback(None))
+        d.addErrback(lambda err: result.errback(err))
     return result
 
 
@@ -502,16 +495,17 @@ def immediatelyCaching(idurl, timeout=10, try_other_sources=True):
     def _fail(err, idurl):
         global _CachingTasks
         idurl = id_url.to_original(idurl)
-        
-        result = _CachingTasks.pop(idurl)
+        result = _CachingTasks.pop(idurl, None)
+        if _Debug:
+            lg.args(_DebugLevel, idurl=idurl, err=err, result=result)
 
         if not try_other_sources:
+            p2p_stats.count_identity_cache(idurl, 0)
+            lg.warn('[cache failed] %s : %s' % (idurl, err.getErrorMessage(), ))
             if result:
                 result.errback(err)
             else:
                 lg.warn('caching task for %s was not found' % idurl)
-            p2p_stats.count_identity_cache(idurl, 0)
-            lg.warn('[cache failed] %s : %s' % (idurl, err.getErrorMessage(), ))
             return None
 
         latest_idurl, latest_rev = id_url.get_latest_revision(idurl)
@@ -531,12 +525,15 @@ def immediatelyCaching(idurl, timeout=10, try_other_sources=True):
             _next_source(err, sources, 0, result)
             return result
 
-        if result:
-            result.errback(err)
-        else:
-            lg.warn('caching task for %s was not found' % idurl)
         p2p_stats.count_identity_cache(idurl, 0)
         lg.warn('[cache failed] and also no other sources found %s : %s' % (idurl, err.getErrorMessage(), ))
+        if result:
+            if not result.called:
+                result.errback(err)
+            else:
+                lg.warn('caching task result for %s already called' % idurl)
+        else:
+            lg.warn('caching task for %s was not found' % idurl)
         return None
 
     idurl = id_url.to_original(idurl)
