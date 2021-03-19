@@ -139,14 +139,14 @@ class ProxySender(automat.Automat):
         self._sending_enabled = settings.enablePROXYsending()
 
     def to_json(self):
-        return {
-            'name': self.name,
-            'state': self.state,
+        j = super().to_json()
+        j.update({
             'host': ('%s://%s' % proxy_receiver.GetRouterProtoHost()) if proxy_receiver.GetRouterProtoHost() else '',
             'idurl': proxy_receiver.GetRouterIDURL(),
             'bytes_received': 0,
             'bytes_sent': self.traffic_out,
-        }
+        })
+        return j
 
     def A(self, event, *args, **kwargs):
         """
@@ -375,7 +375,7 @@ class ProxySender(automat.Automat):
                 'remoteid': router_idurl,
                 'description': 'RelayOut_%s[%s]_%s' % (outpacket.Command, outpacket.PacketID, nameurl.GetName(router_idurl)),
             },
-            response_timeout=15,
+            response_timeout=response_timeout,
             keep_alive=True,
         )
         for command, cb_list in callbacks.items():
@@ -389,9 +389,8 @@ class ProxySender(automat.Automat):
             self.sent_packets[_key] = (routed_packet, outpacket, )
         self.event('relay-out', (outpacket, newpacket, routed_packet))
         if _Debug:
-            lg.out(_DebugLevel, '>>>Relay-OUT %s' % str(outpacket))
-            lg.out(_DebugLevel, '        sent to %s://%s with %d bytes' % (
-                router_proto, router_host, len(block_encrypted)))
+            lg.out(_DebugLevel, '>>>Relay-OUT %s sent to %s://%s with %d bytes, timeout=%r' % (
+                str(outpacket),router_proto, router_host, len(block_encrypted), response_timeout, ))
         if _PacketLogFileEnabled:
             lg.out(0, '\033[0;49;36mRELAY OUT %s(%s) with %s bytes from %s to %s via %s\033[0m' % (
                 outpacket.Command, outpacket.PacketID, len(raw_bytes),

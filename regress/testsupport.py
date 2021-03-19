@@ -331,7 +331,7 @@ async def start_daemon_async(node, loop, verbose=False):
     await run_ssh_command_and_wait_async(node, 'mkdir -pv /root/.bitdust/metadata/', loop)
     if os.environ.get('_DEBUG', '0') == '0':
         await run_ssh_command_and_wait_async(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = False/_Debug = False/g' {} +", loop)
-    bitdust_daemon = await run_ssh_command_and_wait_async(node, 'BITDUST_LOG_USE_COLORS=0 COVERAGE_PROCESS_START=/app/bitdust/.coverage_config bitdust daemon', loop)
+    bitdust_daemon = await run_ssh_command_and_wait_async(node, 'CRYPTO_LOG=0 BITDUST_LOG_USE_COLORS=0 COVERAGE_PROCESS_START=/app/bitdust/.coverage_config bitdust daemon', loop)
     if verbose:
         print('\n' + bitdust_daemon[0].strip())
     assert (
@@ -916,7 +916,7 @@ async def start_customer_async(node, identity_name, loop, join_network=True, num
     cmd += 'bitdust set services/customer/enabled true;'
     cmd += f'bitdust set services/customer/suppliers-number "{num_suppliers}";'
     # decrease message timeout for group communications
-    cmd += 'bitdust set services/private-groups/message-ack-timeout 10;'
+    cmd += 'bitdust set services/private-groups/message-ack-timeout 15;'
     if block_size:
         cmd += f'bitdust set services/backups/block-size "{block_size}";'
     if supplier_candidates:

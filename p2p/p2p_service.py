@@ -363,20 +363,22 @@ def RequestService(request, info):
             request.RemoteID, request.OwnerID, request.CreatorID))
 
 
-def SendRequestService(remote_idurl, service_name, json_payload={}, wide=False, callbacks={}, timeout=60):
+def SendRequestService(remote_idurl, service_name, json_payload={}, wide=False, callbacks={}, timeout=60, packet_id=None):
     service_info = {
         'name': service_name,
         'payload': json_payload,
     }
     service_info_raw = serialization.DictToBytes(service_info)
+    if packet_id is None:
+        packet_id = packetid.UniqueID()
     if _Debug:
-        lg.out(_DebugLevel, 'p2p_service.SendRequestService "%s" to %s with %d bytes' % (
-            service_name, remote_idurl, len(service_info_raw), ))
+        lg.out(_DebugLevel, 'p2p_service.SendRequestService "%s" to %s with %d bytes pid:%s timeout:%r' % (
+            service_name, remote_idurl, len(service_info_raw), packet_id, timeout, ))
     result = signed.Packet(
         Command=commands.RequestService(),
         OwnerID=my_id.getLocalID(),
         CreatorID=my_id.getLocalID(),
-        PacketID=packetid.UniqueID(),
+        PacketID=packet_id,
         Payload=service_info_raw,
         RemoteID=remote_idurl,
     )
@@ -397,7 +399,7 @@ def CancelService(request, info):
             request.RemoteID, request.OwnerID, request.CreatorID))
 
 
-def SendCancelService(remote_idurl, service_name, json_payload={}, wide=False, callbacks={}):
+def SendCancelService(remote_idurl, service_name, json_payload={}, wide=False, callbacks={}, timeout=20):
     service_info = {
         'name': service_name,
         'payload': json_payload,
@@ -414,7 +416,7 @@ def SendCancelService(remote_idurl, service_name, json_payload={}, wide=False, c
         Payload=service_info_raw,
         RemoteID=remote_idurl,
     )
-    gateway.outbox(result, wide=wide, callbacks=callbacks)
+    gateway.outbox(result, wide=wide, callbacks=callbacks, response_timeout=timeout)
     return result
 
 #------------------------------------------------------------------------------

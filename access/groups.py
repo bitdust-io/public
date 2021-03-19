@@ -533,6 +533,13 @@ def clear_brokers(customer_id):
 
 #------------------------------------------------------------------------------
 
+def is_group_active(group_key_id):
+    group_key_id = my_keys.latest_key_id(group_key_id)
+    if not is_group_exist(group_key_id):
+        return False
+    return active_groups()[group_key_id]['active']
+
+
 def set_group_active(group_key_id, value):
     group_key_id = my_keys.latest_key_id(group_key_id)
     if not is_group_exist(group_key_id):
@@ -555,22 +562,25 @@ def on_identity_url_changed(evt):
     new_idurl = id_url.field(evt.data['new_idurl'])
     active_group_keys = list(active_groups())
     for group_key_id in active_group_keys:
+        if not group_key_id:
+            continue
         group_creator_idurl = global_id.glob2idurl(group_key_id)
         if group_creator_idurl == old_idurl:
             old_group_path = os.path.join(groups_dir, group_key_id)
             latest_group_key_id = my_keys.latest_key_id(group_key_id)
             latest_group_path = os.path.join(groups_dir, latest_group_key_id)
             lg.info('going to rename rotated group key: %r -> %r' % (group_key_id, latest_group_key_id, ))
-            try:
-                os.rename(old_group_path, latest_group_path)
-            except:
-                lg.exc()
-                continue
+            if os.path.isfile(old_group_path):
+                try:
+                    os.rename(old_group_path, latest_group_path)
+                except:
+                    lg.exc()
+                    continue
             active_groups()[latest_group_key_id] = active_groups().pop(group_key_id)
             group_member.rotate_active_group_memeber(group_key_id, latest_group_key_id)
         gm = group_member.get_active_group_member(group_key_id)
         if gm and gm.connected_brokers and id_url.is_in(old_idurl, gm.connected_brokers.values()):
-            lg.info('connected brokers %r was rotated, restarting %r' % (old_idurl, gm, ))
+            lg.info('connected broker %r IDURL is rotated, restarting %r' % (old_idurl, gm, ))
             group_member.restart_active_group_member(group_key_id)
     known_customers = list(known_brokers().keys())
     for customer_id in known_customers:
@@ -580,12 +590,13 @@ def on_identity_url_changed(evt):
             latest_customer_dir = os.path.join(brokers_dir, latest_customer_id)
             lg.info('going to rename rotated customer id: %r -> %r' % (customer_id, latest_customer_id, ))
             old_customer_dir = os.path.join(brokers_dir, customer_id)
-            try:
-                bpio.move_dir_recursive(old_customer_dir, latest_customer_dir)
-                bpio.rmdir_recursive(old_customer_dir)
-            except:
-                lg.exc()
-                continue
+            if os.path.isdir(old_customer_dir):
+                try:
+                    bpio.move_dir_recursive(old_customer_dir, latest_customer_dir)
+                    bpio.rmdir_recursive(old_customer_dir)
+                except:
+                    lg.exc()
+                    continue
             known_brokers()[latest_customer_id] = known_brokers().pop(customer_id)
         for broker_pos, broker_id in enumerate(known_brokers(latest_customer_id)):
             if not broker_id:
@@ -596,11 +607,12 @@ def on_identity_url_changed(evt):
                 latest_broker_path = os.path.join(latest_customer_dir, latest_broker_id)
                 lg.info('going to rename rotated broker id: %r -> %r' % (broker_id, latest_broker_id, ))
                 old_broker_path = os.path.join(latest_customer_dir, broker_id)
-                try:
-                    os.rename(old_broker_path, latest_broker_path)
-                except:
-                    lg.exc()
-                    continue
+                if os.path.isfile(old_broker_path):
+                    try:
+                        os.rename(old_broker_path, latest_broker_path)
+                    except:
+                        lg.exc()
+                        continue
                 if latest_broker_id in known_brokers(latest_customer_id):
                     lg.warn('broker %r already exist' % latest_broker_id)
                     continue
