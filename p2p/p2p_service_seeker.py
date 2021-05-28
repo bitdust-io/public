@@ -90,7 +90,8 @@ class P2PServiceSeeker(automat.Automat):
         }
 
     def __repr__(self):
-        return '%s[%s@%s](%s)' % (self.id, self.target_service or '', self.target_id or '', self.state)
+        return '%s[%s@%s%s%s](%s)' % (self.id, self.target_service or '', self.target_id or '',
+                                      '#' if self.RandomLookup else '!', self.Attempts, self.state)
 
     def init(self):
         """
@@ -98,6 +99,7 @@ class P2PServiceSeeker(automat.Automat):
         of p2p_service_seeker() machine.
         """
         self.Attempts = 0
+        self.RandomLookup = False
         self.lookup_method = None
         self.target_idurl = None
         self.target_id = None
@@ -138,38 +140,38 @@ class P2PServiceSeeker(automat.Automat):
                 self.doSelectOneUser(*args, **kwargs)
                 self.Attempts+=1
                 self.doHandshake(*args, **kwargs)
-            elif event == 'users-not-found' and self.Attempts==5:
-                self.state = 'FAILED'
-                self.doNotifyLookupFailed(*args, **kwargs)
-                self.doDestroyMe(*args, **kwargs)
             elif event == 'users-not-found' and self.Attempts<5:
                 self.Attempts+=1
                 self.doLookupRandomNode(*args, **kwargs)
+            elif event == 'users-not-found' and self.Attempts>=5:
+                self.state = 'FAILED'
+                self.doNotifyLookupFailed(*args, **kwargs)
+                self.doDestroyMe(*args, **kwargs)
         #---HANDSHAKE?---
         elif self.state == 'HANDSHAKE?':
             if event == 'shook-hands':
                 self.state = 'SERVICE?'
                 self.doSendRequestService(*args, **kwargs)
-            elif ( self.Attempts==5 or not self.RandomLookup ) and event == 'fail':
-                self.state = 'FAILED'
-                self.doNotifyHandshakeFailed(*args, **kwargs)
-                self.doDestroyMe(*args, **kwargs)
             elif event == 'fail' and self.Attempts<5 and self.RandomLookup:
                 self.state = 'RANDOM_USER?'
                 self.doLookupRandomNode(*args, **kwargs)
+            elif ( self.Attempts>=5 or not self.RandomLookup ) and event == 'fail':
+                self.state = 'FAILED'
+                self.doNotifyHandshakeFailed(*args, **kwargs)
+                self.doDestroyMe(*args, **kwargs)
         #---SERVICE?---
         elif self.state == 'SERVICE?':
             if event == 'service-accepted':
                 self.state = 'SUCCESS'
                 self.doNotifyServiceAccepted(*args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
-            elif ( self.Attempts==5 or not self.RandomLookup ) and ( event == 'timer-90sec' or event == 'fail' or event == 'service-denied' ):
-                self.state = 'FAILED'
-                self.doNotifyServiceRequestFailed(*args, **kwargs)
-                self.doDestroyMe(*args, **kwargs)
             elif ( event == 'timer-90sec' or event == 'fail' or event == 'service-denied' ) and self.Attempts<5 and self.RandomLookup:
                 self.state = 'RANDOM_USER?'
                 self.doLookupRandomNode(*args, **kwargs)
+            elif ( event == 'timer-90sec' or event == 'fail' or event == 'service-denied' ) and ( not self.RandomLookup or ( self.Attempts>=5 and self.RandomLookup ) ):
+                self.state = 'FAILED'
+                self.doNotifyServiceRequestFailed(*args, **kwargs)
+                self.doDestroyMe(*args, **kwargs)
         #---SUCCESS---
         elif self.state == 'SUCCESS':
             pass
