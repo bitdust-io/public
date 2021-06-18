@@ -39,6 +39,7 @@ EVENTS:
     * :red:`timer-10sec`
     * :red:`timer-15sec`
     * :red:`timer-2sec`
+    * :red:`timer-30sec`
     * :red:`user-identity-cached`
 """
 
@@ -94,9 +95,10 @@ class SharedAccessDonor(automat.Automat):
     """
 
     timers = {
-        'timer-2sec': (2.0, ['PUB_KEY']),
         'timer-10sec': (10.0, ['CACHE']),
-        'timer-15sec': (15.0, ['PUB_KEY', 'PING', 'PRIV_KEY', 'AUDIT', 'LIST_FILES']),
+        'timer-15sec': (15.0, ['PUB_KEY', 'PING', 'AUDIT', 'LIST_FILES']),
+        'timer-2sec': (2.0, ['PUB_KEY']),
+        'timer-30sec': (30.0, ['PRIV_KEY']),
     }
 
     def __init__(self, debug_level=0, log_events=False, publish_events=False, **kwargs):
@@ -146,7 +148,7 @@ class SharedAccessDonor(automat.Automat):
                 self.doBlockchainLookupVerifyUserPubKey(*args, **kwargs)
             elif event == 'fail' or event == 'timer-15sec':
                 self.state = 'CLOSED'
-                self.doReportFailed(*args, **kwargs)
+                self.doReportFailed(event, *args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
         #---CACHE---
         elif self.state == 'CACHE':
@@ -155,13 +157,13 @@ class SharedAccessDonor(automat.Automat):
                 self.doSendMyIdentityToUser(*args, **kwargs)
             elif event == 'fail' or event == 'timer-10sec':
                 self.state = 'CLOSED'
-                self.doReportFailed(*args, **kwargs)
+                self.doReportFailed(event, *args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
         #---BLOCKCHAIN---
         elif self.state == 'BLOCKCHAIN':
             if event == 'fail':
                 self.state = 'CLOSED'
-                self.doReportFailed(*args, **kwargs)
+                self.doReportFailed(event, *args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
             elif event == 'blockchain-ok':
                 self.state = 'AUDIT'
@@ -174,7 +176,7 @@ class SharedAccessDonor(automat.Automat):
                 self.doDestroyMe(*args, **kwargs)
             elif event == 'fail' or event == 'timer-15sec':
                 self.state = 'CLOSED'
-                self.doReportFailed(*args, **kwargs)
+                self.doReportFailed(event, *args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
         #---AUDIT---
         elif self.state == 'AUDIT':
@@ -183,7 +185,7 @@ class SharedAccessDonor(automat.Automat):
                 self.doSendPubKeyToSuppliers(*args, **kwargs)
             elif event == 'fail' or event == 'timer-15sec':
                 self.state = 'CLOSED'
-                self.doReportFailed(*args, **kwargs)
+                self.doReportFailed(event, *args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
         #---PUB_KEY---
         elif self.state == 'PUB_KEY':
@@ -191,7 +193,7 @@ class SharedAccessDonor(automat.Automat):
                 self.doCheckAllAcked(*args, **kwargs)
             elif event == 'fail' or ( event == 'timer-15sec' and not self.isSomeSuppliersAcked(*args, **kwargs) ):
                 self.state = 'CLOSED'
-                self.doReportFailed(*args, **kwargs)
+                self.doReportFailed(event, *args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
             elif event == 'all-suppliers-acked' or ( event == 'timer-2sec' and self.isSomeSuppliersAcked(*args, **kwargs) ):
                 self.state = 'PRIV_KEY'
@@ -201,9 +203,9 @@ class SharedAccessDonor(automat.Automat):
             if event == 'priv-key-ok':
                 self.state = 'LIST_FILES'
                 self.doSendMyListFiles(*args, **kwargs)
-            elif event == 'fail' or event == 'timer-15sec':
+            elif event == 'fail' or event == 'timer-30sec':
                 self.state = 'CLOSED'
-                self.doReportFailed(*args, **kwargs)
+                self.doReportFailed(event, *args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
         #---CLOSED---
         elif self.state == 'CLOSED':
@@ -357,23 +359,26 @@ class SharedAccessDonor(automat.Automat):
         if self.result_defer:
             self.result_defer.callback(True)
 
-    def doReportFailed(self, *args, **kwargs):
+    def doReportFailed(self, event, *args, **kwargs):
         """
         Action method.
         """
         lg.warn('share key [%s] with %s failed: %s' % (self.key_id, self.remote_idurl, args, ))
-        reason = 'share key failed with unknown reason'
+        reason = 'key transfer failed with unknown reason'
         if args and args[0]:
             reason = args[0]
         else:
             if self.remote_identity is None:
-                reason='remote id caching failed',
+                reason='remote identity caching failed',
             else:
                 if self.ping_response is None:
                     reason='remote node not responding',
                 else:
                     if self.suppliers_responses:
                         reason = 'connection timeout with my suppliers'
+                    else:
+                        if event.count('timer-'):
+                            reason = 'key transfer failed because of network connection timeout'
         events.send('private-key-share-failed', data=dict(
             global_id=global_id.UrlToGlobalID(self.remote_idurl),
             remote_idurl=self.remote_idurl,
