@@ -935,7 +935,7 @@ def key_erase(key_id):
     return OK(message='private key %r erased successfully' % key_id)
 
 
-def key_share(key_id, trusted_user_id, include_private=False, include_signature=False, timeout=10):
+def key_share(key_id, trusted_user_id, include_private=False, include_signature=False, timeout=30):
     """
     Connects to remote user and transfer given public or private key to that node.
     This way you can share access to files/groups/resources with other users in the network.
@@ -2235,7 +2235,7 @@ def share_delete(key_id):
     return OK(this_share.to_json(), message='share %r deleted' % key_id, )
 
 
-def share_grant(key_id, trusted_user_id, timeout=30, publish_events=True):
+def share_grant(key_id, trusted_user_id, timeout=45, publish_events=True):
     """
     Provide access to given share identified by `key_id` to another trusted user.
 
@@ -2682,7 +2682,7 @@ def group_reconnect(group_key_id, use_dht_cache=False):
     return ret
 
 
-def group_share(group_key_id, trusted_user_id, timeout=30, publish_events=False):
+def group_share(group_key_id, trusted_user_id, timeout=45, publish_events=False):
     """
     Provide access to given group identified by `group_key_id` to another trusted user.
 
@@ -4609,6 +4609,7 @@ def network_status(suppliers=False, customers=False, cache=False, tcp=False, udp
         r['global_id'] = my_id.getGlobalID()
         r['identity_sources'] = my_id.getLocalIdentity().getSources(as_originals=True)
         r['identity_contacts'] = my_id.getLocalIdentity().getContacts()
+        r['identity_revision'] = my_id.getLocalIdentity().getRevisionValue()
     if True in [suppliers, customers, cache, ] and driver.is_on('service_p2p_hookups'):
         from contacts import contactsdb
         from p2p import online_status
@@ -4685,7 +4686,8 @@ def network_status(suppliers=False, customers=False, cache=False, tcp=False, udp
             if driver.is_on('service_tcp_transport'):
                 sessions = []
                 for s in gateway.list_active_sessions('tcp'):
-                    i = {
+                    i = s.to_json()
+                    i.update({
                         'peer': getattr(s, 'peer', None),
                         'state': getattr(s, 'state', None),
                         'id': getattr(s, 'id', None),
@@ -4695,7 +4697,7 @@ def network_status(suppliers=False, customers=False, cache=False, tcp=False, udp
                         'connection_address': net_misc.pack_address_text(getattr(s, 'connection_address', None)),
                         'bytes_received': getattr(s, 'total_bytes_received', 0),
                         'bytes_sent': getattr(s, 'total_bytes_sent', 0),
-                    }
+                    })
                     sessions.append(i)
                 streams = []
                 for s in gateway.list_active_streams('tcp'):
@@ -4721,7 +4723,8 @@ def network_status(suppliers=False, customers=False, cache=False, tcp=False, udp
             if driver.is_on('service_udp_transport'):
                 sessions = []
                 for s in gateway.list_active_sessions('udp'):
-                    sessions.append({
+                    i = s.to_json()
+                    i.update({
                         'peer': s.peer_id,
                         'state': s.state,
                         'id': s.id,
@@ -4734,6 +4737,7 @@ def network_status(suppliers=False, customers=False, cache=False, tcp=False, udp
                         'queue': len(s.file_queue.outboxQueue),
                         'dead_streams': len(s.file_queue.dead_streams),
                     })
+                    sessions.append(i)
                 streams = []
                 for s in gateway.list_active_streams('udp'):
                     streams.append({
@@ -4752,20 +4756,10 @@ def network_status(suppliers=False, customers=False, cache=False, tcp=False, udp
             if driver.is_on('service_proxy_transport'):
                 sessions = []
                 for s in gateway.list_active_sessions('proxy'):
-                    i = {
-                        'state': s.state,
-                        'id': s.id,
-                    }
-                    if getattr(s, 'router_proto_host', None):
-                        i['proto'] = s.router_proto_host[0]
-                        i['peer'] = s.router_proto_host[1]
+                    i = s.to_json()
                     if getattr(s, 'router_idurl', None):
                         i['idurl'] = s.router_idurl
                         i['router'] = global_id.UrlToGlobalID(s.router_idurl)
-                    if getattr(s, 'traffic_out', None):
-                        i['bytes_sent'] = s.traffic_out
-                    if getattr(s, 'traffic_in', None):
-                        i['bytes_received'] = s.traffic_in
                     if getattr(s, 'pending_packets', None):
                         i['queue'] = len(s.pending_packets)
                     sessions.append(i)
