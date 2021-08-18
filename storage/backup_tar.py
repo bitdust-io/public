@@ -37,7 +37,7 @@ from __future__ import print_function
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 8
+_DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
@@ -111,7 +111,7 @@ class BytesLoop:
 
     def write(self, chunk):
         reactor.callFromThread(self._write, chunk)  # @UndefinedVariable
-    
+
     def _write(self, chunk):
         self._buffer += chunk
         if _Debug:

@@ -313,6 +313,8 @@ def process_info():
             'queues': 0,
             'consumers': 0,
             'producers': 0,
+            'keepers': 0,
+            'peddlers': 0,
             'supplier_queues': 0,
         },
         'automats': {
@@ -378,6 +380,11 @@ def process_info():
         result['stream']['queues'] = len(p2p_queue.queue())
         result['stream']['consumers'] = len(p2p_queue.consumer())
         result['stream']['producers'] = len(p2p_queue.producer())
+    if driver.is_on('service_message_broker'):
+        from stream import queue_keeper
+        from stream import message_peddler
+        result['stream']['peddlers'] = len(message_peddler.streams())
+        result['stream']['keepers'] = len(queue_keeper.queue_keepers())
     if driver.is_on('service_data_motion'):
         from stream import io_throttle
         result['stream']['supplier_queues'] = len(io_throttle.throttle().ListSupplierQueues())
@@ -1039,7 +1046,7 @@ def files_sync():
 
 def files_list(remote_path=None, key_id=None, recursive=True, all_customers=False, include_uploads=False, include_downloads=False):
     """
-    Returns list of known files registered in the catalog under given `remote_path` folder.
+    Returns list of all known files registered in the catalog under given `remote_path` folder.
     By default returns items from root of the catalog.
 
     If `key_id` is passed will only return items encrypted using that key.
@@ -2005,7 +2012,7 @@ def file_download_start(remote_path, destination_path=None, wait_result=False, o
         if _Debug:
             lg.out(_DebugLevel, '    "open_share" skipped, starting restore')
         _start_restore()
-    
+
     return ret
 
 
@@ -2647,7 +2654,8 @@ def group_leave(group_key_id, erase_key=False):
         groups.save_group_info(group_key_id)
         return OK(message='group deactivated')
     result_json = this_group_member.to_json()
-    this_group_member.automat('leave', erase_key=erase_key)
+    result_json['state'] = 'CLOSED'
+    this_group_member.event('leave', erase_key=erase_key)
     if erase_key:
         return OK(message='group deactivated and deleted', result=result_json)
     return OK(message='group deactivated', result=result_json)
@@ -2736,7 +2744,7 @@ def group_share(group_key_id, trusted_user_id, timeout=45, publish_events=False)
 
 def friends_list():
     """
-    Returns list of registered correspondents.
+    Returns list of all registered correspondents.
 
     ###### HTTP
         curl -X GET 'localhost:8180/friend/list/v1'
@@ -3399,7 +3407,7 @@ def message_send_group(group_key_id, data):
     this_group_member = group_member.get_active_group_member(group_key_id)
     if not this_group_member:
         return ERROR('group is not active')
-    if this_group_member.state not in ['IN_SYNC!', 'QUEUE?', ]:
+    if this_group_member.state not in ['IN_SYNC!', ]:
         return ERROR('group is not synchronized yet')
     if _Debug:
         lg.out(_DebugLevel, 'api.message_send_group to %r' % group_key_id)
@@ -4360,7 +4368,7 @@ def streams_list(protocols=None):
 
 def queues_list():
     """
-    Returns list of registered streaming queues.
+    Returns list of all registered streaming queues.
 
     ###### HTTP
         curl -X GET 'localhost:8180/queue/list/v1'
@@ -4379,7 +4387,7 @@ def queues_list():
 
 def queue_consumers_list():
     """
-    Returns list of registered queue consumers.
+    Returns list of all registered queue consumers.
 
     ###### HTTP
         curl -X GET 'localhost:8180/queue/consumer/list/v1'
@@ -4400,7 +4408,7 @@ def queue_consumers_list():
 
 def queue_producers_list():
     """
-    Returns list of registered queue producers.
+    Returns list of all registered queue producers.
 
     ###### HTTP
         curl -X GET 'localhost:8180/queue/producer/list/v1'
@@ -4417,6 +4425,46 @@ def queue_producers_list():
         'state': producer_info.state,
         'produced': producer_info.produced_messages,
     } for producer_info in p2p_queue.producer().values()])
+
+
+def queue_keepers_list():
+    """
+    Returns list of all registered queue keepers.
+
+    ###### HTTP
+        curl -X GET 'localhost:8180/queue/keeper/list/v1'
+
+    ###### WebSocket
+        websocket.send('{"command": "api_call", "method": "queue_keepers_list", "kwargs": {} }');
+    """
+    if not driver.is_on('service_message_broker'):
+        return ERROR('service_message_broker() is not started')
+    from stream import queue_keeper
+    return RESULT([qk.to_json() for qk in queue_keeper.queue_keepers().values()])
+
+
+def queue_peddlers_list():
+    """
+    Returns list of all registered message peddlers.
+
+    ###### HTTP
+        curl -X GET 'localhost:8180/queue/peddler/list/v1'
+
+    ###### WebSocket
+        websocket.send('{"command": "api_call", "method": "queue_peddlers_list", "kwargs": {} }');
+    """
+    if not driver.is_on('service_message_broker'):
+        return ERROR('service_message_broker() is not started')
+    from stream import message_peddler
+    return RESULT([{
+        'queue_id': queue_id,
+        'active': mp['active'],
+        'consumers': list(mp['consumers'].keys()),
+        'producers': list(mp['producers'].keys()),
+        'messages': len(mp['messages']),
+        'archive': len(mp['archive']),
+        'sequence_id': mp['last_sequence_id'],
+    } for queue_id, mp in message_peddler.streams().items()])
 
 #------------------------------------------------------------------------------
 

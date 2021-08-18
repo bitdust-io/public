@@ -43,6 +43,7 @@ class TCPTransportService(LocalService):
     service_name = 'service_tcp_transport'
     config_path = 'services/tcp-transport/enabled'
     proto = 'tcp'
+    stop_when_failed = True
 
     def dependent_on(self):
         return [
@@ -88,9 +89,14 @@ class TCPTransportService(LocalService):
         return True
 
     def _on_transport_state_changed(self, transport, oldstate, newstate):
+        from logs import lg
+        lg.info('%s -> %s in %r  starting_deferred=%r' % (oldstate, newstate, transport, bool(self.starting_deferred)))
         if self.starting_deferred:
-            if newstate in ['LISTENING', 'OFFLINE', ]:
-                self.starting_deferred.callback(newstate)
+            if newstate in ['LISTENING', ] and oldstate != newstate:
+                self.starting_deferred.callback(True)
+                self.starting_deferred = None
+            elif newstate in ['OFFLINE', ] and oldstate != newstate and oldstate not in ['INIT', ]:
+                self.starting_deferred.errback(Exception(newstate))
                 self.starting_deferred = None
 #        if self.transport:
 #            from p2p import network_connector

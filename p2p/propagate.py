@@ -158,7 +158,7 @@ def start(AckHandler=None, wide=False, refresh_cache=False, include_all=True, in
     if _Debug:
         lg.args(_DebugLevel, wide=wide, refresh_cache=refresh_cache, include_all=include_all, include_enabled=include_enabled)
     return propagate(
-        selected_contacts=contactsdb.contacts_remote(include_all=include_all, include_enabled=include_enabled),
+        selected_contacts=list(filter(None, contactsdb.contacts_remote(include_all=include_all, include_enabled=include_enabled))),
         AckHandler=AckHandler,
         wide=wide,
         refresh_cache=refresh_cache,
@@ -495,3 +495,11 @@ def ping_customers(timeout=30):
             l.append(online_status.ping(idurl=customer_idurl, ack_timeout=timeout, channel='ping_customers', keep_alive=True))
     return DeferredList(l, consumeErrors=True)
 
+
+def ping_nodes(idurl_list, timeout=15, channel='ping_nodes', keep_alive=True):
+    from p2p import online_status
+    l = []
+    for idurl in idurl_list:
+        if idurl:
+            l.append(online_status.ping(idurl=idurl, ack_timeout=timeout, channel=channel, keep_alive=keep_alive))
+    return DeferredList(l, consumeErrors=True)
