@@ -194,7 +194,7 @@ def group_create_v1(customer: str, key_size=1024, label='', attempts=1):
     return response.json()['result']['group_key_id']
 
 
-def group_info_v1(customer: str, group_key_id, wait_state=None, validate_retries=30, delay=3, stop_state=None):
+def group_info_v1(customer: str, group_key_id, wait_state=None, validate_retries=90, delay=2, stop_state=None):
     response = request_get(customer, 'group/info/v1?group_key_id=%s' % group_key_id, timeout=20)
     assert response.status_code == 200
     print('group/info/v1 [%s] : %s\n' % (customer, pprint.pformat(response.json())))
@@ -565,7 +565,7 @@ def user_ping_v1(node, remote_node_id, timeout=95, ack_timeout=30, retries=2):
     return response.json()
 
 
-def service_info_v1(node, service_name, expected_state, attempts=20, delay=5, verbose=True):
+def service_info_v1(node, service_name, expected_state, attempts=90, delay=2, verbose=True):
     current_state = None
     count = 0
     while current_state is None or current_state != expected_state:
@@ -573,10 +573,11 @@ def service_info_v1(node, service_name, expected_state, attempts=20, delay=5, ve
         assert response.status_code == 200
         assert response.json()['status'] == 'OK', response.json()
         current_state = response.json()['result']['state']
-        if verbose:
-            print(f'service/info/{service_name}/v1 [{node}] : %s' % pprint.pformat(response.json()))
         if current_state == expected_state:
+            if verbose:
+                print(f'service/info/{service_name}/v1 [{node}] : %s' % pprint.pformat(response.json()))
             break
+        print(f'  service/info/{service_name}/v1 [{node}] : %s' % current_state)
         count += 1
         if count >= attempts:
             assert False, f"service {service_name} is not {expected_state} after {attempts} attempts"
@@ -622,7 +623,7 @@ def event_listen_v1(node, expected_event_id, consumer_id='regression_tests_wait_
     return found
 
 
-def packet_list_v1(node, wait_all_finish=False, attempts=20, delay=5, verbose=False):
+def packet_list_v1(node, wait_all_finish=False, attempts=90, delay=2, verbose=False):
     if verbose:
         print('packet/list/v1 [%s]\n' % node)
     response = None
@@ -636,9 +637,13 @@ def packet_list_v1(node, wait_all_finish=False, attempts=20, delay=5, verbose=Fa
         for r in response.json()['result']:
             if r.get('packet_id', '').count('idle_ping:'):
                 continue
+            # if r.get('command') == 'CancelService' and r.get('direction') == 'outgoing':
+            #     continue
             if r.get('command') == 'Retrieve' and r.get('direction') == 'outgoing' and r.get('label', '').count('-rotated'):
                 continue
             if r.get('command') == 'Data' and r.get('direction') == 'outgoing' and r.get('label', '').count('-rotated'):
+                continue
+            if r.get('command') == 'Identity' and r.get('direction') == 'outgoing' and r.get('label', '').count('-rotated'):
                 continue
             found_packet = True
         if not found_packet or not wait_all_finish:
@@ -650,7 +655,7 @@ def packet_list_v1(node, wait_all_finish=False, attempts=20, delay=5, verbose=Fa
     return response.json()
 
 
-def transfer_list_v1(node, wait_all_finish=False, attempts=20, delay=5, verbose=False):
+def transfer_list_v1(node, wait_all_finish=False, attempts=90, delay=2, verbose=False):
     if verbose:
         print('transfer/list/v1 [%s]\n' % node)
     for _ in range(attempts):
@@ -789,6 +794,25 @@ def queue_producer_list_v1(node, extract_ids=False):
     if not extract_ids:
         return response.json()
     return [f['producer_id'] for f in response.json()['result']]
+
+def queue_keeper_list_v1(node, extract_ids=False):
+    response = request_get(node, 'queue/keeper/list/v1', timeout=20)
+    assert response.status_code == 200
+    print('queue/keeper/list/v1 [%s] : %s\n' % (node, pprint.pformat(response.json()), ))
+    assert response.json()['status'] == 'OK', response.json()
+    if not extract_ids:
+        return response.json()
+    return [f['customer_id'] for f in response.json()['result']]
+
+
+def queue_peddler_list_v1(node, extract_ids=False):
+    response = request_get(node, 'queue/peddler/list/v1', timeout=20)
+    assert response.status_code == 200
+    print('queue/peddler/list/v1 [%s] : %s\n' % (node, pprint.pformat(response.json()), ))
+    assert response.json()['status'] == 'OK', response.json()
+    if not extract_ids:
+        return response.json()
+    return [f['queue_id'] for f in response.json()['result']]
 
 #------------------------------------------------------------------------------
 
