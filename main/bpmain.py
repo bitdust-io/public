@@ -180,21 +180,19 @@ def init(UI='', options=None, args=None, overDict=None, executablePath=None):
     except:
         lg.exc()
 
-#    #---reactor.callLater patch---
-    if _Debug:
-        patchReactorCallLater(reactor)
-        monitorDelayedCalls(reactor)
+    #---reactor.callLater patch---
+    # if _Debug:
+    #     patchReactorCallLater(reactor)
+    #     monitorDelayedCalls(reactor)
 
     if _Debug:
         lg.out(_DebugLevel, "    python executable is: %s" % sys.executable)
         lg.out(_DebugLevel, "    python version is:\n%s" % sys.version)
         lg.out(_DebugLevel, "    python sys.path is:\n                %s" % ('\n                '.join(sys.path)))
-        lg.out(_DebugLevel, "bpmain.init UI=[%s]" % UI)
-        if lg.is_debug(12):
-            lg.out(_DebugLevel, '\n' + bpio.osinfofull())
+        lg.out(_DebugLevel, '\n' + bpio.osinfofull())
 
     if _Debug:
-        lg.out(_DebugLevel, 'bpmain.init going to import automats')
+        lg.out(_DebugLevel, 'bpmain.init going to initialize state machines')
 
     #---START!---
     from automats import automat
@@ -265,8 +263,8 @@ def shutdown():
 
     lg.close_intercepted_log_file()
 
-    if bpio.Windows() and bpio.isFrozen():
-        lg.stdout_stop_redirecting()
+    lg.stdout_stop_redirecting()
+    lg.stderr_stop_redirecting()
 
     from main import settings
     settings.shutdown()
@@ -293,7 +291,7 @@ def run_twisted_reactor():
 def run(UI='', options=None, args=None, overDict=None, executablePath=None, start_reactor=True):
     """
     """
-    if options.cpu_profile:
+    if options and options.cpu_profile:
         import cProfile, pstats, io
         from pstats import SortKey  # @UnresolvedImport
         pr = cProfile.Profile()
@@ -307,7 +305,7 @@ def run(UI='', options=None, args=None, overDict=None, executablePath=None, star
     else:
         result = True
 
-    if options.cpu_profile:
+    if options and options.cpu_profile:
         pr.disable()
         s = io.StringIO()
         sortby = SortKey.CUMULATIVE
@@ -433,14 +431,7 @@ def kill():
     total_count = 0
     found = False
     while True:
-        appList = bpio.find_process([
-            'regexp:^.*python.*bitdust.py.*?$',
-            'regexp:^.*Python.*bitdust.py.*?$',
-            'bitdustnode.exe',
-            'BitDustNode.exe',
-            'BitDustConsole.exe',
-            'bpmain.py',
-        ])
+        appList = bpio.lookup_main_process()
         if len(appList) > 0:
             found = True
         for pid in appList:
@@ -475,14 +466,7 @@ def wait_then_kill(x):
     from system import bpio
     total_count = 0
     while True:
-        appList = bpio.find_process([
-            'regexp:^.*python.*bitdust.py.*?$',
-            'regexp:^.*Python.*bitdust.py.*?$',
-            'bitdustnode.exe',
-            'BitDustNode.exe',
-            'BitDustConsole.exe',
-            'bpmain.py',
-        ])
+        appList = bpio.lookup_main_process()
         if len(appList) == 0:
             lg.out(0, 'DONE')
             reactor.stop()  # @UndefinedVariable
@@ -599,12 +583,11 @@ def copyright_text():
     """
     print('Copyright (C) 2008 Veselin Penev, https://bitdust.io')
 
-#--- THIS IS THE ENTRY POINT OF THE PROGRAM! ---------------------------------------------------------
 
-
+#--- THE ENTRY POINT
 def main(executable_path=None, start_reactor=True):
     """
-    THIS IS THE ENTRY POINT OF THE PROGRAM!
+    THE ENTRY POINT
     """
     global AppDataDir
 
@@ -671,19 +654,17 @@ def main(executable_path=None, start_reactor=True):
     if bpio.Android():
         lg.close_intercepted_log_file()
         lg.open_intercepted_log_file('/storage/emulated/0/.bitdust/logs/android.log')
+        if _Debug:
+            lg.dbg(_DebugLevel, 'log file "android.log" opened')
 
     # sys.excepthook = lg.exception_hook
 
+    from twisted.internet.defer import setDebugging
     if _Debug:
         if not bpio.isFrozen():
-            try:
-                from twisted.internet.defer import setDebugging
-                setDebugging(True)
-                # from twisted.python import log as twisted_log
-                # twisted_log.startLogging(sys.stdout)
-            except:
-                print('python-twisted is not installed !!!')
-                # lg.warn('python-twisted is not installed')
+            setDebugging(True)
+    else:
+        setDebugging(False)
 
     # ask to count time for each log line from that moment, not absolute time
     lg.life_begins()
@@ -700,27 +681,38 @@ def main(executable_path=None, start_reactor=True):
     if opts.no_logs:
         lg.disable_logs()
 
+    if opts.debug or str(opts.debug) == '0':
+        lg.set_debug_level(int(opts.debug))
+
     #---logpath---
     if opts.output:
         logpath = opts.output
     else:
         logpath = os.path.join(appdata, 'logs', 'main.log')
 
-    # need_redirecting = False
+    need_redirecting = False
 
-    # if bpio.Windows() and not bpio.isConsoled():
-    #     need_redirecting = True
+    if bpio.Windows() and not bpio.isConsoled():
+        need_redirecting = True
 
     if logpath != '':
         lg.open_log_file(logpath)
         if _Debug:
             lg.out(_DebugLevel, 'bpmain.main log file opened ' + logpath)
-        # if bpio.Windows() and bpio.isFrozen():
-        #     need_redirecting = True
+        if bpio.Windows() and bpio.isFrozen():
+            need_redirecting = True
 
-    # if need_redirecting:
-    #     lg.stdout_start_redirecting()
-    #     lg.out(2, 'bpmain.main redirecting started')
+    if bpio.Android():
+        need_redirecting = True
+
+    if opts.quite and not opts.verbose:
+        lg.disable_output()
+    else:
+        if need_redirecting:
+            lg.stdout_start_redirecting()
+            lg.stderr_start_redirecting()
+            if _Debug:
+                lg.out(_DebugLevel, 'bpmain.main redirecting started')
 
     # very basic solution to record run-time errors
     try:
@@ -728,12 +720,6 @@ def main(executable_path=None, start_reactor=True):
             os.remove(os.path.join(appdata, 'logs', 'exception.log'))
     except:
         pass
-
-    if opts.debug or str(opts.debug) == '0':
-        lg.set_debug_level(opts.debug)
-
-    # if opts.quite and not opts.verbose:
-    #     lg.disable_output()
 
     if opts.verbose:
         copyright_text()
@@ -751,8 +737,6 @@ def main(executable_path=None, start_reactor=True):
             return 0
 
         UI = ''
-        # if cmd == 'show' or cmd == 'open':
-        # UI = 'show'
         try:
             ret = run(UI, opts, args, overDict, executable_path, start_reactor)
         except:
@@ -808,20 +792,23 @@ def main(executable_path=None, start_reactor=True):
         appList = bpio.find_main_process(pid_file_path=os.path.join(appdata, 'metadata', 'processid'))
         ui = False
         if len(appList) > 0:
-            lg.out(0, 'found main BitDust process: %s, executing "api.process_stop()" via WebSocket ... ' % str(appList), '')
+            lg.out(0, 'found main BitDust process: %r ... ' % appList, '')
 
             def done(x):
-                lg.out(0, 'BitDust process finished with: %r\n' % x, '')
+                lg.out(0, 'finished successfully\n', '')
                 from twisted.internet import reactor  # @UnresolvedImport
                 if reactor.running and not reactor._stopped:  # @UndefinedVariable
                     reactor.stop()  # @UndefinedVariable
 
             def failed(x):
-                lg.out(0, 'BitDust process was not finished correctly: %r\n' % x, '')
+                if isinstance(x, Failure):
+                    lg.out(0, 'finished with: %s\n' % x.getErrorMessage(), '')
+                else:
+                    lg.out(0, 'finished successfully\n', '')
                 ok = str(x).count('Connection was closed cleanly') > 0
                 from twisted.internet import reactor  # @UnresolvedImport
                 if ok and reactor.running and not reactor._stopped:  # @UndefinedVariable
-                    lg.out(0, 'DONE\n', '')
+                    # lg.out(0, 'DONE\n', '')
                     reactor.stop()  # @UndefinedVariable
                     return
                 lg.out(0, 'forcing previous process shutdown\n', '')
@@ -935,15 +922,22 @@ def main(executable_path=None, start_reactor=True):
                 return ret
             try:
                 from twisted.internet import reactor  # @UnresolvedImport
+                from twisted.python.failure import Failure
 
                 def _stopped(x):
-                    lg.out(0, 'BitDust process finished with: %r\n' % x, '')
+                    if _Debug:
+                        if isinstance(x, Failure):
+                            lg.out(0, 'finished with: %s\n' % x.getErrorMessage(), '')
+                        else:
+                            lg.out(0, 'finished with: %s\n' % x, '')
+                    else:
+                        lg.out(0, 'finished successfully\n' % x, '')
                     reactor.stop()  # @UndefinedVariable
                     bpio.shutdown()
 
-                lg.out(0, 'found main BitDust process: %r, executing "api.process_stop()" via WebSocket ... ' % appList, '')
+                lg.out(0, 'found main BitDust process: %r ... ' % appList, '')
                 from interface import cmd_line_json
-                cmd_line_json.call_websocket_method('process_stop', websocket_timeout=5).addBoth(_stopped)
+                cmd_line_json.call_websocket_method('process_stop', websocket_timeout=2).addBoth(_stopped)
                 reactor.run()  # @UndefinedVariable
                 if opts.coverage:
                     cov.stop()
@@ -965,8 +959,6 @@ def main(executable_path=None, start_reactor=True):
             appListAllChilds = bpio.find_main_process(
                 check_processid_file=False,
                 extra_lookups=[
-                    'regexp:^.*python.*bitdust.py.*?$',
-                    'regexp:^.*Python.*bitdust.py.*?$',
                 ],
             )
             if len(appListAllChilds) > 0:

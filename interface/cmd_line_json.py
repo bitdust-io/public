@@ -194,9 +194,18 @@ def call_websocket_method(method, **kwargs):
     def _on_result(resp):
         if _Debug:
             print('call_websocket_method._on_result', method, kwargs, resp)
-        websock.stop()
+        try:
+            websock.stop()
+        except Exception as exc:
+            if _Debug:
+                print('call_websocket_method._on_result', exc)
+        if method in ['process_stop', ]:
+            if not ret.called:
+                ret.callback({'status': 'OK'})
+            return None
         if not isinstance(resp, dict):
-            ret.errback(resp)
+            if not ret.called:
+                ret.errback(resp)
             return None
         try:
             payload_response = resp['payload']['response']
@@ -222,7 +231,16 @@ def call_websocket_method(method, **kwargs):
     def _on_error(err):
         if _Debug:
             print('call_websocket_method._on_error', method, kwargs, err)
-        ret.errback(err)
+        try:
+            websock.stop()
+        except Exception as exc:
+            if _Debug:
+                print('call_websocket_method._on_error', exc)
+        if method in ['process_stop', ]:
+            return None
+        if not ret.called:
+            ret.errback(err)
+        return None
 
     websock.start(
         callbacks={
@@ -270,14 +288,7 @@ def kill():
     total_count = 0
     found = False
     while True:
-        appList = bpio.find_process([
-            'regexp:^.*python.*bitdust.py.*?$',
-            'regexp:^.*Python.*bitdust.py.*?$',
-            'bitdustnode.exe',
-            'BitDustNode.exe',
-            'BitDustConsole.exe',
-            'bpmain.py',
-        ])
+        appList = bpio.lookup_main_process()
         if len(appList) > 0:
             found = True
         for pid in appList:
@@ -312,21 +323,14 @@ def wait_then_kill(x):
     from system import bpio
     total_count = 0
     while True:
-        appList = bpio.find_process([
-            'regexp:^.*python.*bitdust.py.*?$',
-            'regexp:^.*Python.*bitdust.py.*?$',
-            'bitdustnode.exe',
-            'BitDustNode.exe',
-            'BitDustConsole.exe',
-            'bpmain.py',
-        ])
+        appList = bpio.lookup_main_process()
         if len(appList) == 0:
-            print_text('DONE')
+            print_text('finished successfully')
             reactor.stop()  # @UndefinedVariable
             return 0
         total_count += 1
         if total_count > 10:
-            print_text('not responding, KILLING ...')
+            print_text('not responding, going to kill the running process ...')
             ret = kill()
             reactor.stop()  # @UndefinedVariable
             return ret
@@ -362,7 +366,7 @@ def cmd_deploy(opts, args, overDict):
 
 def cmd_reconnect(opts, args, overDict):
     tpl = jsontemplate.Template(templ.TPL_RAW)
-    return call_websocket_method_template_and_stop('reconnect', tpl)
+    return call_websocket_method_template_and_stop('network_reconnect', tpl)
 
 #------------------------------------------------------------------------------
 
@@ -1314,7 +1318,7 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
     elif cmd == 'stop' or cmd == 'kill' or cmd == 'shutdown':
         appList = bpio.find_main_process()
         if appList:
-            print_text('found main BitDust process: %s, executing "api.process_stop()" via WebSocket ... ' % str(appList), '')
+            print_text('found main BitDust process: %r ... ' % appList, '')
             try:
                 from twisted.internet import reactor  # @UnresolvedImport
                 call_websocket_method('process_stop', websocket_timeout=5).addBoth(wait_then_kill)
@@ -1328,8 +1332,6 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
             appListAllChilds = bpio.find_main_process(
                 check_processid_file=False,
                 extra_lookups=[
-                    'regexp:^.*python.*bitdust.py.*?$',
-                    'regexp:^.*Python.*bitdust.py.*?$',
                 ],
             )
             if appListAllChilds:
@@ -1461,8 +1463,6 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
         appList = bpio.find_main_process(
             check_processid_file=False,
             extra_lookups=[
-                'regexp:^.*python.*bitdust.py.*?$',
-                'regexp:^.*Python.*bitdust.py.*?$',
             ],
         )
         running = (len(appList) > 0)

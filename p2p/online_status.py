@@ -464,20 +464,20 @@ def OutboxStatus(pkt_out, status, error=''):
     global _ShutdownFlag
     if _ShutdownFlag:
         return False
-    if pkt_out.outpacket.RemoteID.to_bin() == my_id.getIDURL().to_bin():
+    if pkt_out.outpacket.RemoteID.to_bin() == my_id.getLocalID().to_bin():
         return False
-    if pkt_out.outpacket.CreatorID.to_bin() != my_id.getIDURL().to_bin():
+    if pkt_out.outpacket.CreatorID.to_bin() != my_id.getLocalID().to_bin():
         return False
     if status == 'finished':
         if error == 'unanswered' and pkt_out.outpacket.Command == commands.Identity():
-            if pkt_out.outpacket.OwnerID == my_id.getIDURL() and pkt_out.outpacket.CreatorID == my_id.getIDURL():
+            if pkt_out.outpacket.OwnerID == my_id.getLocalID() and pkt_out.outpacket.CreatorID == my_id.getLocalID():
                 # if not handshaker.is_running(pkt_out.outpacket.RemoteID):
                 lg.warn('ping packet %s was "unanswered"' % pkt_out)
     else:
         if _Debug:
             lg.dbg(_DebugLevel, 'packet %s is "%s" with %s error: %r' % (pkt_out, status, pkt_out.outpacket, error))
     if pkt_out.outpacket.Command == commands.Identity():
-        if pkt_out.outpacket.OwnerID == my_id.getIDURL() and pkt_out.outpacket.CreatorID == my_id.getIDURL():
+        if pkt_out.outpacket.OwnerID == my_id.getLocalID() and pkt_out.outpacket.CreatorID == my_id.getLocalID():
             if handshaker.is_running(pkt_out.outpacket.RemoteID):
                 handshaker.on_identity_packet_outbox_status(pkt_out, status, error)
     return False
@@ -491,14 +491,14 @@ def Inbox(newpacket, info, status, message):
     if _ShutdownFlag:
         return False
     if id_url.is_cached(newpacket.OwnerID):
-        if newpacket.OwnerID == my_id.getIDURL():
+        if newpacket.OwnerID == my_id.getLocalID():
             return False
     else:
-        if newpacket.OwnerID.to_bin() == my_id.getIDURL().to_bin():
+        if newpacket.OwnerID.to_bin() == my_id.getLocalID().to_bin():
             return False
     if not id_url.is_cached(newpacket.OwnerID):
         return False
-    if newpacket.RemoteID != my_id.getIDURL():
+    if newpacket.RemoteID != my_id.getLocalID():
         return False
     check_create(newpacket.OwnerID)
     A(newpacket.OwnerID, 'inbox-packet', (newpacket, info, status, message))
@@ -514,7 +514,7 @@ def PacketSendingTimeout(remoteID, packetID):
     global _ShutdownFlag
     if _ShutdownFlag:
         return False
-    if remoteID == my_id.getIDURL():
+    if remoteID == my_id.getLocalID():
         return False
     check_create(remoteID)
     # TODO: do something in that case ... send event "ping-now" ?
@@ -698,9 +698,11 @@ class OnlineStatus(automat.Automat):
         """
         Condition method.
         """
+        if handshaker.is_running(self.idurl.to_bin()):
+            return True
         if not self.latest_inbox_time:
             return False
-        return utime.get_sec1970() - self.latest_inbox_time > 20
+        return utime.get_sec1970() - self.latest_inbox_time > 60
 
     def doInit(self, *args, **kwargs):
         """
@@ -731,6 +733,7 @@ class OnlineStatus(automat.Automat):
                 ack_timeout=ack_timeout,
                 ping_retries=ping_retries,
                 channel=channel or 'ping',
+                cancel_running=True,
             )
         elif event == 'handshake':
             d = handshaker.ping(
@@ -739,6 +742,7 @@ class OnlineStatus(automat.Automat):
                 ping_retries=ping_retries,
                 force_cache=True,
                 channel=channel or 'handshake',
+                cancel_running=True,
             )
         elif event == 'offline-ping':
             if self.keep_alive:

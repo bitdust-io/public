@@ -82,6 +82,7 @@ def init():
     InstallLocale()
     if Linux() or Mac():
         lg.setup_unbuffered_stdout()
+        lg.setup_unbuffered_stderr()
 
 
 def shutdown():
@@ -90,6 +91,7 @@ def shutdown():
     will stop.
     """
     lg.restore_original_stdout()
+    lg.restore_original_stderr()
     lg.close_log_file()
     lg.close_intercepted_log_file()
     lg.disable_logs()
@@ -1092,11 +1094,11 @@ def find_process(applist):
                 continue
             if p_pid == os.getpid():
                 continue
+            try:
+                cmdline = ' '.join(p_cmdline)
+            except:
+                continue
             for app in applist:
-                try:
-                    cmdline = ' '.join(p_cmdline)
-                except:
-                    continue
                 if app.startswith('regexp:'):
                     if re.match(app[7:], cmdline) is not None:
                         pidsL.append(p_pid)
@@ -1120,6 +1122,8 @@ def kill_process(pid):
 
     ``pid`` - process id.
     """
+    if Android():
+        return
     ostype = platform.uname()[0]
     if ostype == "Windows":
         kill_process_win32(pid)
@@ -1246,18 +1250,28 @@ def kill_process_win32(pid):
         return False
     return True
 
+#------------------------------------------------------------------------------
 
 def find_main_process(pid_file_path=None, extra_lookups=[], check_processid_file=True):
     """
     """
+    if Android():
+        return []
     q = [
         'bitdustnode.exe',
         'BitDustNode.exe',
         'BitDustConsole.exe',
         # 'bitdust.py',
-        'regexp:^.*python.*bitdust.py$',
-        'regexp:^.*Python.*bitdust.py$',
     ]
+    if os.environ.get('BITDUST_IN_DOCKER') == '1':
+        q.extend([
+            'regexp:^.*python.*bitdust.py.*?$',
+        ])
+    else:
+        q.extend([
+            'regexp:^.*(?<!\/root\/\.bitdust\/venv\/bin\/)python.*bitdust.py.*?$',
+            'regexp:^.*(?<!\/root\/\.bitdust\/venv\/bin\/)Python.*bitdust.py.*?$',
+        ])
     q += extra_lookups
     appList = find_process(q)
     if not appList:
@@ -1276,6 +1290,25 @@ def find_main_process(pid_file_path=None, extra_lookups=[], check_processid_file
     if processid not in appList:
         return []
     return [processid, ]
+
+
+def lookup_main_process():
+    q = [
+        'bitdustnode.exe',
+        'BitDustNode.exe',
+        'BitDustConsole.exe',
+        'bpmain.py',
+    ]
+    if os.environ.get('BITDUST_IN_DOCKER') == '1':
+        q.extend([
+            'regexp:^.*python.*bitdust.py.*?$',
+        ])
+    else:
+        q.extend([
+            'regexp:^.*(?<!\/root\/\.bitdust\/venv\/bin\/)python.*bitdust.py.*?$',
+            'regexp:^.*(?<!\/root\/\.bitdust\/venv\/bin\/)Python.*bitdust.py.*?$',
+        ])
+    return find_process(q)
 
 #------------------------------------------------------------------------------
 

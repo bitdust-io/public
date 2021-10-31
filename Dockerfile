@@ -41,6 +41,7 @@ RUN echo "export VISIBLE=now" >> /etc/profile
 ENV COVERAGE_PROCESS_START=/app/bitdust/.coverage_config
 
 ENV BITDUST_LOG_USE_COLORS=0
+ENV BITDUST_IN_DOCKER=1
 
 WORKDIR /app
 
@@ -60,7 +61,6 @@ RUN echo '#!/bin/sh\n /root/.bitdust/venv/bin/python /app/bitdust/bitdust.py "$@
 RUN chmod +x /bin/bitdust
 
 RUN /root/.bitdust/venv/bin/pip install "coverage<5" coverage-enable-subprocess
-
 
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]
