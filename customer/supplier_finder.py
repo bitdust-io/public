@@ -235,7 +235,7 @@ class SupplierFinder(automat.Automat):
         from customer import fire_hire
         from raid import eccmap
         position = self.family_position
-        if position is None:
+        if position is None or position == -1:
             lg.warn('position for new supplier is unknown, will "guess"')
             current_suppliers = list(contactsdb.suppliers())
             for i in range(len(current_suppliers)):
@@ -273,9 +273,10 @@ class SupplierFinder(automat.Automat):
         Action method.
         """
         from customer import supplier_connector
-        sc = supplier_connector.by_idurl(self.target_idurl)
-        if sc:
-            sc.remove_callback('supplier_finder', self._supplier_connector_state)
+        if id_url.is_cached(self.target_idurl):
+            sc = supplier_connector.by_idurl(self.target_idurl)
+            if sc:
+                sc.remove_callback('supplier_finder', self._supplier_connector_state)
         self.target_idurl = None
 
     def doRememberUser(self, *args, **kwargs):

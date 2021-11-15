@@ -253,7 +253,7 @@ def open_queue(queue_id):
     if _Debug:
         lg.args(_DebugLevel, queue_id=queue_id)
     _ActiveQueues[queue_id] = OrderedDict()
-    lg.info('new queue opened %s' % queue_id)
+    lg.info('new queue opened: %s' % queue_id)
     return True
 
 
@@ -282,6 +282,7 @@ def close_queue(queue_id, remove_empty_consumers=False, remove_empty_producers=F
         if is_consumer_subscribed(consumer_id, queue_id):
             unsubscribe_consumer(consumer_id, queue_id, remove_empty=remove_empty_consumers)
     _ActiveQueues.pop(queue_id)
+    lg.info('existing queue closed: %s' % queue_id)
     return True
 
 
@@ -311,6 +312,7 @@ def rename_queue(old_queue_id, new_queue_id):
     for producer_id in connected_producers:
         producer(producer_id).queues.remove(old_queue_id)
         producer(producer_id).queues.append(new_queue_id)
+    lg.info('existing queue renamed: %s -> %s' % (old_queue_id, new_queue_id, ))
     return True
 
 #------------------------------------------------------------------------------
@@ -574,13 +576,17 @@ def finish_notification(consumer_id, queue_id, message_id, success):
 def on_notification_succeed(result, consumer_id, queue_id, message_id):
     if _Debug:
         lg.out(_DebugLevel, 'p2p_queue.on_notification_succeed : message %r delivered to consumer %r in %r' % (message_id, consumer_id, queue_id, ))
-    if is_queue_exist(queue_id):
+    if is_queue_exist(queue_id) and is_consumer_exists(consumer_id):
         try:
-            reactor.callLater(0, finish_notification, consumer_id, queue_id, message_id, success=True)  # @UndefinedVariable
+            # reactor.callLater(0, finish_notification, consumer_id, queue_id, message_id, success=True)  # @UndefinedVariable
+            finish_notification(consumer_id, queue_id, message_id, success=True)
         except:
             lg.exc()
-    # reactor.callLater(0, do_cleanup)  # @UndefinedVariable
+    else:
+        lg.warn('notification %r was not finished for consumer %r in %r' % (message_id, consumer_id, queue_id, ))
+    # TODO: add a counter and execute cleanup less frequently
     do_cleanup(target_queues=[queue_id, ])
+    # reactor.callLater(0, do_cleanup, target_queues=[queue_id, ])  # @UndefinedVariable
     return result
 
 
@@ -588,11 +594,15 @@ def on_notification_failed(err, consumer_id, queue_id, message_id):
     if _Debug:
         lg.out(_DebugLevel, 'p2p_queue.on_notification_failed FAILED message %r for consumer %r in %r : %r' % (
             message_id, consumer_id, queue_id, err.getErrorMessage()))
-    if is_queue_exist(queue_id):
+    if is_queue_exist(queue_id) and is_consumer_exists(consumer_id):
         try:
-            reactor.callLater(0, finish_notification, consumer_id, queue_id, message_id, success=False)  # @UndefinedVariable
+            # reactor.callLater(0, finish_notification, consumer_id, queue_id, message_id, success=False)  # @UndefinedVariable
+            finish_notification(consumer_id, queue_id, message_id, success=False)
         except:
             lg.exc()
+    else:
+        lg.warn('failed notification %r was not finished for consumer %r in %r' % (message_id, consumer_id, queue_id, ))
+    # TODO: add a counter and execute cleanup less frequently
     do_cleanup(target_queues=[queue_id, ])
     return err
 

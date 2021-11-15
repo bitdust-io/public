@@ -791,7 +791,7 @@ def on_outbox_packet(outpacket, wide, callbacks, target=None, route=None, respon
             if callbacks:
                 for command, cb in callbacks.items():
                     active_packet.set_callback(command, cb)
-            lg.warn('skip creating new outbox packet because found similar packet: %r' % active_packet)
+            lg.warn('skip creating new outbox packet because found similar pending packet: %r' % active_packet)
             return active_packet
     pkt_out = packet_out.create(outpacket, wide, callbacks, target, route, response_timeout, keep_alive)
     control.request_update([('packet', outpacket.PacketID)])
@@ -953,12 +953,12 @@ def on_cancelled_file_sending(proto, host, filename, size, description='', error
             lg.out(_DebugLevel, 'gateway.on_cancelled_file_sending packet_out %s %s %s not found - IT IS OK' % (
                 proto, host, os.path.basename(filename)))
         return True
-    pkt_out.automat('item-cancelled', (proto, host, filename, size, description, error_message))
+    pkt_out.automat('item-cancelled', (proto, host, filename, size, description, error_message, ))
     if pkt_out.outpacket:
         control.request_update([('packet', pkt_out.outpacket.PacketID)])
     if _Debug:
         lg.out(_DebugLevel, '>>> OUT >>>  {%s} CANCELLED via [%s] to %s : %s' % (
-            os.path.basename(filename), proto, host, error_message))
+            os.path.basename(filename), proto, host, error_message, ))
     return True
 
 
