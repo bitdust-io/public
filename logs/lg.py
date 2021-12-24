@@ -33,6 +33,9 @@ module:: lg
 #------------------------------------------------------------------------------
 
 from __future__ import absolute_import
+
+#------------------------------------------------------------------------------
+
 import six
 import os
 import sys
@@ -81,10 +84,9 @@ def fqn(o):
 
 def out(_DebugLevel, msg, nl='\n', log_name='main', showtime=False):
     """
-    The core method, most useful thing in any Python project!
     Prints a text line to the log file or console.
 
-    :param level: lower values is count as more important messages.
+    :param level: lower values are counting as more important messages.
                         Usually I am using only even values from 0 to 18.
     :param msg: message string to be printed
     :param nl: this string is added at the end,
@@ -153,8 +155,11 @@ def out(_DebugLevel, msg, nl='\n', log_name='main', showtime=False):
                 else:
                     if not isinstance(o, unicode):  # @UndefinedVariable
                         o = o.decode('utf-8')
-                _LogFile.write(o)
-                _LogFile.flush()
+                try:
+                    _LogFile.write(o)
+                    _LogFile.flush()
+                except:
+                    pass
         else:
             if _LogFileName:
                 if log_name not in _AllLogFiles:
@@ -169,8 +174,11 @@ def out(_DebugLevel, msg, nl='\n', log_name='main', showtime=False):
                 else:
                     if not isinstance(o, unicode):  # @UndefinedVariable
                         o = o.decode('utf-8')
-                _AllLogFiles[log_name].write(o)
-                _AllLogFiles[log_name].flush()
+                try:
+                    _AllLogFiles[log_name].write(o)
+                    _AllLogFiles[log_name].flush()
+                except:
+                    pass
         if not _RedirectStdOut and not _RedirectStdErr and not _NoOutput:
             if log_name == 'main':
                 s = s + nl
@@ -180,7 +188,7 @@ def out(_DebugLevel, msg, nl='\n', log_name='main', showtime=False):
                     try:
                         sys.stdout.write(format_exception() + '\n\n' + s)
                     except:
-                        # very bad stuff... we can't write anything to std out?
+                        # very bad stuff... we can't write anything to stdout?
                         pass
     if _WebStreamFunc is not None:
         _WebStreamFunc(level, s_ + nl)
@@ -278,13 +286,9 @@ def exc(msg='', level=0, maxTBlevel=100, exc_info=None, exc_value=None, **kwargs
     global _UseColors
     if _UseColors is None:
         _UseColors = platform.uname()[0] != 'Windows' and os.environ.get('BITDUST_LOG_USE_COLORS', '1') != '0'
-    if msg:
-        if _UseColors:
-            msg = '\033[1;31m%s\033[0m' % msg
-        out(level, msg, showtime=True)
     if exc_value:
-        return exception(level, maxTBlevel, exc_info=('', exc_value, []))
-    return exception(level, maxTBlevel, exc_info)
+        return exception(level, maxTBlevel, exc_info=('', exc_value, []), message=msg)
+    return exception(level, maxTBlevel, exc_info, message=msg)
 
 
 def cb(result, *args, **kwargs):
@@ -306,22 +310,26 @@ def errback(err, *args, **kwargs):
     return err
 
 
-def exception(level, maxTBlevel, exc_info):
+def exception(level, maxTBlevel, exc_info, message=None):
     """
-    This is second most common method in a Python project with good error handling practices
-    Print detailed info about last/given exception to the logs.
+    Prints detailed info about last/given exception to STDOUT and also stores exception in a separate file.
     """
     global _LogFileName
     global _StoreExceptionsEnabled
     global _UseColors
     if _UseColors is None:
         _UseColors = platform.uname()[0] != 'Windows' and os.environ.get('BITDUST_LOG_USE_COLORS', '1') != '0'
+    if message:
+        m = message
+        if _UseColors:
+            m = '\033[1;31m%s\033[0m' % m
+        out(level, m, showtime=True)
     if exc_info is None:
         _, value, trbk = sys.exc_info()
     else:
         _, value, trbk = exc_info
     excArgs = ''
-    if value: 
+    if value:
         try:
             excArgs = value.__dict__["args"]
         except KeyError:
@@ -359,6 +367,8 @@ def exception(level, maxTBlevel, exc_info):
             out(level, 'locals: %s' % f_locals[:1000])
             s += '\nlocals: %s\n' % f_locals
     if _StoreExceptionsEnabled and _LogFileName:
+        if message:
+            s = message + '\n' + s
         s = '\n%s\n' % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f") + s
         exc_label = exc_name.lower().replace(' ', '_').replace('-', '_')[:80]
         exc_label = ''.join([c for c in exc_label if c in '0123456789abcdefghijklmnopqrstuvwxyz_'])

@@ -243,7 +243,7 @@ def ReadIndex(text_data, encoding='utf-8'):
             customer_idurl = global_id.GlobalUserToIDURL(customer_id)
             if not id_url.is_cached(customer_idurl):
                 lg.warn('identity %r is not yet cached, skip reading related catalog items' % customer_idurl)
-                identitycache.immediatelyCaching(customer_idurl, try_other_sources=False)
+                identitycache.immediatelyCaching(customer_idurl, try_other_sources=False, ignore_errors=True)
                 continue
             try:
                 count = backup_fs.Unserialize(
@@ -320,7 +320,7 @@ def on_files_received(newpacket, info):
     if not list_files_global_id['idurl']:
         lg.warn('invalid PacketID: %s' % newpacket.PacketID)
         return False
-    if list_files_global_id['idurl'] != my_id.getLocalID():
+    if list_files_global_id['idurl'] != my_id.getIDURL():
         # ignore Files() if this is another customer
         if _Debug:
             lg.dbg(_DebugLevel, 'ignore incoming %r which is owned by another customer' % newpacket)
