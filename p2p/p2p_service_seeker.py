@@ -60,6 +60,7 @@ from logs import lg
 from automats import automat
 
 from lib import strng
+from lib import packetid
 
 from p2p import commands
 from p2p import p2p_service
@@ -136,24 +137,24 @@ class P2PServiceSeeker(automat.Automat):
                 self.doSelectOneUser(*args, **kwargs)
                 self.Attempts+=1
                 self.doHandshake(*args, **kwargs)
-            elif event == 'users-not-found' and self.Attempts<5:
+            elif event == 'users-not-found' and not self.isRetries(*args, **kwargs):
+                self.state = 'FAILED'
+                self.doNotifyLookupFailed(event, *args, **kwargs)
+                self.doDestroyMe(*args, **kwargs)
+            elif event == 'users-not-found' and self.isRetries(*args, **kwargs):
                 self.Attempts+=1
                 self.doLookupRandomNode(*args, **kwargs)
-            elif event == 'users-not-found' and self.Attempts>=5:
-                self.state = 'FAILED'
-                self.doNotifyLookupFailed(*args, **kwargs)
-                self.doDestroyMe(*args, **kwargs)
         #---HANDSHAKE?---
         elif self.state == 'HANDSHAKE?':
             if event == 'shook-hands':
                 self.state = 'SERVICE?'
                 self.doSendRequestService(*args, **kwargs)
-            elif event == 'fail' and self.Attempts<5 and self.RandomLookup:
+            elif event == 'fail' and self.isRetries(*args, **kwargs) and self.RandomLookup:
                 self.state = 'RANDOM_USER?'
                 self.doLookupRandomNode(*args, **kwargs)
-            elif ( self.Attempts>=5 or not self.RandomLookup ) and event == 'fail':
+            elif ( not self.isRetries(*args, **kwargs) or not self.RandomLookup ) and event == 'fail':
                 self.state = 'FAILED'
-                self.doNotifyHandshakeFailed(*args, **kwargs)
+                self.doNotifyHandshakeFailed(event, *args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
         #---SERVICE?---
         elif self.state == 'SERVICE?':
@@ -161,11 +162,11 @@ class P2PServiceSeeker(automat.Automat):
                 self.state = 'SUCCESS'
                 self.doNotifyServiceAccepted(*args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
-            elif ( event == 'request-timeout' or event == 'fail' or event == 'service-denied' ) and ( not self.RandomLookup or ( self.Attempts>=5 and self.RandomLookup ) ):
+            elif ( event == 'request-timeout' or event == 'fail' or event == 'service-denied' ) and ( not self.RandomLookup or ( not self.isRetries(*args, **kwargs) and self.RandomLookup ) ):
                 self.state = 'FAILED'
-                self.doNotifyServiceRequestFailed(*args, **kwargs)
+                self.doNotifyServiceRequestFailed(event, *args, **kwargs)
                 self.doDestroyMe(*args, **kwargs)
-            elif ( event == 'request-timeout' or event == 'fail' or event == 'service-denied' ) and self.Attempts<5 and self.RandomLookup:
+            elif ( event == 'request-timeout' or event == 'fail' or event == 'service-denied' ) and self.isRetries(*args, **kwargs) and self.RandomLookup:
                 self.state = 'RANDOM_USER?'
                 self.doLookupRandomNode(*args, **kwargs)
         #---SUCCESS---
@@ -175,6 +176,12 @@ class P2PServiceSeeker(automat.Automat):
         elif self.state == 'FAILED':
             pass
         return None
+
+    def isRetries(self, *args, **kwargs):
+        """
+        Condition method.
+        """
+        return self.Attempts < self.retries
 
     def doInit(self, *args, **kwargs):
         """
@@ -189,6 +196,7 @@ class P2PServiceSeeker(automat.Automat):
         self.force_handshake = kwargs.get('force_handshake', False)
         self.result_callback = kwargs.get('result_callback', None)
         self.exclude_nodes = id_url.to_bin_list(kwargs.get('exclude_nodes', []))
+        self.retries = kwargs.get('attempts', 5)
 
     def doLookupRandomNode(self, *args, **kwargs):
         """
@@ -232,15 +240,16 @@ class P2PServiceSeeker(automat.Automat):
         d.addCallback(lambda ok: self.automat('shook-hands'))
         if _Debug:
             d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='p2p_service_seeker.doHandshake')
-        d.addErrback(lambda err: self.automat('fail'))
+        d.addErrback(lambda err: self.automat('fail', reason='handshake-failed'))
 
     def doSendRequestService(self, *args, **kwargs):
         """
         Action method.
         """
         self.target_idurl.refresh()
+        packet_id = packetid.UniqueID()
         if _Debug:
-            lg.args(_DebugLevel, target_idurl=self.target_idurl, target_service=self.target_service)
+            lg.args(_DebugLevel, idurl=self.target_idurl, service=self.target_service, packet_id=packet_id)
         service_request_payload = self.request_service_params
         if callable(service_request_payload):
             service_request_payload = service_request_payload(self.target_idurl)
@@ -253,7 +262,8 @@ class P2PServiceSeeker(automat.Automat):
                 commands.Ack(): self._node_acked,
                 commands.Fail(): self._node_failed,
                 None: self._node_timed_out,
-            }
+            },
+            packet_id=packet_id,
         )
         self.requested_packet_id = out_packet.PacketID
 
@@ -268,32 +278,32 @@ class P2PServiceSeeker(automat.Automat):
             self.result_callback('node-connected', *args, **kwargs)
         self.result_callback = None
 
-    def doNotifyLookupFailed(self, *args, **kwargs):
+    def doNotifyLookupFailed(self, event, *args, **kwargs):
         """
         Action method.
         """
         if _Debug:
-            lg.out(_DebugLevel, 'p2p_service_seeker.doNotifyLookupFailed, Attempts=%d' % self.Attempts)
+            lg.args(_DebugLevel, event=event, attempts=self.Attempts, args=args, kwargs=kwargs)
         if self.result_callback:
             self.result_callback('lookup-failed', *args, **kwargs)
         self.result_callback = None
 
-    def doNotifyServiceRequestFailed(self, *args, **kwargs):
+    def doNotifyServiceRequestFailed(self, event, *args, **kwargs):
         """
         Action method.
         """
         if _Debug:
-            lg.out(_DebugLevel, 'p2p_service_seeker.doNotifyServiceRequestFailed, Attempts=%d' % self.Attempts)
+            lg.args(_DebugLevel, event=event, attempts=self.Attempts, args=args, kwargs=kwargs)
         if self.result_callback:
             self.result_callback('request-failed', *args, **kwargs)
         self.result_callback = None
 
-    def doNotifyHandshakeFailed(self, *args, **kwargs):
+    def doNotifyHandshakeFailed(self, event, *args, **kwargs):
         """
         Action method.
         """
         if _Debug:
-            lg.out(_DebugLevel, 'p2p_service_seeker.doNotifyHandshakeFailed, Attempts=%d' % self.Attempts)
+            lg.args(_DebugLevel, event=event, attempts=self.Attempts, args=args, kwargs=kwargs)
         if self.result_callback:
             self.result_callback('handshake-failed', *args, **kwargs)
         self.result_callback = None
@@ -323,8 +333,8 @@ class P2PServiceSeeker(automat.Automat):
             lg.out(_DebugLevel, 'p2p_service_seeker._node_acked %r %r' % (response, info))
         if not strng.to_text(response.Payload).startswith('accepted'):
             if _Debug:
-                lg.out(_DebugLevel, 'p2p_service_seeker._node_acked with service denied %r %r' % (response, info))
-            self.automat('service-denied', (response, info, ))
+                lg.out(_DebugLevel, 'p2p_service_seeker._node_acked with "service denied" response: %r %r' % (response, info))
+            self.automat('service-denied', (response, info, ), reason='service-denied')
             return
         if _Debug:
             lg.out(_DebugLevel, 'p2p_service_seeker._node_acked %s is connected' % response.CreatorID)
@@ -333,12 +343,12 @@ class P2PServiceSeeker(automat.Automat):
     def _node_failed(self, response, info):
         if _Debug:
             lg.out(_DebugLevel, 'p2p_service_seeker._node_failed %r %r' % (response, info))
-        self.automat('service-denied', (response, info, ))
+        self.automat('service-denied', (response, info, ), reason='service-denied')
 
     def _node_timed_out(self, pkt_out):
         if _Debug:
             lg.out(_DebugLevel, 'p2p_service_seeker._node_timed_out for outgoing packet %r' % pkt_out)
-        self.automat('fail', pkt_out)
+        self.automat('fail', pkt_out, reason='service-request-timeout')
 
     def _nodes_lookup_finished(self, idurls):
         if _Debug:
@@ -373,7 +383,7 @@ def on_lookup_result(event, result_defer, *args, **kwargs):
 
 #------------------------------------------------------------------------------
 
-def connect_random_node(lookup_method, service_name, service_params=None, exclude_nodes=[],
+def connect_random_node(lookup_method, service_name, service_params=None, exclude_nodes=[], attempts=5,
                         request_service_timeout=None, ping_retries=None, ack_timeout=None, force_handshake=False):
     global _P2PServiceSeekerInstaceCounter
     _P2PServiceSeekerInstaceCounter += 1
@@ -393,6 +403,7 @@ def connect_random_node(lookup_method, service_name, service_params=None, exclud
         request_service_params=service_params,
         request_service_timeout=request_service_timeout,
         ping_retries=ping_retries,
+        attempts=attempts,
         ack_timeout=ack_timeout,
         force_handshake=force_handshake,
         result_callback=lambda evt, *a, **kw: on_lookup_result(evt, result, *a, **kw),
@@ -403,7 +414,7 @@ def connect_random_node(lookup_method, service_name, service_params=None, exclud
     return result
 
 
-def connect_known_node(remote_idurl, service_name, service_params=None, exclude_nodes=[],
+def connect_known_node(remote_idurl, service_name, service_params=None, exclude_nodes=[], attempts=2,
                        request_service_timeout=None, ping_retries=None, ack_timeout=None, force_handshake=False):
     global _P2PServiceSeekerInstaceCounter
     _P2PServiceSeekerInstaceCounter += 1
@@ -423,6 +434,7 @@ def connect_known_node(remote_idurl, service_name, service_params=None, exclude_
         request_service_params=service_params,
         request_service_timeout=request_service_timeout,
         ping_retries=ping_retries,
+        attempts=attempts,
         ack_timeout=ack_timeout,
         force_handshake=force_handshake,
         result_callback=lambda evt, *a, **kw: on_lookup_result(evt, result, *a, **kw),

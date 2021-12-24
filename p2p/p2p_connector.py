@@ -71,7 +71,13 @@ _DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
+import sys
 import time
+
+try:
+    from twisted.internet import reactor  # @UnresolvedImport
+except:
+    sys.exit('Error initializing twisted.internet.reactor in p2p_connector.py')
 
 from twisted.internet.task import LoopingCall  #@UnresolvedImport
 
@@ -164,7 +170,13 @@ def A(event=None, *args, **kwargs):
     if event is None:
         return _P2PConnector
     if _P2PConnector is None:
-        _P2PConnector = P2PConnector('p2p_connector', 'AT_STARTUP', _DebugLevel)
+        _P2PConnector = P2PConnector(
+            name='p2p_connector',
+            state='AT_STARTUP',
+            debug_level=_DebugLevel,
+            log_events=False,
+            log_transitions=_Debug,
+        )
     if event is not None:
         _P2PConnector.automat(event, *args, **kwargs)
     return _P2PConnector
@@ -183,8 +195,6 @@ def Destroy():
 
 
 class P2PConnector(automat.Automat):
-    """
-    """
 
     fast = False
 
@@ -193,10 +203,12 @@ class P2PConnector(automat.Automat):
     }
 
     def init(self):
+        self.is_reconnecting = False
         self.health_check_task = None
-        self.log_transitions = _Debug
 
     def state_changed(self, oldstate, newstate, event, *args, **kwargs):
+        if oldstate != newstate and oldstate == 'MY_IDENTITY':
+            self.is_reconnecting = False
         if newstate == 'INCOMMING?' and event != 'instant':
             self.automat('instant')
         if newstate == 'CONNECTED':
@@ -223,21 +235,21 @@ class P2PConnector(automat.Automat):
         elif self.state == 'NETWORK?':
             if ( event == 'network_connector.state' and args[0] == 'CONNECTED' ):
                 self.state = 'MY_IDENTITY'
-                self.doUpdateMyIdentity(*args, **kwargs)
+                self.doUpdateMyIdentity(event, *args, **kwargs)
             elif ( event == 'network_connector.state' and args[0] == 'DISCONNECTED' ):
                 self.state = 'DISCONNECTED'
         #---INCOMMING?---
         elif self.state == 'INCOMMING?':
             if event == 'inbox-packet' and not self.isUsingBestProto(*args, **kwargs):
                 self.state = 'MY_IDENTITY'
-                self.doUpdateMyIdentity(*args, **kwargs)
+                self.doUpdateMyIdentity(event, *args, **kwargs)
                 self.doPopBestProto(*args, **kwargs)
             elif event == 'timer-20sec' or ( event == 'network_connector.state' and args[0] == 'DISCONNECTED' ):
                 self.state = 'DISCONNECTED'
                 self.doInitRatings(*args, **kwargs)
             elif event == 'check-synchronize' or ( event == 'network_connector.state' and args[0] == 'CONNECTED' ):
                 self.state = 'MY_IDENTITY'
-                self.doUpdateMyIdentity(*args, **kwargs)
+                self.doUpdateMyIdentity(event, *args, **kwargs)
             elif ( event == 'instant' and not self.isAnyPeersKnown(*args, **kwargs) ) or ( event == 'inbox-packet' and self.isUsingBestProto(*args, **kwargs) ):
                 self.state = 'CONNECTED'
                 self.doInitRatings(*args, **kwargs)
@@ -250,7 +262,7 @@ class P2PConnector(automat.Automat):
                 self.state = 'DISCONNECTED'
             elif event == 'check-synchronize' or ( event == 'network_connector.state' and args[0] == 'CONNECTED' ):
                 self.state = 'MY_IDENTITY'
-                self.doUpdateMyIdentity(*args, **kwargs)
+                self.doUpdateMyIdentity(event, *args, **kwargs)
             elif ( event == 'network_connector.state' and args[0] not in [ 'CONNECTED' , 'DISCONNECTED' ] ):
                 self.state = 'NETWORK?'
         #---DISCONNECTED---
@@ -259,7 +271,7 @@ class P2PConnector(automat.Automat):
                 self.doSendMyIdentity(*args, **kwargs)
             elif event == 'inbox-packet' or event == 'check-synchronize' or ( ( event == 'network_connector.state' and args[0] == 'CONNECTED' ) ):
                 self.state = 'MY_IDENTITY'
-                self.doUpdateMyIdentity(*args, **kwargs)
+                self.doUpdateMyIdentity(event, *args, **kwargs)
             elif ( event == 'network_connector.state' and args[0] not in [ 'CONNECTED', 'DISCONNECTED', ] ):
                 self.state = 'NETWORK?'
         #---MY_IDENTITY---
@@ -271,10 +283,10 @@ class P2PConnector(automat.Automat):
             elif event == 'my-id-updated' and not self.isMyContactsChanged(*args, **kwargs) and ( self.NeedPropagate or self.isMyIdentityChanged(*args, **kwargs) ):
                 self.state = 'PROPAGATE'
                 self.doCheckRotatePropagateMyIdentity(*args, **kwargs)
-            elif event == 'my-id-updated' and not ( self.NeedPropagate or self.isMyIdentityChanged(*args, **kwargs) ) and ( network_connector.A().state != 'CONNECTED' ):
-                self.state = 'DISCONNECTED'
-            elif event == 'my-id-updated' and not ( self.NeedPropagate or self.isMyIdentityChanged(*args, **kwargs) ) and ( network_connector.A().state == 'CONNECTED' ):
+            elif event == 'my-id-updated' and not ( self.NeedPropagate or self.isMyIdentityChanged(*args, **kwargs) ) and ( network_connector.A().state is 'CONNECTED' ):
                 self.state = 'CONNECTED'
+            elif event == 'my-id-updated' and not ( self.NeedPropagate or self.isMyIdentityChanged(*args, **kwargs) ) and ( network_connector.A().state is not 'CONNECTED' ):
+                self.state = 'DISCONNECTED'
         #---PROPAGATE---
         elif self.state == 'PROPAGATE':
             if event == 'my-id-propagated':
@@ -283,7 +295,7 @@ class P2PConnector(automat.Automat):
                 self.doRestartFireHire(*args, **kwargs)
             elif ( ( event == 'network_connector.state' and args[0] == 'CONNECTED' ) ) or event == 'check-synchronize':
                 self.state = 'MY_IDENTITY'
-                self.doUpdateMyIdentity(*args, **kwargs)
+                self.doUpdateMyIdentity(event, *args, **kwargs)
         return None
 
     def isUsingBestProto(self, *args, **kwargs):
@@ -302,6 +314,8 @@ class P2PConnector(automat.Automat):
         """
         Condition method.
         """
+        if self.is_reconnecting:
+            return True
         return args[0][0]
 
     def isAnyPeersKnown(self, *args, **kwargs):
@@ -322,9 +336,11 @@ class P2PConnector(automat.Automat):
         """
         propagate.single(args[0], wide=True)
 
-    def doUpdateMyIdentity(self, *args, **kwargs):
+    def doUpdateMyIdentity(self, event, *args, **kwargs):
         if _Debug:
-            lg.out(_DebugLevel - 6, 'p2p_connector.doUpdateMyIdentity')
+            lg.out(_DebugLevel - 6, 'p2p_connector.doUpdateMyIdentity event=%r' % event)
+        if event == 'check-synchronize':
+            self.is_reconnecting = True
         self._update_my_identity()
 
     def doCheckRotatePropagateMyIdentity(self, *args, **kwargs):
@@ -505,77 +521,84 @@ class P2PConnector(automat.Automat):
             lg.out(4, '    identity HAS %sBEEN CHANGED' % ('' if identity_changed else 'NOT '))
         self.automat('my-id-updated', (contacts_changed, identity_changed))
 
+    def _do_propagate(self, result, rotated):
+        if _Debug:
+            lg.out(_DebugLevel, 'p2p_connector._do_propagate rotated=%r result=%r' % (rotated, result, ))
+        if driver.is_on('service_entangled_dht'):
+            from dht import dht_service
+            dht_service.set_node_data('idurl', my_id.getIDURL().to_text())
+        d = propagate.start(
+            wide=True,
+            refresh_cache=True,
+            include_all=True,
+            include_startup=rotated,
+            wait_packets=True,
+        )
+        d.addCallback(lambda x: self.automat('my-id-propagated'))
+        if rotated:
+            d.addBoth(lambda x: events.send('my-identity-rotate-complete', data=dict()))
+        if _Debug:
+            d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='_check_rotate_propagate_my_identity._do_propagate')
+        d.addErrback(self._on_propagate_failed)
+        # d.addTimeout(30, clock=reactor)
+        return result
+
+    def _on_propagate_failed(self, err):
+        lg.err('failed propagate my identity: %r' % err)
+        self.automat('my-id-propagated')
+        return err
+
+    def _on_update_failed(self, err):
+        lg.err('failed to update my identity: %r' % err)
+        self.automat('my-id-propagated')
+        return err
+
+    def _do_update(self, ret):
+        if _Debug:
+            lg.out(_DebugLevel, 'p2p_connector._do_update  ret=%r' % repr(ret))
+        result, rotated = ret
+        if not result:
+            lg.err('failed to rotate identity sources, skip propagating my identity')
+            self.automat('my-id-propagated')
+            return None
+        d = propagate.update()
+        d.addCallback(self._do_propagate, rotated)
+        if _Debug:
+            d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='_check_rotate_propagate_my_identity._do_update')
+        d.addErrback(self._on_update_failed)
+        return ret
+
+    def _do_rotate(self, ret):
+        if _Debug:
+            lg.out(_DebugLevel, 'p2p_connector._do_rotate  ret=%r' % repr(ret))
+        check_result, rotated = ret
+        if check_result:
+            lg.info('identity sources are healthy, send my identity now')
+            self._do_update((True, False, ))
+            return None
+        lg.err('identity sources are not healthy, will execute identity rotate flow now')
+        from p2p import id_rotator
+        d = id_rotator.run()
+        d.addCallback(self._do_update)
+        if _Debug:
+            d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='_check_rotate_propagate_my_identity._do_rotate')
+        d.addErrback(lambda _: self._do_update((False, False, )))
+        return ret
+
+    def _do_check(self, ret):
+        if _Debug:
+            lg.out(_DebugLevel, 'p2p_connector._do_check ret=%r' % repr(ret))
+        from p2p import id_rotator
+        d = id_rotator.check()
+        d.addCallback(self._do_rotate)
+        if _Debug:
+            d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='_check_rotate_propagate_my_identity._do_check')
+        d.addErrback(lambda _: self._do_rotate((False, False, )))
+        return ret
+
     def _check_rotate_propagate_my_identity(self):
         # TODO: rebuild that method into another state machine
-        from p2p import id_rotator
-
-        def _do_propagate(result, rotated):
-            if _Debug:
-                lg.out(_DebugLevel, 'p2p_connector._do_propagate rotated=%r result=%r' % (rotated, result, ))
-            if driver.is_on('service_entangled_dht'):
-                from dht import dht_service
-                dht_service.set_node_data('idurl', my_id.getLocalID().to_text())
-            d = propagate.start(
-                wide=True,
-                refresh_cache=True,
-                include_all=True,
-                include_startup=rotated,
-                wait_packets=True,
-            )
-            d.addCallback(lambda x: self.automat('my-id-propagated'))
-            if rotated:
-                d.addBoth(lambda x: events.send('my-identity-rotate-complete', data=dict()))
-            if _Debug:
-                d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='_check_rotate_propagate_my_identity._do_propagate')
-            d.addErrback(_on_propagate_failed)
-
-        def _on_propagate_failed(err):
-            lg.err('failed propagate my identity: %r' % err)
-            self.automat('my-id-propagated')
-
-        def _on_update_failed(err):
-            lg.err('failed to update my identity: %r' % err)
-            self.automat('my-id-propagated')
-
-        def _do_update(ret):
-            result, rotated = ret
-            if _Debug:
-                lg.out(_DebugLevel, 'p2p_connector._do_update  result=%r rotated=%r' % (result, rotated, ))
-            if not result:
-                lg.err('failed to rotate identity sources, skip propagating my identity')
-                self.automat('my-id-propagated')
-                return None
-            d = propagate.update()
-            d.addCallback(_do_propagate, rotated)
-            if _Debug:
-                d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='_check_rotate_propagate_my_identity._do_update')
-            d.addErrback(_on_update_failed)
-
-        def _do_rotate(ret):
-            check_result, rotated = ret
-            if _Debug:
-                lg.out(_DebugLevel, 'p2p_connector._do_rotate  result=%r rotated=%r' % (check_result, rotated, ))
-            if check_result:
-                lg.info('identity sources are healthy, send my identity now')
-                _do_update((True, False, ))
-                return None
-            lg.err('identity sources are not healthy, will execute identity rotate flow now')
-            d = id_rotator.run()
-            d.addCallback(_do_update)
-            if _Debug:
-                d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='_check_rotate_propagate_my_identity._do_rotate')
-            d.addErrback(lambda _: _do_update((False, False, )))
-
-        def _do_check(x):
-            if _Debug:
-                lg.out(_DebugLevel, 'p2p_connector._do_check')
-            d = id_rotator.check()
-            d.addCallback(_do_rotate)
-            if _Debug:
-                d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='_check_rotate_propagate_my_identity._do_check')
-            d.addErrback(lambda _: _do_rotate((False, False, )))
-
-        _do_check(None)
+        self._do_check(None)
 
     def _do_id_server_health_check(self):
         my_idurl = my_id.getLocalIdentity().getIDURL(as_original=True)
@@ -610,4 +633,4 @@ class P2PConnector(automat.Automat):
 
         d = identitycache.immediatelyCaching(my_idurl, try_other_sources=False)
         d.addCallback(_verify)
-        d.addErrback(lambda _: _verify())
+        d.addErrback(lambda _: _verify() and None)

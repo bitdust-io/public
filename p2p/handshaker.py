@@ -314,9 +314,9 @@ class Handshaker(automat.Automat):
         Action method.
         """
         self.cache_attempts += 1
-        idcache_defer = identitycache.immediatelyCaching(strng.to_text(self.remote_idurl), timeout=self.cache_timeout)
+        idcache_defer = identitycache.immediatelyCaching(idurl=strng.to_text(self.remote_idurl), timeout=self.cache_timeout)
         idcache_defer.addCallback(lambda src: self.automat('remote-identity-cached', src))
-        idcache_defer.addErrback(lambda err: self.automat('remote-identity-failed', err))
+        idcache_defer.addErrback(lambda err: self.automat('remote-identity-failed', err) and None)
 
     def doSendMyIdentity(self, *args, **kwargs):
         """
@@ -336,8 +336,8 @@ class Handshaker(automat.Automat):
             packet_id = '%s:%d:%s' % (self.channel, self.ping_attempts, packetid.UniqueID())
         ping_packet = signed.Packet(
             Command=commands.Identity(),
-            OwnerID=my_id.getLocalID(),
-            CreatorID=my_id.getLocalID(),
+            OwnerID=my_id.getIDURL(),
+            CreatorID=my_id.getIDURL(),
             PacketID=packet_id,
             Payload=strng.to_bin(identity_object.serialize()),
             RemoteID=self.remote_idurl,
@@ -399,9 +399,9 @@ class Handshaker(automat.Automat):
         status = kwargs.get('status')
         error = kwargs.get('error')
         if status == 'cancelled':
-            lg.warn('handshake failed, my Identity() packet was not sent to remote user %r : %r' % (status, error, ))
+            lg.warn('handshake was cancelled, my Identity() packet was not sent to %r : %r' % (self.remote_idurl, error, ))
         else:
-            lg.err('handshake failed with status %r, my Identity() packet was not sent to remote user: %r' % (status, error, ))
+            lg.err('handshake failed with status %r, my Identity() packet was not sent to remote user %r : %r' % (status, self.remote_idurl, error, ))
         if self.remote_idurl in _RunningHandshakers:
             for result_defer in _RunningHandshakers[self.remote_idurl]['results']:
                 if not result_defer.called:

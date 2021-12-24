@@ -604,7 +604,7 @@ def on_notification_failed(err, consumer_id, queue_id, message_id):
         lg.warn('failed notification %r was not finished for consumer %r in %r' % (message_id, consumer_id, queue_id, ))
     # TODO: add a counter and execute cleanup less frequently
     do_cleanup(target_queues=[queue_id, ])
-    return err
+    return None
 
 #------------------------------------------------------------------------------
 
@@ -679,7 +679,7 @@ def push_signed_message(producer_id, queue_id, data, creation_time=None):
         signed_data = signed.Packet(
             Command=commands.Event(),
             OwnerID=producer_id,
-            CreatorID=my_id.getLocalID(),
+            CreatorID=my_id.getIDURL(),
             PacketID=packetid.UniqueID(),
             Payload=serialization.DictToBytes(data, keys_to_text=True),
             RemoteID=queue_id,

@@ -145,7 +145,7 @@ def read_customer_suppliers(customer_idurl, as_fields=True, use_cache=True):
         return _do_identity_cache(ret)
 
     def _do_save_customer_suppliers(id_cached_result, ret):
-        if my_id.getLocalID() != id_url.field(ret['customer_idurl']):
+        if my_id.getIDURL() != id_url.field(ret['customer_idurl']):
             contactsdb.set_suppliers(ret['suppliers'], customer_idurl=ret['customer_idurl'])
             contactsdb.save_suppliers(customer_idurl=ret['customer_idurl'])
             if ret.get('ecc_map'):
@@ -188,7 +188,7 @@ def read_customer_suppliers(customer_idurl, as_fields=True, use_cache=True):
 def write_customer_suppliers(customer_idurl, suppliers_list, ecc_map=None, revision=None, publisher_idurl=None, ):
     customer_idurl = id_url.field(customer_idurl)
     publisher_idurl = id_url.field(publisher_idurl)
-    if customer_idurl == my_id.getLocalID():
+    if customer_idurl == my_id.getIDURL():
         lg.warn('skip writing my own suppliers list which suppose to be written to DHT')
     else:
         contactsdb.set_suppliers(suppliers_list, customer_idurl=customer_idurl)
@@ -221,7 +221,6 @@ def read_customer_message_brokers(customer_idurl, positions=[0, ], return_detail
             'customer_idurl': customer_idurl,
             'broker_idurl': None,
             'position': position,
-            'archive_folder_path': None,
         })
         return None
 
@@ -240,7 +239,6 @@ def read_customer_message_brokers(customer_idurl, positions=[0, ], return_detail
             'customer_idurl': customer_idurl,
             'broker_idurl': None,
             'position': position,
-            'archive_folder_path': None,
         }
         if not dht_value or not isinstance(dht_value, dict):
             if _Debug:
@@ -255,7 +253,6 @@ def read_customer_message_brokers(customer_idurl, positions=[0, ], return_detail
                 _customer_idurl = id_url.to_bin(dht_value['customer_idurl'])
                 _broker_idurl = id_url.to_bin(dht_value['broker_idurl'])
             _position = int(dht_value['position'])
-            _archive_folder_path = strng.to_text(dht_value['archive_folder_path'])
             _revision = int(dht_value.get('revision'))
             _timestamp = int(dht_value.get('timestamp'))
         except:
@@ -263,7 +260,7 @@ def read_customer_message_brokers(customer_idurl, positions=[0, ], return_detail
             broker_result.callback(ret)
             return ret
         if _Debug:
-            lg.args(_DebugLevel, p=position, b=_broker_idurl, a=_archive_folder_path, r=_revision)
+            lg.args(_DebugLevel, p=position, b=_broker_idurl, r=_revision)
         if as_fields:
             if _customer_idurl != customer_idurl:
                 lg.err('wrong customer idurl %r in message broker DHT record for %r at position %d' % (
@@ -279,7 +276,6 @@ def read_customer_message_brokers(customer_idurl, positions=[0, ], return_detail
             'customer_idurl': _customer_idurl,
             'broker_idurl': _broker_idurl,
             'position': _position,
-            'archive_folder_path': _archive_folder_path,
             'revision': _revision,
             'timestamp': _timestamp,
         })
@@ -340,15 +336,14 @@ def read_customer_message_brokers(customer_idurl, positions=[0, ], return_detail
     return result
 
 
-def write_customer_message_broker(customer_idurl, broker_idurl, position=0, archive_folder_path=None, revision=None):
+def write_customer_message_broker(customer_idurl, broker_idurl, position=0, revision=None):
     if _Debug:
-        lg.args(_DebugLevel, c=customer_idurl, b=broker_idurl, p=position, af=archive_folder_path, r=revision)
+        lg.args(_DebugLevel, c=customer_idurl, b=broker_idurl, p=position, r=revision)
     customer_idurl = id_url.field(customer_idurl)
     broker_idurl = id_url.field(broker_idurl)
     return dht_records.set_message_broker(
         customer_idurl=customer_idurl,
         broker_idurl=broker_idurl,
         position=position,
-        archive_folder_path=archive_folder_path,
         revision=revision,
     )

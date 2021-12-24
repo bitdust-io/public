@@ -57,14 +57,14 @@ try:
 except:
     sys.exit('Error initializing twisted.internet.reactor in net_misc.py')
 
-from twisted.internet.defer import Deferred, DeferredList, succeed, fail
+from twisted.internet.defer import Deferred, DeferredList, succeed, fail, CancelledError
+from twisted.python.failure import Failure
+from twisted.python import log as twisted_log
 from twisted.internet import protocol
 from twisted.web import iweb
 from twisted.web import client
 from twisted.web import http_headers
-from twisted.web.client import downloadPage
-from twisted.web.client import HTTPDownloader
-from twisted.web.client import Agent, readBody
+from twisted.web.client import downloadPage, HTTPDownloader, Agent, _ReadBodyProtocol
 from twisted.web.http_headers import Headers
 
 from zope.interface import implementer
@@ -143,6 +143,8 @@ def ConnectionFailed(param=None, proto=None, info=None):
     global _ConnectionFailedCallbackFunc
     if _ConnectionFailedCallbackFunc is not None:
         _ConnectionFailedCallbackFunc(proto, info, param)
+    if param and isinstance(param, Failure) and param.type == CancelledError:
+        return None
     return param
 
 #------------------------------------------------------------------------------
@@ -445,13 +447,13 @@ def downloadSSL(url, fileOrName, progress_func, certificates_filenames):
     from OpenSSL import SSL  # @UnresolvedImport
 
     class MyClientContextFactory(ssl.ClientContextFactory):
-    
+
         def __init__(self, certificates_filenames):
             self.certificates_filenames = list(certificates_filenames)
-    
+
         def verify(self, connection, x509, errnum, errdepth, ok):
             return ok
-    
+
         def getContext(self):
             ctx = ssl.ClientContextFactory.getContext(self)
             for cert in self.certificates_filenames:
@@ -461,7 +463,7 @@ def downloadSSL(url, fileOrName, progress_func, certificates_filenames):
                     pass
             ctx.set_verify(SSL.VERIFY_PEER | SSL.VERIFY_FAIL_IF_NO_PEER_CERT, self.verify)
             return ctx
-    
+
     scheme, host, port, path = parse_url(url)
     if not isinstance(certificates_filenames, list):
         certificates_filenames = [certificates_filenames, ]
@@ -472,7 +474,7 @@ def downloadSSL(url, fileOrName, progress_func, certificates_filenames):
             break
     if not cert_found:
         return fail(Exception('no one ssl certificate found'))
-    
+
     factory = HTTPDownloader(url, fileOrName, agent=_UserAgentString)
     contextFactory = MyClientContextFactory(certificates_filenames)
     reactor.connectSSL(host, port, factory, contextFactory)  # @UndefinedVariable
@@ -488,7 +490,31 @@ def downloadSSL(url, fileOrName, progress_func, certificates_filenames):
 #         self.path = url
 
 
-def readResponse(response):
+def readBody(response):
+
+    def cancel(deferred):
+        abort = getAbort()
+        if abort is not None:
+            abort()
+
+    d = Deferred(cancel)
+    d.addErrback(twisted_log.err)
+    protocol = _ReadBodyProtocol(response.code, response.phrase, d)
+
+    def getAbort():
+        return getattr(protocol.transport, 'abortConnection', None)
+
+    response.deliverBody(protocol)
+    return d
+
+
+def readBodyFailed(result):
+    if result.type == CancelledError:
+        return None
+    return result
+
+
+def readResponse(response, timeout):
 #     print('Response version:', response.version)
 #     print('Response code:', response.code)
 #     print('Response phrase:', response.phrase)
@@ -498,6 +524,8 @@ def readResponse(response):
         return fail(Exception('Bad response from the server: [%d] %s' % (
             response.code, response.phrase.strip(),)))
     d = readBody(response)
+    d.addTimeout(timeout=timeout, clock=reactor)
+    d.addErrback(readBodyFailed)
     return d
 
 
@@ -538,10 +566,10 @@ def getPageTwisted(url, timeout=10, method=b'GET'):
 #     if timeout:
 #         timeout_call = reactor.callLater(timeout, getPageTwistedTimeout, d)
 #         d.addBoth(getPageTwistedCancelTimeout, timeout_call)
+    d.addCallback(readResponse, timeout)
+    # d.addTimeout(timeout=timeout, clock=reactor)
     d.addCallback(ConnectionDone, 'http', 'getPageTwisted %r' % url)
     d.addErrback(ConnectionFailed, 'http', 'getPageTwisted %r' % url)
-    d.addCallback(readResponse)
-    d.addTimeout(timeout=timeout, clock=reactor)
     return d
 
 #------------------------------------------------------------------------------

@@ -105,8 +105,6 @@ def init():
 
 
 def shutdown():
-    """
-    """
     if _Debug:
         lg.out(_DebugLevel, "propagate.shutdown")
 
@@ -116,7 +114,6 @@ def startup_list():
     return _StartupPropagateList
 
 #------------------------------------------------------------------------------
-
 
 def propagate(selected_contacts, ack_handler=None, wide=False, refresh_cache=False, wait_packets=False, response_timeout=10):
     """
@@ -130,9 +127,6 @@ def propagate(selected_contacts, ack_handler=None, wide=False, refresh_cache=Fal
     result = Deferred()
 
     def contacts_fetched(x):
-        if _Debug:
-            lg.out(_DebugLevel, "propagate.contacts_fetched with %d identities, sending my identity to %d remote nodes" % (
-                len(x), len(selected_contacts)))
         res = SendToIDs(
             idlist=selected_contacts,
             ack_handler=ack_handler,
@@ -140,17 +134,24 @@ def propagate(selected_contacts, ack_handler=None, wide=False, refresh_cache=Fal
             wait_packets=wait_packets,
             response_timeout=response_timeout,
         )
+        if _Debug:
+            lg.out(_DebugLevel, "propagate.contacts_fetched with %d identities, sending my identity to %d remote nodes: %r" % (
+                len(x), len(selected_contacts), res, ))
         if wait_packets:
-            res.addBoth(lambda x: result.callback(x))
-        else:
-            result.callback(list(selected_contacts))
-        return None
+            if not res:
+                result.callback([])
+                return result
+            res.addCallback(result.callback)
+            res.addErrback(result.errback)
+            return result
+        result.callback(list(selected_contacts))
+        return result
 
     fetch(list_ids=selected_contacts, refresh_cache=refresh_cache).addBoth(contacts_fetched)
     return result
 
 
-def fetch(list_ids, refresh_cache=False):
+def fetch(list_ids, refresh_cache=False, timeout=10, try_other_sources=True):
     """
     Request a list of identity files.
     """
@@ -162,7 +163,11 @@ def fetch(list_ids, refresh_cache=False):
             continue
         if identitycache.FromCache(url) and not refresh_cache:
             continue
-        dl.append(identitycache.immediatelyCaching(id_url.to_original(url)))
+        dl.append(identitycache.immediatelyCaching(
+            idurl=id_url.to_original(url),
+            timeout=timeout,
+            try_other_sources=try_other_sources,
+        ))
     return DeferredList(dl, consumeErrors=True)
 
 
@@ -428,8 +433,8 @@ def SendToID(idurl, Payload=None, wide=False, ack_handler=None, timeout_handler=
         thePayload = strng.to_bin(my_id.getLocalIdentity().serialize())
     p = signed.Packet(
         Command=commands.Identity(),
-        OwnerID=my_id.getLocalID(),
-        CreatorID=my_id.getLocalID(),
+        OwnerID=my_id.getIDURL(),
+        CreatorID=my_id.getIDURL(),
         PacketID=('propagate:%d:%s' % (_PropagateCounter, packetid.UniqueID())),
         Payload=thePayload,
         RemoteID=idurl,
@@ -485,8 +490,8 @@ def SendToIDs(idlist, wide=False, ack_handler=None, timeout_handler=None, respon
             continue
         p = signed.Packet(
             Command=commands.Identity(),
-            OwnerID=my_id.getLocalID(),
-            CreatorID=my_id.getLocalID(),
+            OwnerID=my_id.getIDURL(),
+            CreatorID=my_id.getIDURL(),
             PacketID=('propagate:%d:%s' % (_PropagateCounter, packetid.UniqueID())),
             Payload=Payload,
             RemoteID=contact,
@@ -511,12 +516,12 @@ def SendToIDs(idlist, wide=False, ack_handler=None, timeout_handler=None, respon
         if wait_packets and res:
             if isinstance(res, Deferred):
                 wait_list.append(res)
-            else:
+            elif res.finished_deferred and isinstance(res.finished_deferred, Deferred):
                 wait_list.append(res.finished_deferred)
     del alreadysent
-    if wait_packets:
-        return DeferredList(wait_list)
-    return totalsent
+    if not wait_packets:
+        return totalsent
+    return DeferredList(wait_list, consumeErrors=True)
 
 #------------------------------------------------------------------------------
 
