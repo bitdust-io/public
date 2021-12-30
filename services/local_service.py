@@ -56,7 +56,7 @@ from __future__ import absolute_import
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 10
+_DebugLevel = 14
 
 #------------------------------------------------------------------------------
 
@@ -104,6 +104,17 @@ class LocalService(automat.Automat):
                 os.makedirs(my_data_dir_path)
         automat.Automat.__init__(self, name=self.service_name, state='OFF',
                                  debug_level=_DebugLevel, log_events=_Debug, log_transitions=_Debug, )
+
+    def to_json(self):
+        j = super().to_json()
+        j.update({
+            'name': self.service_name,
+            'enabled': self.enabled(),
+            'installed': self.installed(),
+            'config_path': self.config_path,
+            'depends': self.dependent_on(),
+        })
+        return j
 
     #------------------------------------------------------------------------------
 

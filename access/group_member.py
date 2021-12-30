@@ -96,19 +96,23 @@ from crypt import my_keys
 
 from dht import dht_relations
 
+from contacts import identitycache
+
 from p2p import commands
 from p2p import p2p_service
 from p2p import lookup
 from p2p import propagate
 from p2p import p2p_service_seeker
 
+from transport import packet_out
+
 from stream import message
 
 from storage import archive_reader
 
 from access import groups
-from access import key_ring
 
+from userid import identity
 from userid import global_id
 from userid import id_url
 from userid import my_id
@@ -391,10 +395,10 @@ class GroupMember(automat.Automat):
             'group_key_id': self.group_key_id,
             'alias': self.group_glob_id['key_alias'],
             'label': my_keys.get_label(self.group_key_id),
-            'creator': self.group_creator_idurl,
+            'creator': self.group_creator_id,
             'active_broker_id': self.active_broker_id,
             'active_queue_id': self.active_queue_id,
-            'connected_brokers': self.connected_brokers,
+            'connected_brokers': {p: id_url.idurl_to_id(b) for p, b in self.connected_brokers.items()},
             'last_sequence_id': self.last_sequence_id,
             'archive_folder_path': groups.get_archive_folder_path(self.group_key_id),
         })
@@ -704,7 +708,7 @@ class GroupMember(automat.Automat):
         )
         if _Debug:
             result.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='group_member.doReadQueue')
-        result.addErrback(lambda err: self.automat('queue-read-failed', err))
+        result.addErrback(self._on_read_queue_failed)
 
     def doReadArchive(self, *args, **kwargs):
         """
@@ -1224,9 +1228,9 @@ class GroupMember(automat.Automat):
         if _Debug:
             lg.args(_DebugLevel, broker=possible_broker_idurl, pos=desired_broker_position, action=action, owner=self.group_creator_id, )
         group_key_info = {}
-        if not my_keys.is_key_registered(self.group_key_id):
-            lg.warn('group key %r was not registered, checking all registered keys' % self.group_key_id)
-            key_ring.check_rename_my_keys()
+        # if not my_keys.is_key_registered(self.group_key_id):
+        #     lg.warn('group key %r was not registered, checking all registered keys' % self.group_key_id)
+        #     my_keys.check_rename_my_keys(prefix=self.group_key_id.split('@')[0])
         if not my_keys.is_key_registered(self.group_key_id):
             lg.err('closing group_member %r because key %r is not registered' % (self, self.group_key_id, ))
             lg.exc('group key %r is not registered' % self.group_key_id)
@@ -1344,7 +1348,17 @@ class GroupMember(automat.Automat):
             try:
                 evt, a, kw = err.value.args
                 if a and a[0]:
-                    resp_payload = strng.to_text(a[0][0].Payload)
+                    if isinstance(a[0], packet_out.PacketOut):
+                        resp_payload = strng.to_text(a[0].Payload)
+                    else:
+                        resp_payload = strng.to_text(a[0][0].Payload)
+                    if resp_payload.startswith('identity:'):
+                        xml_src = resp_payload[9:]
+                        new_ident = identity.identity(xmlsrc=xml_src)
+                        if new_ident.isCorrect() and new_ident.Valid():
+                            if identitycache.UpdateAfterChecking(new_ident.getIDURL(), xml_src):
+                                reactor.callLater(0.2, self.automat, 'brokers-mismatch')  # @UndefinedVariable
+                                return
                     if resp_payload.startswith('mismatch:'):
                         mismatch_info = jsn.loads(resp_payload[9:])
                         if 'dht_brokers' in mismatch_info:
@@ -1356,8 +1370,10 @@ class GroupMember(automat.Automat):
                 self.automat('broker-connect-failed', err)
                 return
             if mismatch_info:
+                lg.warn('broker request mismatch at position %d: %r' % (broker_pos, mismatch_info, ))
                 self.automat('brokers-mismatch', **mismatch_info)
                 return
+        lg.err('failed connecting to broker at position %d : %r' % (broker_pos, err, ))
         self.automat('broker-connect-failed', err)
 
     def _on_broker_hired(self, response_info, broker_pos, *args, **kwargs):
@@ -1384,7 +1400,10 @@ class GroupMember(automat.Automat):
             try:
                 evt, a, kw = err.value.args
                 if a and a[0]:
-                    resp_payload = strng.to_text(a[0][0].Payload)
+                    if isinstance(a[0], packet_out.PacketOut):
+                        resp_payload = strng.to_text(a[0].Payload)
+                    else:
+                        resp_payload = strng.to_text(a[0][0].Payload)
                     if resp_payload.startswith('mismatch:'):
                         mismatch_info = jsn.loads(resp_payload[9:])
                         if 'dht_brokers' in mismatch_info:
@@ -1416,6 +1435,27 @@ class GroupMember(automat.Automat):
             self.automat('brokers-ping-failed')
             return
         self.automat('brokers-all-connected', **kwargs)
+
+    def _on_read_queue_failed(self, err):
+        if _Debug:
+            lg.args(_DebugLevel, err=err)
+        if isinstance(err, Failure):
+            if _Debug:
+                lg.args(_DebugLevel, args=err.value.args)
+            try:
+                resp_payload = strng.to_text(err.value.args[0].Payload)
+                if _Debug:
+                    lg.dbg(_DebugLevel, resp_payload)
+                if resp_payload.startswith('identity:'):
+                    xml_src = resp_payload[9:]
+                    new_ident = identity.identity(xmlsrc=xml_src)
+                    if new_ident.isCorrect() and new_ident.Valid():
+                        if identitycache.UpdateAfterChecking(new_ident.getIDURL(), xml_src):
+                            reactor.callLater(0.5, self.automat, 'reconnect')  # @UndefinedVariable
+                            return
+            except:
+                lg.exc()
+        self.automat('queue-read-failed', err)
 
     def _on_message_to_broker_sent(self, response_packet, outgoing_counter, packet_id):
         if _Debug:

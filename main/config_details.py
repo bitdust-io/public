@@ -32,13 +32,11 @@ module:: config_details
 
 
 def raw():
-    # in case option does not have any description it will be marked as "internal"
-    # "internal" options should not be displayed in the UI, but still can be manipulated via API or command line
+    """
+    In case option does not have any description here it will be marked as "internal".
+    The "internal" options are not displayed in the UI, but still can be manipulated via API or command line.
+    """
     return """
-{interface/api/json-rpc-enabled}
-
-{interface/api/json-rpc-port}
-
 {interface/api/rest-http-enabled}
 
 {interface/api/rest-http-port}
@@ -61,7 +59,7 @@ This option enables logging of all events that are submitted to state machines, 
 By enabling this option, you can also monitor the life cycle of each state machine running in the main process, see `~/.bitdust/logs/automats.log` file.
 
 {logs/debug-level} debug level
-Higher values of `debug-level` option will produce more log messages in the console output, see `~/.bitdust/logs/main.log` file.
+Higher values of `debug-level` option will produce more log messages in the console output, see `~/.bitdust/logs/stdout.log` file.
 
 {logs/packet-enabled} log network packets
 This option enables logging of all incoming & outgoing peer-to-peer packets - very helpful when analyzing/debugging network communications, see `~/.bitdust/logs/packet.log` file.

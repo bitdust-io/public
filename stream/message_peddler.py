@@ -212,6 +212,17 @@ def on_consume_queue_messages(json_messages):
             continue
         if msg_type == 'queue_message':
             if queue_id not in streams():
+                group_creator_idurl = global_id.GetGlobalQueueOwnerIDURL(queue_id)
+                if not group_creator_idurl.is_latest():
+                    lg.warn('group creator idurl was rotated, consumer must refresh own identity cache: %r ~ %r' % (
+                        group_creator_idurl.to_original(), group_creator_idurl.to_bin(), ))
+                    known_ident = identitycache.get_one(group_creator_idurl.to_bin())
+                    if not known_ident:
+                        lg.err('unknown group creator identity: %r' % group_creator_idurl.to_bin())
+                        p2p_service.SendFailNoRequest(from_idurl, packet_id, 'unknown group creator identity')
+                        continue
+                    p2p_service.SendFailNoRequest(from_idurl, packet_id, 'identity:%s' %  known_ident.serialize(as_text=True))
+                    continue
                 lg.warn('skipped incoming queue_message, queue %r is not registered' % queue_id)
                 p2p_service.SendFailNoRequest(from_idurl, packet_id, 'queue ID not registered')
                 continue
@@ -732,7 +743,10 @@ def rename_stream(old_queue_id, new_queue_id):
     streams()[new_queue_id] = streams().pop(old_queue_id)
     if new_customer_idurl not in customers():
         customers()[new_customer_idurl] = []
-    customers()[new_customer_idurl].append(new_queue_id)
+    if new_queue_id not in customers()[new_customer_idurl]:
+        customers()[new_customer_idurl].append(new_queue_id)
+    if os.path.isdir(new_queue_dir):
+        bpio.rmdir_recursive(new_queue_dir, ignore_errors=True)
     if os.path.isdir(old_queue_dir):
         bpio.move_dir_recursive(old_queue_dir, new_queue_dir)
     if _Debug:
@@ -1209,10 +1223,23 @@ class MessagePeddler(automat.Automat):
             p2p_service.SendFail(request_packet, 'failed reading key info')
             result_defer.callback(False)
             return
+        group_key_id = my_keys.latest_key_id(group_key_id)
         group_key_alias, group_creator_idurl = my_keys.split_key_id(group_key_id)
         if not group_key_alias or not group_creator_idurl:
             lg.warn('wrong group_key_id: %r' % group_key_id)
             p2p_service.SendFail(request_packet, 'invalid group_key_id')
+            result_defer.callback(False)
+            return
+        if not group_creator_idurl.is_latest():
+            lg.warn('group creator idurl was rotated, consumer must refresh own identity cache: %r ~ %r' % (
+                group_creator_idurl.to_original(), group_creator_idurl.to_bin(), ))
+            known_ident = identitycache.get_one(group_creator_idurl.to_bin())
+            if not known_ident:
+                lg.err('unknown group creator identity: %r' % group_creator_idurl)
+                p2p_service.SendFail(request_packet, 'unknown group creator identity')
+                result_defer.callback(False)
+                return
+            p2p_service.SendFail(request_packet, 'identity:%s' %  known_ident.serialize(as_text=True))
             result_defer.callback(False)
             return
         if my_keys.is_key_registered(group_key_id):
@@ -1563,6 +1590,7 @@ class MessagePeddler(automat.Automat):
                     lg.info('no streams left for %r, clean up queue_keeper()' % customer_idurl)
                     queue_keeper.close(customer_idurl)
                     group_key_id = global_id.GetGlobalQueueKeyID(queue_id)
+                    group_key_id = my_keys.latest_key_id(group_key_id)
                     if erase_key and my_keys.is_key_registered(group_key_id):
                         lg.info('clean up group key %r' % group_key_id)
                         my_keys.erase_key(group_key_id)
@@ -1570,7 +1598,7 @@ class MessagePeddler(automat.Automat):
     def _do_check_create_queue_keeper(self, customer_idurl, request_packet, queue_id, consumer_id, producer_id,
                                       position, last_sequence_id, archive_folder_path, known_brokers, group_key_info, result_defer):
         if _Debug:
-            lg.args(_DebugLevel, queue_id=queue_id, consumer_id=consumer_id, producer_id=producer_id,
+            lg.args(_DebugLevel, customer=customer_idurl, queue_id=queue_id, consumer_id=consumer_id, producer_id=producer_id,
                     position=position, archive_folder_path=archive_folder_path, known_brokers=known_brokers)
         queue_keeper_result = Deferred()
         if _Debug:
@@ -1755,7 +1783,7 @@ class MessagePeddler(automat.Automat):
                 if current_queue_id not in streams():
                     raise Exception('rotated queue %r was not registered' % current_queue_id)
                 if target_queue_id in streams():
-                    raise Exception('rotated queue %r was already registered' % target_queue_id)
+                    lg.warn('rotated queue %r was already registered' % target_queue_id)
                 rename_stream(current_queue_id, target_queue_id)
             if target_queue_id not in streams():
                 open_stream(target_queue_id)

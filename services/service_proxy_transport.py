@@ -106,6 +106,20 @@ class ProxyTransportService(LocalService):
             return False
         return True
 
+    def health_check(self):
+        from services import driver
+        all_deps_are_ok = True
+        for dep_name in self.dependent_on():
+            if not driver.is_enabled(dep_name):
+                all_deps_are_ok = False
+                break
+            if not driver.is_on(dep_name):
+                all_deps_are_ok = False
+                break
+        if not all_deps_are_ok:
+            return False
+        return self.state == 'ON'
+
     def _available_transports(self):
         from main import settings
         atransports = []
@@ -237,5 +251,8 @@ class ProxyTransportService(LocalService):
         network_connector.A('reconnect')
 
     def _on_dht_layer_connected(self, evt):
+        from dht import dht_records
         if evt.data['layer_id'] == 0:
             self._do_join_proxy_routers_dht_layer()
+        elif evt.data['layer_id'] == dht_records.LAYER_PROXY_ROUTERS:
+            self._on_proxy_routers_dht_layer_connected(True)

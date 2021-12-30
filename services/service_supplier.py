@@ -141,6 +141,7 @@ class SupplierService(LocalService):
         if family_snapshot:
             family_snapshot = id_url.to_bin_list(family_snapshot)
         key_id = json_payload.get('key_id')
+        key_id = my_keys.latest_key_id(key_id)
         target_customer_id = json_payload.get('customer_id')
         if key_id:
             # this is a request from external user to access shared data stored by one of my customers
@@ -351,5 +352,8 @@ class SupplierService(LocalService):
         return ok
 
     def _on_dht_layer_connected(self, evt):
+        from dht import dht_records
         if evt.data['layer_id'] == 0:
             self._do_connect_suppliers_dht_layer()
+        elif evt.data['layer_id'] == dht_records.LAYER_SUPPLIERS:
+            self._on_suppliers_dht_layer_connected(True)

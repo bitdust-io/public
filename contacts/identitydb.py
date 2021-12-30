@@ -355,16 +355,21 @@ def update(idurl, xml_src):
         return False
 
     if not newid.isCorrect():
-        lg.err("incorrect identity : %r" % idurl)
+        lg.warn("incorrect identity : %r" % idurl)
         return False
 
     try:
         if not newid.Valid():
-            lg.err("identity not valid : %r" % idurl)
+            lg.warn("identity not valid : %r" % idurl)
             return False
     except:
         lg.exc()
         return False
+
+    new_idurl = newid.getIDURL(as_original=True)
+    if idurl != new_idurl:
+        lg.warn('original IDURL is not matching, updated: %r -> %r' % (idurl, new_idurl, ))
+        idurl = new_idurl
 
     filename = os.path.join(settings.IdentityCacheDir(), nameurl.UrlFilename(idurl))
     if os.path.exists(filename):

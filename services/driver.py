@@ -39,7 +39,7 @@ from six.moves import range
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 12
+_DebugLevel = 14
 
 #------------------------------------------------------------------------------
 
@@ -147,8 +147,14 @@ def is_healthy(service_name):
     if svc is None:
         result.errback(Exception('service %s not found' % service_name))
         return result
+    if not svc.installed():
+        result.errback(Exception('service %s is not installed' % service_name))
+        return result
     if not svc.enabled():
         result.errback(Exception('service %s is disabled' % service_name))
+        return result
+    if not is_started(service_name):
+        result.errback(Exception('service %s is not started' % service_name))
         return result
     service_health = svc.health_check()
     if isinstance(service_health, Deferred):
@@ -410,6 +416,17 @@ def resume(service_name, *args, **kwargs):
 
 #------------------------------------------------------------------------------
 
+def info(service_name):
+    svc = services().get(service_name, None)
+    if svc is None:
+        service_name = 'service_' + service_name.replace('-', '_')
+        svc = services().get(service_name, None)
+    if svc is None:
+        return None
+    return svc.to_json()
+
+#------------------------------------------------------------------------------
+
 def restart(service_name, wait_timeout=None):
     """
     """
@@ -583,6 +600,7 @@ def stop_single(service_name):
     svc.automat('stop', _stopping)
     return result
 
+#------------------------------------------------------------------------------
 
 def health_check(services_list=[]):
     if not services_list:
@@ -606,6 +624,7 @@ def health_check(services_list=[]):
     health_result = DeferredList(dl, consumeErrors=True)
     return health_result
 
+#------------------------------------------------------------------------------
 
 def get_network_configuration(services_list=[]):
     if not services_list:
