@@ -296,10 +296,14 @@ class identity(object):
             return False
         if not self.revision:
             return False
-        if len(self.sources) > settings.MaximumIdentitySources():
+        original_sources = self.getSources(as_originals=True)
+        if len(set(original_sources)) != len(self.sources):
+            lg.warn('original identity sources are duplicated: %r' % original_sources)
+            return False
+        if len(original_sources) > settings.MaximumIdentitySources():
             lg.warn('too much sources')
             return False
-        if len(self.sources) < settings.MinimumIdentitySources():
+        if len(original_sources) < settings.MinimumIdentitySources():
             lg.warn('too few sources')
             return False
         try:
@@ -308,7 +312,7 @@ class identity(object):
             lg.warn('identity revision: %s' % self.revision)
             return False
         names = set()
-        for source in self.sources:
+        for source in original_sources:
             if not source:
                 lg.warn('found empty source')
                 return False
@@ -545,7 +549,7 @@ class identity(object):
         signature = doc.createElement('signature')
         signature.appendChild(doc.createTextNode(strng.to_text(self.signature)))
         root.appendChild(signature)
-        
+
         xmlsrc = doc.toprettyxml(indent="  ", newl="\n", encoding="utf-8")
         return xmlsrc, root, doc
 

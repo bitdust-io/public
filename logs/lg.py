@@ -82,7 +82,7 @@ def fqn(o):
 
 #------------------------------------------------------------------------------
 
-def out(_DebugLevel, msg, nl='\n', log_name='main', showtime=False):
+def out(_DebugLevel, msg, nl='\n', log_name='stdout', showtime=False):
     """
     Prints a text line to the log file or console.
 
@@ -146,7 +146,7 @@ def out(_DebugLevel, msg, nl='\n', log_name='main', showtime=False):
     if not _LogsEnabled:
         return
     if is_debug(level):
-        if log_name == 'main':
+        if log_name == 'stdout':
             if _LogFile is not None:
                 o = s + nl
                 if sys.version_info[0] == 3:
@@ -180,7 +180,7 @@ def out(_DebugLevel, msg, nl='\n', log_name='main', showtime=False):
                 except:
                     pass
         if not _RedirectStdOut and not _RedirectStdErr and not _NoOutput:
-            if log_name == 'main':
+            if log_name == 'stdout':
                 s = s + nl
                 try:
                     sys.stdout.write(s)
@@ -193,8 +193,8 @@ def out(_DebugLevel, msg, nl='\n', log_name='main', showtime=False):
     if _WebStreamFunc is not None:
         _WebStreamFunc(level, s_ + nl)
     _LogLinesCounter += 1
-    if _LogLinesCounter % 10000 == 0:
-        out(10, '[%s]' % time.asctime())
+    # if _LogLinesCounter % 10000 == 0:
+    #     out(10, '[%s]' % time.asctime())
     return None
 
 
@@ -271,7 +271,7 @@ def err(message, level=0):
     if not isinstance(message, six.text_type):  # @UndefinedVariable
         message = str(message)
     if not message.count(funcname):
-        message = ' in %s() : "%s"' % (funcname, message)
+        message = ' %s in %s()' % (message, funcname)
     if not message.count('ERROR'):
         message = 'ERROR ' + message
     message = '%s%s   ' % ((' ' * (level + 11)), message)
@@ -304,9 +304,12 @@ def errback(err, *args, **kwargs):
     _debug = kwargs.pop('debug', 0)
     _debug_level = kwargs.pop('debug_level', 0)
     _method = kwargs.pop('method', 'unknown')
+    _ignore = kwargs.pop('ignore', False)
     if _debug and is_debug(_debug_level):
         dbg(_debug_level, 'Deferred.errback() from "%s" method with %r : args=%r  kwargs=%r' % (
             repr(err).replace('\n', ''), _method, args, kwargs, ))
+    if _ignore:
+        return None
     return err
 
 
@@ -582,7 +585,7 @@ def open_log_file(filename, append_mode=False):
     global _LogFile
     global _LogFileName
     if _LogFile:
-        return
+        return None
     try:
         if not os.path.isdir(os.path.dirname(os.path.abspath(filename))):
             os.makedirs(os.path.dirname(os.path.abspath(filename)))
@@ -594,6 +597,7 @@ def open_log_file(filename, append_mode=False):
     except:
         _LogFile = None
         _LogFileName = None
+    return _LogFile
 
 
 def close_log_file():

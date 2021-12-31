@@ -113,8 +113,6 @@ def shutdown():
     """
     global _InitDone
     _InitDone = False
-    if _Debug:
-        lg.out(_DebugLevel, 'settings.shutdown data location was %r' % deploy.current_base_dir())
     deploy.set_base_dir(None)
     config.shutdown()
 
@@ -211,15 +209,6 @@ Below is a set of global constants.
 #------------------------------------------------------------------------------
 #--- LOGS --------------------------------------------------------------------
 #------------------------------------------------------------------------------
-
-
-def MainLogFilename():
-    """
-    A prefix for file names to store main process logs.
-    """
-    # return os.path.join(LogsDir(), 'bitdust')
-    return os.path.join(LogsDir(), 'main.log')
-
 
 def UpdateLogFilename():
     """
@@ -980,58 +969,6 @@ def UserNameFilename():
     return os.path.join(MetaDataDir(), "username")
 
 
-# def GUIOptionsFilename():
-#     """
-#     A small file to keep GUI config.
-# 
-#     For example windows positions and sizes after last execution of the
-#     program.
-#     """
-#     return os.path.join(MetaDataDir(), "guioptions")
-
-
-# def UpdateSheduleFilename():
-#     """
-#     Under Windows software update process is made by bitstarter.exe file.
-#     Obsolete.
-#     """
-#     return os.path.join(MetaDataDir(), "updateshedule")
-
-
-# def LocalPortFilename():
-#     """
-#     This is a file to keep randomly generated port number for HTTP server to
-#     provide a Web Access to BitDust main process.
-# 
-#     See module ``web.webcontrol`` for more details. This is old stuff,
-#     will be removed soon!
-#     """
-#     return os.path.join(MetaDataDir(), 'localport')
-
-
-# def LocalWSGIPortFilename():
-#     """
-#     This is a file to keep randomly generated port number for Django WSGI
-#     server.
-# 
-#     This stuff creates a User Interface to the BitDust main process. See
-#     module ``web.control`` for more details.
-#     """
-#     return os.path.join(MetaDataDir(), 'localwsgiport')
-
-
-# def LocalXMLRPCPortFilename():
-#     """
-#     """
-#     return os.path.join(MetaDataDir(), 'localxmlrpcport')
-
-
-# def LocalJsonRPCPortFilename():
-#     """
-#     """
-#     return os.path.join(MetaDataDir(), 'localjsonrpcport')
-
-
 def BackupInfoFileNameOld():
     """
     Long time ago backup data base were stored in that file.
@@ -1131,33 +1068,6 @@ def RepoFile():
     A file to store info about currently used repository.
     """
     return os.path.join(MetaDataDir(), 'repo')
-
-
-def VersionFile():
-    """
-    A place for local copy of "checksum" file, see
-    ``CurrentVersionDigestsFilename()``.
-    """
-    return os.path.join(MetaDataDir(), 'checksum')
-
-
-def InfoFile():
-    """
-    A place for local copy of "files" file, see ``FilesDigestsFilename()``.
-    """
-    # return os.path.join(MetaDataDir(), 'files')
-    return os.path.join(bpio.getExecutableDir(), 'files')
-
-
-def RevisionNumberFile():
-    """
-    We keep track of Subversion revision number and store it in the binary
-    folder. This is a sort of "product version". Probably not very best idea,
-    we need to use a widely used software version format.
-
-    This is not used anymore - switched to ``VersionNumberFile()``.
-    """
-    return os.path.join(bpio.getExecutableDir(), 'revnum')
 
 
 def VersionNumberFile():
@@ -1621,14 +1531,6 @@ def enableWebSocketServer(enable=None):
     config.conf().setData('interface/api/web-socket-enabled', str(enable))
 
 
-def enableJsonRPCServer(enable=None):
-    """
-    """
-    if enable is None:
-        return config.conf().getBool('interface/api/json-rpc-enabled')
-    config.conf().setData('interface/api/json-rpc-enabled', str(enable))
-
-
 def enableFTPServer(enable=None):
     """
     """
@@ -1695,18 +1597,6 @@ def setWebSocketServerPort(rest_http_port):
     """
     """
     return config.conf().setInt("interface/api/web-socket-port", rest_http_port)
-
-
-def getJsonRPCServerPort():
-    """
-    """
-    return config.conf().getInt('interface/api/json-rpc-port', DefaultJsonRPCPort())
-
-
-def setJsonRPCServerPort(json_rpc_port):
-    """
-    """
-    return config.conf().setInt("interface/api/json-rpc-port", json_rpc_port)
 
 
 def getFTPServerPort():
