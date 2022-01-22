@@ -130,9 +130,13 @@ class BitDustWrappedWebSocketProtocol(txws.WebSocketProtocol):
     def validateHeaders(self):
         global _APISecret
         if _APISecret:
+            access_granted = False
             _, _, api_secret_parameter = self.location.partition('?')
-            _, _, api_secret_parameter = api_secret_parameter.partition('=')
-            if api_secret_parameter != _APISecret:
+            param_name, _, api_secret_parameter = api_secret_parameter.partition('=')
+            if param_name == 'a' or param_name == 'api_secret':
+                if api_secret_parameter == _APISecret:
+                    access_granted = True
+            if not access_granted:
                 events.send('web-socket-access-denied', data=dict())
                 self.loseConnection()
                 return
@@ -307,6 +311,13 @@ def on_online_status_changed(status_info):
     return push({
         'type': 'online_status',
         'payload': status_info,
+    })
+
+
+def on_model_changed(snapshot_object):
+    return push({
+        'type': 'model',
+        'payload': snapshot_object.to_json(),
     })
 
 #------------------------------------------------------------------------------
