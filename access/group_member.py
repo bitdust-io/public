@@ -1349,7 +1349,7 @@ class GroupMember(automat.Automat):
                 evt, a, kw = err.value.args
                 if a and a[0]:
                     if isinstance(a[0], packet_out.PacketOut):
-                        resp_payload = strng.to_text(a[0].Payload)
+                        resp_payload = strng.to_text(a[0].outpacket.Payload)
                     else:
                         resp_payload = strng.to_text(a[0][0].Payload)
                     if resp_payload.startswith('identity:'):
@@ -1401,7 +1401,7 @@ class GroupMember(automat.Automat):
                 evt, a, kw = err.value.args
                 if a and a[0]:
                     if isinstance(a[0], packet_out.PacketOut):
-                        resp_payload = strng.to_text(a[0].Payload)
+                        resp_payload = strng.to_text(a[0].outpacket.Payload)
                     else:
                         resp_payload = strng.to_text(a[0][0].Payload)
                     if resp_payload.startswith('mismatch:'):
@@ -1443,7 +1443,12 @@ class GroupMember(automat.Automat):
             if _Debug:
                 lg.args(_DebugLevel, args=err.value.args)
             try:
-                resp_payload = strng.to_text(err.value.args[0].Payload)
+                if isinstance(err.value.args[0], str):
+                    resp_payload = strng.to_text(err.value.args[0])
+                elif isinstance(err.value.args[0], packet_out.PacketOut):
+                    resp_payload = strng.to_text(err.value.args[0].outpacket.Payload)
+                else:
+                    resp_payload = strng.to_text(err.value.args[0][0].Payload)
                 if _Debug:
                     lg.dbg(_DebugLevel, resp_payload)
                 if resp_payload.startswith('identity:'):

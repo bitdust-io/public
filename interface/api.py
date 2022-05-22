@@ -206,11 +206,11 @@ def enable_model_listener(model_name, request_all=False):
     if not request_all:
         return OK()
     if model_name == 'service':
-        driver.populate_all_services()
+        driver.populate_services()
     elif model_name == 'key':
         if driver.is_on('service_keys_registry'):
             from crypt import my_keys
-            my_keys.populate_all_keys()
+            my_keys.populate_keys()
         else:
             listeners.populate_later('key')
     elif model_name == 'conversation':
@@ -221,10 +221,40 @@ def enable_model_listener(model_name, request_all=False):
             listeners.populate_later('conversation')
     elif model_name == 'message':
         if driver.is_on('service_message_history'):
-            from chat import message_database
+            from chat import message_database  # @Reimport
             message_database.populate_messages()
         else:
             listeners.populate_later('message')
+    elif model_name == 'correspondent':
+        if driver.is_on('service_identity_propagate'):
+            from contacts import contactsdb
+            contactsdb.populate_correspondents()
+        else:
+            listeners.populate_later('correspondent')
+    elif model_name == 'online_status':
+        if driver.is_on('service_p2p_hookups'):
+            from p2p import online_status
+            online_status.populate_online_statuses()
+        else:
+            listeners.populate_later('online_status')
+    elif model_name == 'private_file':
+        if driver.is_on('service_my_data'):
+            from storage import backup_fs
+            backup_fs.populate_private_files()
+        else:
+            listeners.populate_later('private_file')
+    elif model_name == 'shared_file':
+        if driver.is_on('service_shared_data'):
+            from storage import backup_fs  # @Reimport
+            backup_fs.populate_shared_files()
+        else:
+            listeners.populate_later('shared_file')
+    elif model_name == 'remote_version':
+        if driver.is_on('service_backups'):
+            from storage import backup_matrix
+            backup_matrix.populate_remote_versions()
+        else:
+            listeners.populate_later('remote_version')
     return OK()
 
 
@@ -1261,7 +1291,7 @@ def files_list(remote_path=None, key_id=None, recursive=True, all_customers=Fals
                         'eccmap': '' if not d.EccMap else d.EccMap.name,
                     })
             r['downloads'] = downloads
-        result.append(r)        
+        result.append(r)
     if _Debug:
         lg.out(_DebugLevel, '    %d items returned' % len(result))
     return RESULT(result, extra_fields={
@@ -1336,7 +1366,7 @@ def file_info(remote_path, include_uploads=True, include_downloads=True):
     item = backup_fs.GetByID(pathID, iterID=backup_fs.fsID(customer_idurl))
     if not item:
         return ERROR('item %r not found in the catalog' % pathID)
-    (item_size, item_time, versions) = backup_fs.ExtractVersions(pathID, item)  # , customer_id=norm_path['customer'])
+    (item_size, item_time, versions) = backup_fs.ExtractVersions(pathID, item)
     glob_path_item = norm_path.copy()
     glob_path_item['path'] = pathID
     key_alias = 'master'
@@ -1420,9 +1450,8 @@ def file_info(remote_path, include_uploads=True, include_downloads=True):
         r['downloads'] = downloads
     if _Debug:
         lg.out(_DebugLevel, 'api.file_info : %r' % pathID)
-    return RESULT([r, ], extra_fields={
-        'revision': backup_control.revision(),
-    })
+    r['revision'] = backup_control.revision()
+    return OK(r)
 
 
 def file_create(remote_path, as_folder=False, exist_ok=False, force_path_id=None):
@@ -1445,8 +1474,11 @@ def file_create(remote_path, as_folder=False, exist_ok=False, force_path_id=None
     from storage import backup_control
     from system import bpio
     from main import control
-    from userid import global_id
+    from main import listeners
     from crypt import my_keys
+    from userid import id_url
+    from userid import global_id
+    from userid import my_id
     parts = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
     if not parts['path']:
         return ERROR('invalid "remote_path" format')
@@ -1455,6 +1487,7 @@ def file_create(remote_path, as_folder=False, exist_ok=False, force_path_id=None
     pathID = backup_fs.ToID(path, iter=backup_fs.fs(customer_idurl))
     keyID = my_keys.make_key_id(alias=parts['key_alias'], creator_glob_id=parts['customer'])
     keyAlias = parts['key_alias']
+    itemInfo = None
     if _Debug:
         lg.args(_DebugLevel, remote_path=remote_path, as_folder=as_folder, path_id=pathID, customer_idurl=customer_idurl, force_path_id=force_path_id)
     if pathID is not None:
@@ -1473,7 +1506,7 @@ def file_create(remote_path, as_folder=False, exist_ok=False, force_path_id=None
             }, message='remote path %r already exist in catalog: %r' % (('folder' if as_folder else 'file'), fullGlobID), )
         return ERROR('remote path %r already exist in catalog: %r' % (path, pathID))
     if as_folder:
-        newPathID, _, _ = backup_fs.AddDir(
+        newPathID, itemInfo, _, _ = backup_fs.AddDir(
             path,
             read_stats=False,
             iter=backup_fs.fs(customer_idurl),
@@ -1486,7 +1519,7 @@ def file_create(remote_path, as_folder=False, exist_ok=False, force_path_id=None
         if not backup_fs.IsDir(parent_path, iter=backup_fs.fs(customer_idurl)):
             if backup_fs.IsFile(parent_path, iter=backup_fs.fs(customer_idurl)):
                 return ERROR('remote path can not be assigned, file already exist: %r' % parent_path)
-            parentPathID, _, _ = backup_fs.AddDir(
+            parentPathID, _, _, _ = backup_fs.AddDir(
                 parent_path,
                 read_stats=False,
                 iter=backup_fs.fs(customer_idurl),
@@ -1503,7 +1536,7 @@ def file_create(remote_path, as_folder=False, exist_ok=False, force_path_id=None
         if not id_iter_iterID:
             return ERROR('remote path can not be assigned, parent folder not found: %r' % parent_path)
         parentPathID = id_iter_iterID[0]
-        newPathID, _, _ = backup_fs.PutItem(
+        newPathID, itemInfo, _, _ = backup_fs.PutItem(
             name=os.path.basename(path),
             parent_path_id=parentPathID,
             as_folder=as_folder,
@@ -1517,6 +1550,24 @@ def file_create(remote_path, as_folder=False, exist_ok=False, force_path_id=None
     control.request_update([('pathID', newPathID), ])
     full_glob_id = global_id.MakeGlobalID(customer=parts['customer'], path=newPathID, key_alias=keyAlias)
     full_remote_path = global_id.MakeGlobalID(customer=parts['customer'], path=parts['path'], key_alias=keyAlias)
+    if id_url.is_the_same(customer_idurl, my_id.getIDURL()):
+        listeners.push_snapshot('private_file', snap_id=full_glob_id, data=dict(
+            global_id=full_glob_id,
+            remote_path=full_remote_path,
+            size=max(0, itemInfo.size),
+            type=backup_fs.TYPES.get(itemInfo.type, 'unknown').lower(),
+            customer=parts['customer'],
+            versions=[],
+        ))
+    else:
+        listeners.push_snapshot('shared_file', snap_id=full_glob_id, data=dict(
+            global_id=full_glob_id,
+            remote_path=full_remote_path,
+            size=max(0, itemInfo.size),
+            type=backup_fs.TYPES.get(itemInfo.type, 'unknown').lower(),
+            customer=parts['customer'],
+            versions=[],
+        ))
     if _Debug:
         lg.out(_DebugLevel, 'api.file_create : %r' % full_glob_id)
     return OK({
@@ -1550,9 +1601,12 @@ def file_delete(remote_path):
     from storage import backup_monitor
     from main import settings
     from main import control
+    from main import listeners
     from lib import packetid
     from system import bpio
     from userid import global_id
+    from userid import id_url
+    from userid import my_id
     parts = global_id.NormalizeGlobalID(global_id.ParseGlobalID(remote_path))
     if not parts['idurl'] or not parts['path']:
         return ERROR('invalid "remote_path" format')
@@ -1562,6 +1616,7 @@ def file_delete(remote_path):
         return ERROR('remote path %r was not found' % parts['path'])
     if not packetid.Valid(pathID):
         return ERROR('invalid item found: %r' % pathID)
+    itemInfo = backup_fs.GetByID(pathID, iterID=backup_fs.fsID(parts['idurl']))
     pathIDfull = packetid.MakeBackupID(parts['customer'], pathID)
     keyAlias = parts['key_alias'] or 'master'
     full_glob_id = global_id.MakeGlobalID(customer=parts['customer'], path=pathID, key_alias=keyAlias)
@@ -1576,6 +1631,24 @@ def file_delete(remote_path):
     backup_control.Save()
     backup_monitor.A('restart')
     control.request_update([('pathID', pathIDfull), ])
+    if id_url.is_the_same(parts['idurl'], my_id.getIDURL()):
+        listeners.push_snapshot('private_file', snap_id=full_glob_id, deleted=True, data=dict(
+            global_id=full_glob_id,
+            remote_path=full_remote_path,
+            size=0 if not itemInfo else itemInfo.size,
+            type='file' if not itemInfo else backup_fs.TYPES.get(itemInfo.type, 'unknown').lower(),
+            customer=parts['customer'],
+            versions=[],
+        ))
+    else:
+        listeners.push_snapshot('shared_file', snap_id=full_glob_id, deleted=True, data=dict(
+            global_id=full_glob_id,
+            remote_path=full_remote_path,
+            size=0 if not itemInfo else itemInfo.size,
+            type='file' if not itemInfo else backup_fs.TYPES.get(itemInfo.type, 'unknown').lower(),
+            customer=parts['customer'],
+            versions=[],
+        ))
     if _Debug:
         lg.out(_DebugLevel, 'api.file_delete %s' % parts)
     return OK({
@@ -2869,7 +2942,6 @@ def friends_list():
             'alias': alias,
             'contact_status': contact_status,
             'contact_state': contact_state,
-            'index': None,
         }
         if driver.is_on('service_identity_propagate'):
             from p2p import online_status
@@ -3006,7 +3078,7 @@ def friend_remove(user_id):
 
 #------------------------------------------------------------------------------
 
-def user_ping(user_id, timeout=15, retries=2):
+def user_ping(user_id, timeout=15, retries=1):
     """
     Sends `Identity` packet to remote peer and wait for an `Ack` packet to check connection status.
 
@@ -3334,7 +3406,7 @@ def message_conversations_list(message_types=[], offset=0, limit=100):
     return RESULT(conversations)
 
 
-def message_send(recipient_id, data, ping_timeout=30, message_ack_timeout=15):
+def message_send(recipient_id, data, ping_timeout=15, message_ack_timeout=15):
     """
     Sends a private message to remote peer, `recipient_id` is a string with a nickname, global_id or IDURL of the remote user.
 
@@ -4085,6 +4157,25 @@ def service_restart(service_name, wait_timeout=10):
     d = driver.restart(service_name, wait_timeout=wait_timeout)
     d.addCallback(lambda resp: ret.callback(OK(resp, api_method='service_restart')))
     d.addErrback(lambda err: ret.callback(ERROR(err, api_method='service_restart')))
+    return ret
+
+
+def service_health(service_name):
+    """
+    Method will execute "health check" procedure of the given service - each service defines its own way to verify that.
+
+    ###### HTTP
+        curl -X POST 'localhost:8180/service/health/service_message_history/v1'
+
+    ###### WebSocket
+        websocket.send('{"command": "api_call", "method": "service_health", "kwargs": {"service_name": "service_message_history"} }');
+    """
+    if _Debug:
+        lg.out(_DebugLevel, 'api.service_health : %s' % service_name)
+    ret = Deferred()
+    d = driver.is_healthy(service_name)
+    d.addCallback(lambda resp: ret.callback(RESULT(resp, api_method='service_health')))
+    d.addErrback(lambda err: ret.callback(ERROR(err, api_method='service_health')))
     return ret
 
 #------------------------------------------------------------------------------

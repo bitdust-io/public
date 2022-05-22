@@ -49,6 +49,7 @@ import sys
 
 from lib import jsontemplate
 from lib import strng
+from lib import jsn
 
 from interface import cmd_line_json_templates as templ
 
@@ -147,8 +148,7 @@ def print_and_stop(result):
     Print text to console and stop the reactor.
     """
     from twisted.internet import reactor  # @UnresolvedImport
-    import pprint
-    pprint.pprint(result, indent=2, )
+    sys.stdout.write(jsn.dumps(result, indent=2, keys_to_text=True, values_to_text=True, ensure_ascii=True) + '\n')
     reactor.stop()  # @UndefinedVariable
 
 
@@ -688,9 +688,13 @@ def cmd_api(opts, args, overDict, executablePath):
             print_text('\n    %s(%s)' % (item, ', '.join(params.args),))
             print_text('        %s' % doc_line)
         return 0
+    def _clean_value(v):
+        if isinstance(v, str) and v in ['true', 'True', ]:
+            return True
+        return v
     try:
         pairs = [i.split('=') for i in args[2:]]
-        kwargs = {k:v for k, v in pairs}
+        kwargs = {k:_clean_value(v) for k, v in pairs}
     except Exception as e:
         print_text('failed reading input arguments: %s\n' % e)
         return 1
@@ -1184,8 +1188,8 @@ def cmd_dhtseed(opts, args, overDict):
         result = misc.DoRestart(
             param='dhtseed',
             detach=True,
-            std_out=os.path.join(appdata, 'logs', 'stdout.log'),
-            std_err=os.path.join(appdata, 'logs', 'stderr.log'),
+            # std_out=os.path.join(appdata, 'logs', 'stdout.log'),
+            # std_err=os.path.join(appdata, 'logs', 'stderr.log'),
         )
         try:
             result = result.pid
@@ -1239,8 +1243,8 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
         print_text('run and detach main BitDust process')
         result = misc.DoRestart(
             detach=True,
-            std_out=os.path.join(appdata, 'logs', 'stdout.log'),
-            std_err=os.path.join(appdata, 'logs', 'stderr.log'),
+            # std_out=os.path.join(appdata, 'logs', 'stdout.log'),
+            # std_err=os.path.join(appdata, 'logs', 'stderr.log'),
         )
         try:
             result = result.pid
@@ -1283,8 +1287,8 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
                 misc.DoRestart,
                 param='show' if ui else '',
                 detach=True,
-                std_out=os.path.join(appdata, 'logs', 'stdout.log'),
-                std_err=os.path.join(appdata, 'logs', 'stderr.log'),
+                # std_out=os.path.join(appdata, 'logs', 'stdout.log'),
+                # std_err=os.path.join(appdata, 'logs', 'stderr.log'),
             )
             reactor.stop()  # @UndefinedVariable
             settings.shutdown()
@@ -1317,13 +1321,13 @@ def run(opts, args, pars=None, overDict=None, executablePath=None):
             from lib import misc
             from main import settings
             settings.init()
-            appdata = settings.BaseDir()
+            # appdata = settings.BaseDir()
             print_text('run and detach main BitDust process')
             result = misc.DoRestart(
                 'show',
                 detach=True,
-                std_out=os.path.join(appdata, 'logs', 'stdout.log'),
-                std_err=os.path.join(appdata, 'logs', 'stderr.log'),
+                # std_out=os.path.join(appdata, 'logs', 'stdout.log'),
+                # std_err=os.path.join(appdata, 'logs', 'stderr.log'),
             )
             try:
                 result = result.pid

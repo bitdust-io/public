@@ -213,6 +213,7 @@ def run(args):
     status = 1
     on_windows = platform.uname()[0] == "Windows"
     on_mac = platform.uname()[0] == "Darwin"
+    on_linux = platform.uname()[0] == "Linux"
     source_dir = get_executable_location()
     init_base_dir()
     base_dir = current_base_dir()
@@ -245,12 +246,17 @@ def run(args):
             python_exe = current_python
         make_venv_cmd = "{} -m virtualenv --system-site-packages {}".format(python_exe, venv_path)
     if on_mac:
-        make_venv_cmd = "{} -m virtualenv --system-site-packages {}".format(current_python, venv_path)
+        make_venv_cmd = "{} -m virtualenv --clear --always-copy {}".format(current_python, venv_path)
 
     print_text('\n***** Executing "{}"'.format(make_venv_cmd))
     status = os.system(make_venv_cmd)
     if on_mac and status != 0:
         make_venv_cmd = 'virtualenv -p {} {}'.format(current_python, venv_path)
+        status = os.system(make_venv_cmd)
+    if on_linux and status != 0:
+        make_venv_cmd = "{} -m pip install -q virtualenv".format(current_python)
+        status = os.system(make_venv_cmd)
+        make_venv_cmd = "{} -m virtualenv --clear --always-copy {}".format(current_python, venv_path)
         status = os.system(make_venv_cmd)
 
     if status != 0:
@@ -262,7 +268,7 @@ def run(args):
     if on_windows or on_mac:
         pass
     else:
-        print_text('\n***** Install/Upgrade pip in "%s"' % venv_path)
+        print_text('\n***** Installing/Upgrading pip in "%s"' % venv_path)
         status = os.system('{} install -U pip'.format(pip_bin))
         if status != 0:
             # print_text('\n***** Failed to install latest pip version, please check/install latest pip version manually\n')
@@ -271,19 +277,20 @@ def run(args):
 
     if on_mac:
         print_text('\n***** Updating setuptools version in "%s"' % venv_path)
-        status = os.system('{} install setuptools==40.9.0'.format(pip_bin))
+        status = os.system('{} install setuptools'.format(pip_bin))
         if status != 0:
-            print_text('\n***** Failed to install setuptools==40.9.0, please check/install setuptools manually\n')
+            print_text('\n***** Failed to install/upgrade setuptools, please check/install setuptools manually\n')
             return status
 
     requirements_txt = os.path.join(source_dir, 'requirements.txt')
-    print_text('\n***** Install BitDust requirements from "%s"' % (requirements_txt))
-    requirements_cmd = '{} install -r "{}"'.format(pip_bin, requirements_txt)
+    print_text('\n***** Installing BitDust requirements from "%s"' % (requirements_txt))
+    requirements_cmd = '{} install -q -r "{}"'.format(pip_bin, requirements_txt)
     if on_windows:
         venv_python_path = os.path.join(base_dir, 'venv', 'Scripts', 'python.exe')
-        requirements_cmd = '{} -m pip install -r "{}"'.format(venv_python_path, requirements_txt)
+        requirements_cmd = '{} -m pip install -q -r "{}"'.format(venv_python_path, requirements_txt)
     if on_mac:
-        requirements_cmd = '{} -m pip install -r "{}"'.format(current_python, requirements_txt)
+        venv_python_path = os.path.join(base_dir, 'venv', 'bin', 'python')
+        requirements_cmd = '{} -m pip install -q -r "{}"'.format(venv_python_path, requirements_txt)
 
     print_text('\n***** Executing "{}"'.format(requirements_cmd))
     status = os.system(requirements_cmd)
