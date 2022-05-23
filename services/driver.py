@@ -121,7 +121,7 @@ def is_started(name):
     svc = services().get(name, None)
     if svc is None:
         return False
-    return svc.state != 'ON' and svc.state != 'OFF' and svc.state != 'NOT_INSTALLED' and svc.state != 'DEPENDS_OFF'
+    return svc.state == 'ON' or svc.state == 'STOPPING' or svc.state == 'STARTING' or svc.state == 'INFLUENCE'
 
 
 def is_enabled(name):
@@ -664,7 +664,7 @@ def get_attached_dht_layers(services_list=[]):
 
 #------------------------------------------------------------------------------
 
-def populate_all_services():
+def populate_services():
     services_list = reversed(boot_up_order())
     for name in services_list:
         svc = services().get(name, None)
@@ -672,11 +672,7 @@ def populate_all_services():
             continue
         svc_data = svc.to_json()
         svc_data['event'] = None
-        listeners.push_snapshot(
-            model_name='service',
-            snap_id=name,
-            data=svc_data,
-        )
+        listeners.push_snapshot('service', snap_id=name, data=svc_data)
 
 #------------------------------------------------------------------------------
 
@@ -728,11 +724,7 @@ def on_service_callback(result, service_name):
             depend_service.automat('depend-service-stopped')
     svc_data = svc.to_json()
     svc_data['event'] = result
-    listeners.push_snapshot(
-        model_name='service',
-        snap_id=service_name,
-        data=svc_data,
-    )
+    listeners.push_snapshot('service', snap_id=service_name, data=svc_data)
     return result
 
 
