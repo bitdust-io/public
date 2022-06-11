@@ -167,6 +167,8 @@ def dispatch_snapshot(snap):
                 lg.exc()
                 continue
             handled += 1
+    if _Debug:
+        lg.args(_DebugLevel, handled=handled, snap=snap)
     return handled
 
 #------------------------------------------------------------------------------

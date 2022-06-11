@@ -1,6 +1,20 @@
 Change Log
 ==========
 
+
+2022-06-11 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
+* fix in api.files_list()
+* fix in storage/backup_matrix.py
+* fix in api.file_create()
+* fix in shared_access_coordinator()
+* switched from ParseGlobalID() to NormalizeGlobalID() in few places
+* keep track of key alias in storage/backup_fs.py
+* bug fix in api.file_delete()
+* few bug fixes related to API model data streaming for private/shared files
+
+
+
 2022-05-22 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
 * populate more information in API streaming for private/shared files
