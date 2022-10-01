@@ -50,7 +50,7 @@ from __future__ import absolute_import
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 8
+_DebugLevel = 10
 
 #------------------------------------------------------------------------------
 
@@ -288,6 +288,8 @@ class KeysSynchronizer(automat.Automat):
                         self.not_stored_keys[stored_key_id] = is_private
                     else:
                         self.unreliable_keys[stored_key_id] = is_private
+                    if _Debug:
+                        lg.args(_DebugLevel, i=i)
         if _Debug:
             lg.args(_DebugLevel,
                     stored_keys=len(self.stored_keys),

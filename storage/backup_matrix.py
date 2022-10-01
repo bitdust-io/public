@@ -254,8 +254,6 @@ def SuppliersChangedNumbers(oldSupplierList, customer_idurl=None):
 #------------------------------------------------------------------------------
 
 def DetectSupplierPosition(raw_list_file_text):
-    """
-    """
     inpt = BytesIO(strng.to_bin(raw_list_file_text))
     all_positions = {}
     while True:
@@ -769,7 +767,7 @@ def ReadLocalFiles():
             return True
         if realpath.startswith('newblock-'):
             return False
-        if subpath in [settings.BackupIndexFileName(), settings.BackupInfoFileName(), settings.BackupInfoFileNameOld(), settings.BackupInfoEncryptedFileName()]:
+        if subpath == settings.BackupIndexFileName():
             return False
         try:
             version = subpath.split('/')[-2]
@@ -1505,8 +1503,6 @@ def GetKnownMaxBlockNum(backupID):
 
 
 def GetLocalMatrix(backupID, blockNum):
-    """
-    """
     customer_idurl = packetid.CustomerIDURL(backupID)
     if backupID not in local_files():
         return {'D': [0] * contactsdb.num_suppliers(customer_idurl=customer_idurl),
@@ -1544,8 +1540,6 @@ def GetLocalParityArray(backupID, blockNum):
 
 
 def GetRemoteMatrix(backupID, blockNum):
-    """
-    """
     customer_idurl = packetid.CustomerIDURL(backupID)
     if backupID not in remote_files():
         return {'D': [0] * contactsdb.num_suppliers(customer_idurl=customer_idurl),

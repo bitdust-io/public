@@ -205,26 +205,18 @@ def DeleteSuppliers(suppliers_IDURLs):
 
 
 def DeleteAllSuppliers():
-    """
-    """
     return throttle().DeleteSuppliers(list(throttle().supplierQueues.keys()))
 
 
 def OutboxStatus(pkt_out, status, error):
-    """
-    """
     return throttle().OutboxStatus(pkt_out, status, error)
 
 
 def FileSendingFinished(pkt_out, item, status, size, error_message):
-    """
-    """
     return throttle().FileSendingFinished(pkt_out, item, status, size, error_message)
 
 
 def IsSendingQueueEmpty():
-    """
-    """
     return throttle().IsSendingQueueEmpty()
 
 
@@ -815,14 +807,10 @@ class IOThrottle:
     # state is: received, exist, in queue, shutdown
     def QueueRequestFile(self, callOnReceived, creatorID, packetID, ownerID, remoteID):
         # make sure that we don't actually already have the file
-        # if packetID != settings.BackupInfoFileName():
         remoteID = id_url.field(remoteID)
         ownerID = id_url.field(ownerID)
         creatorID = id_url.field(creatorID)
-        if packetID not in [
-                settings.BackupInfoFileName(),
-                settings.BackupInfoFileNameOld(),
-                settings.BackupInfoEncryptedFileName(), ]:
+        if packetID != settings.BackupIndexFileName():
             customer, pathID = packetid.SplitPacketID(packetID)
             filename = os.path.join(settings.getLocalBackupsDir(), customer, pathID)
             if os.path.exists(filename):

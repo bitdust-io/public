@@ -85,8 +85,6 @@ import raid.eccmap
 #------------------------------------------------------------------------------
 
 def ReadBinaryFile(filename):
-    """
-    """
     if not os.path.isfile(filename):
         return ''
     if not os.access(filename, os.R_OK):
@@ -216,7 +214,9 @@ def raidread(
             )
             if os.path.exists(FileName):
                 GoodDSegs += 1
-                moredata = open(FileName, "rb").read()
+                fin = open(FileName, "rb")
+                moredata = fin.read()
+                fin.close()
                 output.write(moredata)
         output.close()
 

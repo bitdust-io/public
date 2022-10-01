@@ -915,8 +915,6 @@ def set_valid_data(key, json_data, age=0, expire=KEY_EXPIRE_MAX_SECONDS, rules={
 #------------------------------------------------------------------------------
 
 def write_verify_republish_data(key, json_data, age=0, expire=KEY_EXPIRE_MAX_SECONDS, rules={}, layer_id=0):
-    """
-    """
     try:
         raw_value = jsn.dumps(json_data, indent=0, sort_keys=True, separators=(',', ':'))
     except:
@@ -1592,6 +1590,6 @@ if __name__ == '__main__':
     bpio.init()
     settings.init()
     lg.set_debug_level(20)
-    dht_service._Debug = False
+    # dht_service._Debug = False
     dht_service.main()
     settings.shutdown()
