@@ -93,6 +93,7 @@ from main import events
 from main import config
 
 from crypt import my_keys
+from crypt import signed
 
 from dht import dht_relations
 
@@ -129,8 +130,6 @@ _ActiveGroupMembersByIDURL = {}
 #------------------------------------------------------------------------------
 
 def register_group_member(A):
-    """
-    """
     global _ActiveGroupMembers
     global _ActiveGroupMembersByIDURL
     if _Debug:
@@ -146,8 +145,6 @@ def register_group_member(A):
 
 
 def unregister_group_member(A):
-    """
-    """
     global _ActiveGroupMembers
     global _ActiveGroupMembersByIDURL
     if _Debug:
@@ -166,15 +163,11 @@ def unregister_group_member(A):
 #------------------------------------------------------------------------------
 
 def list_active_group_members():
-    """
-    """
     global _ActiveGroupMembers
     return list(_ActiveGroupMembers.keys())
 
 
 def get_active_group_member(group_key_id):
-    """
-    """
     global _ActiveGroupMembers
     if group_key_id not in _ActiveGroupMembers:
         return None
@@ -182,8 +175,6 @@ def get_active_group_member(group_key_id):
 
 
 def find_active_group_members(group_creator_idurl):
-    """
-    """
     global _ActiveGroupMembersByIDURL
     result = []
     for automat_index in _ActiveGroupMembersByIDURL.values():
@@ -364,7 +355,7 @@ class GroupMember(automat.Automat):
         self.recorded_messages = []
         self.group_brokers_updated = False
         super(GroupMember, self).__init__(
-            name="group_member_%s$%s" % (self.group_queue_alias[:10], self.group_creator_id, ),
+            name="group_member_%s$%s" % (self.group_queue_alias, self.group_creator_id, ),
             state="AT_STARTUP",
             debug_level=debug_level,
             log_events=log_events,
@@ -394,7 +385,7 @@ class GroupMember(automat.Automat):
             'member_id': self.member_id,
             'group_key_id': self.group_key_id,
             'alias': self.group_glob_id['key_alias'],
-            'label': my_keys.get_label(self.group_key_id),
+            'label': my_keys.get_label(self.group_key_id) or '',
             'creator': self.group_creator_id,
             'active_broker_id': self.active_broker_id,
             'active_queue_id': self.active_queue_id,
@@ -1447,6 +1438,8 @@ class GroupMember(automat.Automat):
                     resp_payload = strng.to_text(err.value.args[0])
                 elif isinstance(err.value.args[0], packet_out.PacketOut):
                     resp_payload = strng.to_text(err.value.args[0].outpacket.Payload)
+                elif isinstance(err.value.args[0], signed.Packet):
+                    resp_payload = strng.to_text(err.value.args[0].Payload)
                 else:
                     resp_payload = strng.to_text(err.value.args[0][0].Payload)
                 if _Debug:
