@@ -2,7 +2,7 @@
 
 [bitdust.io](https://bitdust.io)
 
-[![Build Status](https://travis-ci.com/bitdust-io/devel.svg?branch=master)](https://travis-ci.com/bitdust-io/devel)
+[![Regression Test](https://github.com/bitdust-io/devel/actions/workflows/pull_request.yml/badge.svg)](https://github.com/bitdust-io/devel/actions/workflows/pull_request.yml)
 
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
