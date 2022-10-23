@@ -1,18 +1,17 @@
 from unittest import TestCase
 import os
 
-from logs import lg
+from bitdust.logs import lg
 
-from system import bpio
+from bitdust.system import bpio
 
-from main import settings
+from bitdust.main import settings
 
-from crypt import key
+from bitdust.crypt import key
 
-from storage import backup_fs
+from bitdust.storage import backup_fs
 
-from userid import my_id
-
+from bitdust.userid import my_id
 
 _some_priv_key = """-----BEGIN RSA PRIVATE KEY-----
 MIIEowIBAAKCAQEA/ZsJKyCakqA8vO2r0CTOG0qE2l+4y1dIqh7VC0oaVkXy0Cim
@@ -75,13 +74,13 @@ class Test(TestCase):
             os.makedirs('/tmp/.bitdust_tmp/metadata/')
         except:
             pass
-        fout = open('/tmp/_some_priv_key', 'w')
+        fout = open(settings.KeyFileName(), 'w')
         fout.write(_some_priv_key)
         fout.close()
         fout = open(settings.LocalIdentityFilename(), 'w')
         fout.write(_some_identity_xml)
         fout.close()
-        self.assertTrue(key.LoadMyKey(keyfilename='/tmp/_some_priv_key'))
+        self.assertTrue(key.LoadMyKey())
         self.assertTrue(my_id.loadLocalIdentity())
         backup_fs.init()
 
@@ -90,7 +89,6 @@ class Test(TestCase):
         key.ForgetMyKey()
         my_id.forgetLocalIdentity()
         settings.shutdown()
-        os.remove('/tmp/_some_priv_key')
         bpio.rmdir_recursive('/tmp/.bitdust_tmp')
 
     def test_file_create(self):
@@ -114,7 +112,9 @@ class Test(TestCase):
         self.assertEqual(newPathID, itemInfo.path_id)
         self.assertEqual(itemInfo.name(), 'cat.jpeg')
         self.assertEqual(itemInfo.key_alias(), 'master')
-        self.assertEqual(backup_fs.fs(customer_idurl, key_alias), {'cat.jpeg': int(newPathID), })
+        self.assertEqual(backup_fs.fs(customer_idurl, key_alias), {
+            'cat.jpeg': int(newPathID),
+        })
         self.assertEqual(backup_fs.fsID(customer_idurl, key_alias)[int(newPathID)].name(), 'cat.jpeg')
 
     def test_file_create_with_key_alias(self):

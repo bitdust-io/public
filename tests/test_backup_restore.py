@@ -4,30 +4,29 @@ from twisted.trial.unittest import TestCase
 from twisted.internet import reactor  # @UnresolvedImport
 from twisted.internet.defer import Deferred
 from twisted.internet.base import DelayedCall
+
 DelayedCall.debug = True
 
+from bitdust.logs import lg
 
-from logs import lg
+from bitdust.automats import automat
 
-from automats import automat
+from bitdust.main import settings
 
-from main import settings
+from bitdust.system import bpio
+from bitdust.system import local_fs
+from bitdust.system import tmpfile
 
-from system import bpio
-from system import local_fs
-from system import tmpfile
+from bitdust.crypt import key
 
-from crypt import key
+from bitdust.raid import eccmap
+from bitdust.raid import raid_worker
 
-from raid import eccmap
-from raid import raid_worker
+from bitdust.storage import backup_tar
+from bitdust.storage import backup
+from bitdust.storage import restore_worker
 
-from storage import backup_tar
-from storage import backup
-from storage import restore_worker
-
-from userid import my_id
-
+from bitdust.userid import my_id
 
 _some_priv_key = """-----BEGIN RSA PRIVATE KEY-----
 MIIEowIBAAKCAQEA/ZsJKyCakqA8vO2r0CTOG0qE2l+4y1dIqh7VC0oaVkXy0Cim
@@ -91,13 +90,13 @@ class Test(TestCase):
             pass
         automat.OpenLogFile('/tmp/.bitdust_tmp/logs/automats.log')
         self.my_current_key = None
-        fout = open('/tmp/_some_priv_key', 'w')
+        fout = open(settings.KeyFileName(), 'w')
         fout.write(_some_priv_key)
         fout.close()
         fout = open(settings.LocalIdentityFilename(), 'w')
         fout.write(_some_identity_xml)
         fout.close()
-        self.assertTrue(key.LoadMyKey(keyfilename='/tmp/_some_priv_key'))
+        self.assertTrue(key.LoadMyKey())
         self.assertTrue(my_id.loadLocalIdentity())
         my_id.init()
         try:
@@ -119,7 +118,6 @@ class Test(TestCase):
         key.ForgetMyKey()
         my_id.forgetLocalIdentity()
         settings.shutdown()
-        os.remove('/tmp/_some_priv_key')
         bpio.rmdir_recursive('/tmp/.bitdust_tmp')
         bpio.rmdir_recursive('/tmp/_some_folder')
         os.remove('/tmp/random_file')
@@ -168,7 +166,7 @@ class Test(TestCase):
 
         reactor.callWhenRunning(raid_worker.A, 'init')  # @UndefinedVariable
 
-        job = backup.backup(backupID, backupPipe, blockSize=1024*1024, ecc_map=eccmap.eccmap(test_ecc_map))
+        job = backup.backup(backupID, backupPipe, blockSize=1024 * 1024, ecc_map=eccmap.eccmap(test_ecc_map))
         job.finishCallback = _bk_done
         job.addStateChangedCallback(lambda *a, **k: _bk_closed(job), oldstate=None, newstate='DONE')
         reactor.callLater(0.5, job.automat, 'start')  # @UndefinedVariable
