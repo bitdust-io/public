@@ -2,20 +2,19 @@ import os
 
 from unittest import TestCase
 
-from logs import lg
+from bitdust.logs import lg
 
-from system import bpio
+from bitdust.system import bpio
 
-from main import settings
+from bitdust.main import settings
 
-from crypt import key
-from crypt import signed
+from bitdust.crypt import key
+from bitdust.crypt import signed
 
-from contacts import identitycache
+from bitdust.contacts import identitycache
 
-from userid import identity
-from userid import my_id
-
+from bitdust.userid import identity
+from bitdust.userid import my_id
 
 _some_priv_key = """-----BEGIN RSA PRIVATE KEY-----
 MIIEowIBAAKCAQEA/ZsJKyCakqA8vO2r0CTOG0qE2l+4y1dIqh7VC0oaVkXy0Cim
@@ -62,7 +61,6 @@ _some_identity_xml = """<?xml version="1.0" encoding="utf-8"?>
   <publickey>ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD9mwkrIJqSoDy87avQJM4bSoTaX7jLV0iqHtULShpWRfLQKKazc34023q8nrXsfkV4wAtqxF/j7mceSV5MH4EpMoHG3h8ub0zPeaTDxT6my0l9jNIWOMbdmOzpcLgfIyM4JORgJ29BBN6oH0AsAnXRilXCUmVc5oWixzC/cuRQPhcHZDiuHqKph1Cjs1ra9jRoDD63/BOctPOv+vFC6FueDuS0+/xlTHr14fMbTuAtGmrNgfvOS+6KO16zE8gUUtpKWBA9zesgurAs//Ajp8OO09aWcbVwkn17s8GrUuRDwUmgLFpLH3/OtlxW4oWcI8atzWGOoIhT0eHfBM/FX88h</publickey>
   <signature>906441963064925827454594808955119786427327091644004203121255573673324339896720684156436969809331302081059171001468697744607176215971850395448358447221987030255681283469602485017439100048818715591137645334649289784704347547476744833593959051239987455656492991690929110057776187651745011046495572223232179906271885029639566994962961751420295596050170876718201976232073313442092469148257068924122205928495395843354406033087633663157320015417942886925426409641297819144861516715728591303834175552581452070473350075769438068777969720417764064190628218036180170101856467748070658740635441921977032005183554438715223073852</signature>
 </identity>"""
-
 
 _another_priv_key = """-----BEGIN RSA PRIVATE KEY-----
 MIIEowIBAAKCAQEA0K7W6mtHwNYTshIq9yfCR2Gi0U4rFPiAornvgltAUC+r68Ld
@@ -111,7 +109,6 @@ _another_identity_xml = """<?xml version="1.0" encoding="utf-8"?>
 </identity>"""
 
 
-
 class Test(TestCase):
 
     def setUp(self):
@@ -130,13 +127,13 @@ class Test(TestCase):
             os.makedirs('/tmp/.bitdust_tmp/identitycache/')
         except:
             pass
-        fout = open('/tmp/_some_priv_key', 'w')
+        fout = open(settings.KeyFileName(), 'w')
         fout.write(_some_priv_key)
         fout.close()
         fout = open(settings.LocalIdentityFilename(), 'w')
         fout.write(_some_identity_xml)
         fout.close()
-        self.assertTrue(key.LoadMyKey(keyfilename='/tmp/_some_priv_key'))
+        self.assertTrue(key.LoadMyKey())
         self.assertTrue(my_id.loadLocalIdentity())
         self.bob_ident = identity.identity(xmlsrc=_another_identity_xml)
         identitycache.UpdateAfterChecking(idurl=self.bob_ident.getIDURL(), xml_src=_another_identity_xml)
@@ -145,7 +142,6 @@ class Test(TestCase):
         key.ForgetMyKey()
         my_id.forgetLocalIdentity()
         settings.shutdown()
-        os.remove('/tmp/_some_priv_key')
         bpio.rmdir_recursive('/tmp/.bitdust_tmp')
 
     def test_signed_packet(self):

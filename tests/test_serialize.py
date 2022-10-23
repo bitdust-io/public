@@ -1,21 +1,20 @@
 from unittest import TestCase
 import os
 
-from system import bpio
+from bitdust.system import bpio
 
-from logs import lg
+from bitdust.logs import lg
 
-from main import settings
+from bitdust.main import settings
 
-from lib import jsn
-from lib import serialization
+from bitdust.lib import jsn
+from bitdust.lib import serialization
 
-from crypt import key
-from crypt import signed
-from crypt import encrypted
+from bitdust.crypt import key
+from bitdust.crypt import signed
+from bitdust.crypt import encrypted
 
-from userid import my_id
-
+from bitdust.userid import my_id
 
 _some_priv_key = """-----BEGIN RSA PRIVATE KEY-----
 MIIEowIBAAKCAQEA/ZsJKyCakqA8vO2r0CTOG0qE2l+4y1dIqh7VC0oaVkXy0Cim
@@ -82,25 +81,28 @@ class Test(TestCase):
             os.makedirs('/tmp/.bitdust_tmp/logs/')
         except:
             pass
-        fout = open('/tmp/_some_priv_key', 'w')
+        fout = open(settings.KeyFileName(), 'w')
         fout.write(_some_priv_key)
         fout.close()
         fout = open(settings.LocalIdentityFilename(), 'w')
         fout.write(_some_identity_xml)
         fout.close()
-        self.assertTrue(key.LoadMyKey(keyfilename='/tmp/_some_priv_key'))
+        self.assertTrue(key.LoadMyKey())
         self.assertTrue(my_id.loadLocalIdentity())
 
     def tearDown(self):
         key.ForgetMyKey()
         my_id.forgetLocalIdentity()
         settings.shutdown()
-        os.remove('/tmp/_some_priv_key')
         bpio.rmdir_recursive('/tmp/.bitdust_tmp')
 
     def test_jsn(self):
         data1 = os.urandom(1024)
-        dct1 = {'d': {'data': data1, }, }
+        dct1 = {
+            'd': {
+                'data': data1,
+            },
+        }
         raw = jsn.dumps(dct1, encoding='latin1')
         dct2 = jsn.loads(raw, encoding='latin1')
         data2 = dct2['d']['data']
@@ -108,7 +110,11 @@ class Test(TestCase):
 
     def test_serialization(self):
         data1 = os.urandom(1024)
-        dct1 = {'d': {'data': data1, }, }
+        dct1 = {
+            'd': {
+                'data': data1,
+            },
+        }
         raw = serialization.DictToBytes(dct1, encoding='latin1')
         dct2 = serialization.BytesToDict(raw, encoding='latin1')
         data2 = dct2['d']['data']
