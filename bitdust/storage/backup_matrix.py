@@ -63,12 +63,6 @@ _DebugLevel = 10
 #------------------------------------------------------------------------------
 
 import os
-import sys
-
-try:
-    from twisted.internet import reactor  # @UnresolvedImport
-except:
-    sys.exit('Error initializing twisted.internet.reactor in backup_matrix.py')
 
 #------------------------------------------------------------------------------
 
@@ -106,8 +100,6 @@ _BackupStatusNotifyCallback = None
 _StatusCallBackForGuiBackup = None
 _LocalFilesNotifyCallback = None
 _UpdatedBackupIDs = set()
-_RepaintingTask = None
-_RepaintingTaskDelay = 2.0
 _ListFilesQueryCallbacks = {}
 
 #------------------------------------------------------------------------------
@@ -123,7 +115,6 @@ def init():
     """
     if _Debug:
         lg.out(_DebugLevel, 'backup_matrix.init')
-    # RepaintingProcess(True)
     ReadLocalFiles()
     ReadLatestRawListFiles()
 
@@ -134,7 +125,6 @@ def shutdown():
     """
     if _Debug:
         lg.out(_DebugLevel, 'backup_matrix.shutdown')
-    # RepaintingProcess(False)
 
 
 #------------------------------------------------------------------------------
@@ -216,9 +206,7 @@ def GetActiveArray(customer_idurl=None):
     the current state of supplier.
     """
     from bitdust.p2p import online_status
-    activeArray = [
-        0,
-    ]*contactsdb.num_suppliers(customer_idurl=customer_idurl)
+    activeArray = [0]*contactsdb.num_suppliers(customer_idurl=customer_idurl)
     for i in range(contactsdb.num_suppliers(customer_idurl=customer_idurl)):
         suplier_idurl = contactsdb.supplier(i, customer_idurl=customer_idurl)
         if not suplier_idurl:
@@ -303,7 +291,46 @@ def process_line_key(line):
     return line.strip()
 
 
-def process_line_file(line, current_key_alias=None, customer_idurl=None, is_in_sync=None, auto_create=False):
+def process_line_dir(line, current_key_alias=None, customer_idurl=None, is_in_sync=None, ignored_path_ids=[], auto_create=False):
+    paths2remove = set()
+    modified = False
+    try:
+        pth = line.split(' ')[0]
+    except:
+        pth = line
+    path_id = pth.strip('/')
+    if auto_create and is_in_sync:
+        if path_id != settings.BackupIndexFileName() and path_id not in ignored_path_ids:
+            if not backup_fs.ExistsID(pth, iterID=backup_fs.fsID(customer_idurl, current_key_alias)):
+                if _Debug:
+                    lg.out(_DebugLevel, '        AUTO CREATE DIR "%s" in the index' % pth)
+                item = backup_fs.FSItemInfo(
+                    name=path_id,
+                    path_id=path_id,
+                    typ=backup_fs.DIR,
+                    key_id=global_id.MakeGlobalID(idurl=customer_idurl, key_alias=current_key_alias) if current_key_alias else None,
+                )
+                success, _modified = backup_fs.SetDir(item, customer_idurl=customer_idurl)
+                if _modified:
+                    modified = True
+    if not backup_fs.ExistsID(pth, iterID=backup_fs.fsID(customer_idurl, current_key_alias)):
+        if is_in_sync:
+            # if customer_idurl == my_id.getIDURL():
+            paths2remove.add(packetid.MakeBackupID(
+                customer=global_id.UrlToGlobalID(customer_idurl),
+                path_id=pth,
+                key_alias=current_key_alias,
+                version=None,
+            ))
+            if _Debug:
+                lg.out(_DebugLevel, '        DIR "%s" to be removed, not found in the index' % pth)
+        # else:
+        #     if _Debug:
+        #         lg.out(_DebugLevel, '        DIR "%s" skip removing, index not in sync' % pth)
+    return modified, paths2remove
+
+
+def process_line_file(line, current_key_alias=None, customer_idurl=None, is_in_sync=None, ignored_path_ids=[], auto_create=False):
     """
     if we don't have this path in the index at the moment we have several possible scenarios:
        1. this is old file and we need to remove it and all its backups
@@ -331,84 +358,43 @@ def process_line_file(line, current_key_alias=None, customer_idurl=None, is_in_s
     except:
         pth = line
         filesz = -1
-    if auto_create:
-        if not backup_fs.IsFileID(pth, iterID=backup_fs.fsID(customer_idurl, current_key_alias)):
-            if _Debug:
-                lg.out(_DebugLevel, '        AUTO CREATE FILE "%s" in the index' % pth)
-            if pth.strip('/') not in [
-                settings.BackupIndexFileName(),
-            ]:
+    path_id = pth.strip('/')
+    if auto_create and is_in_sync:
+        if path_id != settings.BackupIndexFileName() and path_id not in ignored_path_ids:
+            if not backup_fs.IsFileID(pth, iterID=backup_fs.fsID(customer_idurl, current_key_alias)):
+                if _Debug:
+                    lg.out(_DebugLevel, '        AUTO CREATE FILE "%s" in the index' % pth)
                 item = backup_fs.FSItemInfo(
-                    name=pth.strip('/'),
-                    path_id=pth.strip('/'),
+                    name=path_id,
+                    path_id=path_id,
                     typ=backup_fs.FILE,
                     key_id=global_id.MakeGlobalID(idurl=customer_idurl, key_alias=current_key_alias) if current_key_alias else None,
                 )
                 item.size = filesz
-                backup_fs.SetFile(item, customer_idurl=customer_idurl)
-                modified = True
+                success, _modified = backup_fs.SetFile(item, customer_idurl=customer_idurl)
+                if _modified:
+                    modified = True
     if not backup_fs.IsFileID(pth, iterID=backup_fs.fsID(customer_idurl, current_key_alias)):
         # remote supplier have some file - but we don't have it in the index
-        if pth.strip('/') in [
-            settings.BackupIndexFileName(),
-        ]:
+        if path_id == settings.BackupIndexFileName():
             # this is the index file saved on remote supplier
             # must remember its size and put it in the backup_fs
             item = backup_fs.FSItemInfo(
-                name=pth.strip('/'),
-                path_id=pth.strip('/'),
+                name=path_id,
+                path_id=path_id,
                 typ=backup_fs.FILE,
                 key_id=global_id.MakeGlobalID(idurl=customer_idurl, key_alias=current_key_alias),
             )
             item.size = filesz
-            backup_fs.SetFile(item, customer_idurl=customer_idurl)
-            modified = True
+            success, _modified = backup_fs.SetFile(item, customer_idurl=customer_idurl)
+            if _modified:
+                modified = True
         else:
             if is_in_sync:
                 # so we have some modifications in the index - it is not empty!
                 # index_synchronizer() did the job - so we have up to date index on hands
-                if customer_idurl == my_id.getIDURL():
-                    # now we are sure that this file is old and must be removed from remote supplier
-                    paths2remove.add(packetid.MakeBackupID(
-                        customer=global_id.UrlToGlobalID(customer_idurl),
-                        path_id=pth,
-                        key_alias=current_key_alias,
-                        version=None,
-                    ))
-                    if _Debug:
-                        lg.out(_DebugLevel, '        FILE "%s" to be removed, not found in the index' % pth)
-            else:
-                if _Debug:
-                    lg.out(_DebugLevel, '        FILE "%s" skip removing, index not in sync yet' % pth)
-                # what to do now? let's hope we still can restore our index and this file is our remote data
-    return modified, paths2remove
-
-
-def process_line_dir(line, current_key_alias=None, customer_idurl=None, is_in_sync=None, auto_create=False):
-    paths2remove = set()
-    modified = False
-    try:
-        pth = line.split(' ')[0]
-    except:
-        pth = line
-    if auto_create:
-        if not backup_fs.ExistsID(pth, iterID=backup_fs.fsID(customer_idurl, current_key_alias)):
-            if _Debug:
-                lg.out(_DebugLevel, '        AUTO CREATE DIR "%s" in the index' % pth)
-            if pth.strip('/') not in [
-                settings.BackupIndexFileName(),
-            ]:
-                item = backup_fs.FSItemInfo(
-                    name=pth.strip('/'),
-                    path_id=pth.strip('/'),
-                    typ=backup_fs.DIR,
-                    key_id=global_id.MakeGlobalID(idurl=customer_idurl, key_alias=current_key_alias) if current_key_alias else None,
-                )
-                backup_fs.SetDir(item, customer_idurl=customer_idurl)
-                modified = True
-    if not backup_fs.ExistsID(pth, iterID=backup_fs.fsID(customer_idurl, current_key_alias)):
-        if is_in_sync:
-            if customer_idurl == my_id.getIDURL():
+                # if customer_idurl == my_id.getIDURL():
+                # now we are sure that this file is old and must be removed from remote supplier
                 paths2remove.add(packetid.MakeBackupID(
                     customer=global_id.UrlToGlobalID(customer_idurl),
                     path_id=pth,
@@ -416,19 +402,21 @@ def process_line_dir(line, current_key_alias=None, customer_idurl=None, is_in_sy
                     version=None,
                 ))
                 if _Debug:
-                    lg.out(_DebugLevel, '        DIR "%s" to be removed, not found in the index' % pth)
-        else:
-            if _Debug:
-                lg.out(_DebugLevel, '        DIR "%s" skip removing, index not in sync' % pth)
+                    lg.out(_DebugLevel, '        FILE "%s" to be removed, not found in the index' % pth)
+            else:
+                if _Debug:
+                    lg.out(_DebugLevel, '        FILE "%s" skip removing, index not in sync yet' % pth)
+                # what to do now? let's hope we still can restore our index and this file is our remote data
     return modified, paths2remove
 
 
-def process_line_version(line, supplier_num, current_key_alias=None, customer_idurl=None, is_in_sync=None, auto_create=False):
+def process_line_version(line, supplier_num, current_key_alias=None, customer_idurl=None, is_in_sync=None, ignored_path_ids=[], auto_create=False):
     backups2remove = set()
     paths2remove = set()
     found_backups = set()
     newfiles = 0
     modified = False
+    file_auto_created = False
     # minimum is 4 words: "0/0/F20090709034221PM", "3", "0-1000" "123456"
     words = line.split(' ')
     if len(words) < 4:
@@ -453,6 +441,18 @@ def process_line_version(line, supplier_num, current_key_alias=None, customer_id
     except:
         lg.err('incorrect line (digits format): [%s]' % line)
         return modified, backups2remove, paths2remove, found_backups, newfiles
+    if remotePath in ignored_path_ids:
+        # this mean supplier have old files and we do not need those files
+        backups2remove.add(backupID)
+        paths2remove.add(packetid.MakeBackupID(
+            customer=global_id.UrlToGlobalID(customer_idurl),
+            path_id=remotePath,
+            key_alias=current_key_alias,
+            version=None,
+        ))
+        if _Debug:
+            lg.out(_DebugLevel, '        VERSION "%s" to be removed, ignoring path %s because it was deleted' % (backupID, remotePath))
+        return modified, backups2remove, paths2remove, found_backups, newfiles
     if lineSupplierNum != supplier_num:
         # this mean supplier have old files and we do not need those files
         backups2remove.add(backupID)
@@ -471,31 +471,34 @@ def process_line_version(line, supplier_num, current_key_alias=None, customer_id
     if item is None:
         # this path is not found in the index at all
         if is_in_sync:
-            if customer_idurl == my_id.getIDURL():
-                found_backups.add(backupID)
-                backups2remove.add(backupID)
-                paths2remove.add(packetid.MakeBackupID(
-                    customer=global_id.UrlToGlobalID(customer_idurl),
-                    path_id=remotePath,
-                    key_alias=current_key_alias,
-                    version=None,
-                ))
-                if _Debug:
-                    lg.out(_DebugLevel, '        VERSION "%s" to be remove, path not found in the index' % backupID)
-            else:
-                if _Debug:
-                    lg.out(_DebugLevel, '        found unknown stored data from another customer: %r' % backupID)
+            # if customer_idurl == my_id.getIDURL():
+            found_backups.add(backupID)
+            backups2remove.add(backupID)
+            paths2remove.add(packetid.MakeBackupID(
+                customer=global_id.UrlToGlobalID(customer_idurl),
+                path_id=remotePath,
+                key_alias=current_key_alias,
+                version=None,
+            ))
+            if _Debug:
+                lg.out(_DebugLevel, '        VERSION "%s" to be remove, path not found in the index' % backupID)
+
+
+#             else:
+#                 if _Debug:
+#                     lg.out(_DebugLevel, '        found unknown stored data from another customer: %r' % backupID)
         else:
             if _Debug:
                 lg.out(_DebugLevel, '        VERSION "%s" skip removing, index not in sync' % backupID)
         return modified, backups2remove, paths2remove, found_backups, newfiles
-    if auto_create:
+    if auto_create and is_in_sync:
         if not item.has_version(versionName):
             if not current_key_alias or not customer_idurl:
                 if _Debug:
                     lg.out(_DebugLevel, '        AUTO CREATE VERSION (skip key verification) "%s" at "%s" in the index' % (versionName, remotePath))
                 item.add_version(versionName)
                 modified = True
+                file_auto_created = True
             else:
                 authorized_key_id = my_keys.make_key_id(
                     alias=current_key_alias,
@@ -506,17 +509,18 @@ def process_line_version(line, supplier_num, current_key_alias=None, customer_id
                         lg.out(_DebugLevel, '        AUTO CREATE VERSION "%s" at "%s" in the index' % (versionName, remotePath))
                     item.add_version(versionName)
                     modified = True
+                    file_auto_created = True
                 else:
                     lg.warn('skip auto create version %r for path %r because key %r not registered' % (versionName, remotePath, authorized_key_id))
     if not item.has_version(versionName):
         if is_in_sync:
-            if customer_idurl == my_id.getIDURL():
-                backups2remove.add(backupID)
-                if _Debug:
-                    lg.out(_DebugLevel, '        VERSION "%s" to be removed, version is not found in the index' % backupID)
-            else:
-                if _Debug:
-                    lg.out(_DebugLevel, '        found unknown version from another customer: %r' % backupID)
+            # if customer_idurl == my_id.getIDURL():
+            backups2remove.add(backupID)
+            if _Debug:
+                lg.out(_DebugLevel, '        VERSION "%s" to be removed, version is not found in the index' % backupID)
+            # else:
+            #     if _Debug:
+            #         lg.out(_DebugLevel, '        found unknown version from another customer: %r' % backupID)
         else:
             if _Debug:
                 lg.out(_DebugLevel, '        VERSION "%s" skip removing, index not in sync' % backupID)
@@ -546,10 +550,7 @@ def process_line_version(line, supplier_num, current_key_alias=None, customer_id
                 'D': [0]*contactsdb.num_suppliers(customer_idurl=customer_idurl),
                 'P': [0]*contactsdb.num_suppliers(customer_idurl=customer_idurl),
             }
-        for dataORparity in [
-            'Data',
-            'Parity',
-        ]:
+        for dataORparity in ['Data', 'Parity']:
             # we set -1 if the file is missing and 1 if exist, so 0 mean "no info yet" ... smart!
             bit = -1 if str(blockNum) in missingBlocksSet[dataORparity] else 1
             remote_files()[backupID][blockNum][dataORparity[0]][supplier_num] = bit
@@ -561,21 +562,43 @@ def process_line_version(line, supplier_num, current_key_alias=None, customer_id
         remote_max_block_numbers()[backupID] = maxBlockNum
     if len(missingBlocksSet['Data']) == 0 and len(missingBlocksSet['Parity']) == 0:
         found_backups.add(backupID)
-    if item_version_info[0] != maxBlockNum or item_version_info[1] != versionSize:
-        # lg.warn('updating version %s info with %s / %s from recent ListFiles()' % (
-        #     backupID, maxBlockNum, versionSize, ))
+    if item_version_info[0] != maxBlockNum or (item_version_info[1] in [None, -1, 0] and versionSize > 0):
+        if _Debug:
+            lg.out(_DebugLevel, '            updating version %s info, maxBlockNum %r->%r, size %r->%r' % (
+                backupID,
+                item_version_info[0],
+                maxBlockNum,
+                item_version_info[1],
+                versionSize,
+            ))
         item.set_version_info(versionName, maxBlockNum, versionSize)
         modified = True
-    # mark this backup to be repainted
-    # RepaintBackup(backupID)
+    if file_auto_created:
+        full_remote_path = global_id.MakeGlobalID(path=item.name(), key_id=item.key_id)
+        full_remote_path_id = global_id.MakeGlobalID(path=item.path_id, key_id=item.key_id)
+        _, percent, _, weakPercent = GetBackupRemoteStats(backupID)
+        listeners.push_snapshot(
+            'remote_version', snap_id=backupID, data=dict(
+                backup_id=backupID,
+                max_block=maxBlockNum,
+                remote_path=full_remote_path,
+                global_id=full_remote_path_id,
+                type=item.type,
+                size=item.size,
+                key_id=item.key_id,
+                delivered=misc.percent2string(percent),
+                reliable=misc.percent2string(weakPercent),
+            )
+        )
     return modified, backups2remove, paths2remove, found_backups, newfiles
 
 
-def process_raw_list_files(supplier_num, list_files_text_body, customer_idurl=None, is_in_sync=None, auto_create=False):
+def process_raw_list_files(supplier_num, list_files_text_body, customer_idurl=None, is_in_sync=None):
     """
     Read ListFiles packet for given supplier and build a "remote" matrix. All
     lines are something like that:
 
+      Q*
       Kmaster
       Findex 5456
       D0 -1
@@ -592,31 +615,27 @@ def process_raw_list_files(supplier_num, list_files_text_body, customer_idurl=No
 
     First character can be:
 
+      "Q" for selection query
       "K" for keys
-      "F" for files
       "D" for folders
+      "F" for files
       "V" for stored data
     """
     global _ListFilesQueryCallbacks
     from bitdust.storage import backup_control
     if not customer_idurl:
         customer_idurl = my_id.getIDURL()
-    if is_in_sync is None:
-        if driver.is_on('service_backup_db'):
-            from bitdust.storage import index_synchronizer
-            is_in_sync = index_synchronizer.is_synchronized() and backup_fs.revision() > 0
-        else:
-            is_in_sync = False
     if _Debug:
-        lg.out(_DebugLevel, 'backup_matrix.process_raw_list_files [%d] : %d bytes, is_in_sync=%s, rev:%d, customer_idurl=%s' % (supplier_num, len(list_files_text_body), is_in_sync, backup_fs.revision(), customer_idurl))
+        lg.out(_DebugLevel, 'backup_matrix.process_raw_list_files [%d] : %d bytes, is_in_sync=%s, rev:%d, c=%s' % (supplier_num, len(list_files_text_body), is_in_sync, backup_fs.revision(), customer_idurl))
     backups2remove = set()
     paths2remove = set()
     missed_backups = set(remote_files().keys())
-    oldfiles = ClearSupplierRemoteInfo(supplier_num, customer_idurl=customer_idurl)
+    oldfiles = 0
     newfiles = 0
     remote_files_changed = False
     current_key_alias = 'master'
     current_query = None
+    current_ignored_path_ids = set()
     query_results = set()
     updated_keys = []
     inpt = BytesIO(strng.to_bin(list_files_text_body))
@@ -632,51 +651,71 @@ def process_raw_list_files(supplier_num, list_files_text_body, customer_idurl=No
         # also don't consider the identity a backup
         if line.find('http://') != -1 or line.find('.xml') != -1:
             continue
-        if _Debug:
-            lg.out(_DebugLevel, '    %s %s' % (typ, line))
 
         if typ == 'Q':
             current_query = line.strip()
+            if _Debug:
+                lg.out(_DebugLevel, '    %s %s' % (typ, current_query))
             continue
 
         if typ == 'K':
             current_key_alias = process_line_key(line)
+            current_ignored_path_ids.clear()
+            if current_key_alias != 'master':
+                if driver.is_on('service_shared_data'):
+                    from bitdust.access import shared_access_coordinator
+                    current_ignored_path_ids.update(shared_access_coordinator.get_deleted_path_ids(customer_idurl, current_key_alias))
+            if _Debug:
+                lg.out(_DebugLevel, '    %s %s/%s' % (typ, current_query, current_key_alias))
+            oldfiles += ClearSupplierRemoteInfo(supplier_num, customer_idurl=customer_idurl, key_alias=current_key_alias)
             continue
 
         if typ == 'D':
             if current_key_alias == 'master' and not id_url.is_the_same(customer_idurl, my_id.getIDURL()):
+                if _Debug:
+                    lg.out(_DebugLevel, '    %s %s/%s/%s IGNORED' % (typ, current_query, current_key_alias, line))
                 continue
             modified, _paths2remove = process_line_dir(
                 line,
                 current_key_alias=current_key_alias,
                 customer_idurl=customer_idurl,
                 is_in_sync=is_in_sync,
+                ignored_path_ids=current_ignored_path_ids,
                 auto_create=False,
             )
             paths2remove.update(_paths2remove)
             remote_files_changed = remote_files_changed or modified
             if modified:
                 updated_keys.append(current_key_alias)
+            if _Debug:
+                lg.out(_DebugLevel, '    %s %s/%s/%s %s' % (typ, current_query, current_key_alias, line, 'MODIFIED' if modified else 'IN_SYNC'))
             continue
 
         if typ == 'F':
             if current_key_alias == 'master' and not id_url.is_the_same(customer_idurl, my_id.getIDURL()):
+                if _Debug:
+                    lg.out(_DebugLevel, '    %s %s/%s/%s IGNORED' % (typ, current_query, current_key_alias, line))
                 continue
             modified, _paths2remove = process_line_file(
                 line,
                 current_key_alias=current_key_alias,
                 customer_idurl=customer_idurl,
                 is_in_sync=is_in_sync,
-                auto_create=auto_create,
+                ignored_path_ids=current_ignored_path_ids,
+                auto_create=True,
             )
             paths2remove.update(_paths2remove)
             remote_files_changed = remote_files_changed or modified
             if modified:
                 updated_keys.append(current_key_alias)
+            if _Debug:
+                lg.out(_DebugLevel, '    %s %s/%s/%s %s' % (typ, current_query, current_key_alias, line, 'MODIFIED' if modified else 'IN_SYNC'))
             continue
 
         if typ == 'V':
             if current_key_alias == 'master' and not id_url.is_the_same(customer_idurl, my_id.getIDURL()):
+                if _Debug:
+                    lg.out(_DebugLevel, '    %s %s/%s/%s IGNORED' % (typ, current_query, current_key_alias, line))
                 continue
             modified, _backups2remove, _paths2remove, found_backups, _newfiles = process_line_version(
                 line,
@@ -684,7 +723,8 @@ def process_raw_list_files(supplier_num, list_files_text_body, customer_idurl=No
                 current_key_alias=current_key_alias,
                 customer_idurl=customer_idurl,
                 is_in_sync=is_in_sync,
-                auto_create=auto_create,
+                ignored_path_ids=current_ignored_path_ids,
+                auto_create=True,
             )
             backups2remove.update(_backups2remove)
             paths2remove.update(_paths2remove)
@@ -695,6 +735,8 @@ def process_raw_list_files(supplier_num, list_files_text_body, customer_idurl=No
                 query_results.add((customer_idurl, current_query))
             if modified:
                 updated_keys.append(current_key_alias)
+            if _Debug:
+                lg.out(_DebugLevel, '    %s %s/%s/%s %s' % (typ, current_query, current_key_alias, line, 'MODIFIED' if modified else 'IN_SYNC'))
             continue
 
         raise Exception('unexpected line received: %r' % line)
@@ -716,7 +758,7 @@ def process_raw_list_files(supplier_num, list_files_text_body, customer_idurl=No
         )
     if remote_files_changed and is_in_sync:
         for key_alias in updated_keys:
-            backup_control.Save(customer_idurl, key_alias)
+            backup_control.SaveFSIndex(customer_idurl, key_alias)
     for query_key in query_results:
         if query_key in _ListFilesQueryCallbacks:
             for cb in _ListFilesQueryCallbacks[query_key]:
@@ -762,13 +804,17 @@ def ReadLatestRawListFiles(customer_idurl=None):
             if os.path.isfile(filename):
                 listFileText = bpio.ReadTextFile(filename).strip()
                 if listFileText:
-                    process_raw_list_files(
+                    remote_files_changed, backups2remove, paths2remove, missed_backups = process_raw_list_files(
                         supplier_num=contactsdb.supplier_position(idurl),
                         list_files_text_body=listFileText,
                         customer_idurl=customer_idurl,
                         is_in_sync=False,
-                        auto_create=False,
                     )
+                    if _Debug:
+                        lg.out(
+                            _DebugLevel,
+                            '    %r loaded with %d bytes, changed:%r, backups2remove:%d, paths2remove:%d, missed_backups:%d' % (filename, len(listFileText), remote_files_changed, len(backups2remove), len(paths2remove), len(missed_backups))
+                        )
 
 
 #------------------------------------------------------------------------------
@@ -873,7 +919,6 @@ def RemoteFileReport(backupID, blockNum, supplierNum, dataORparity, result, item
     # but we uploaded N+1 block - remember that
     maxBlockNum = max(remote_max_block_numbers().get(backupID, -1), blockNum)
     remote_max_block_numbers()[backupID] = maxBlockNum
-    # RepaintBackup(backupID)
     full_remote_path = global_id.MakeGlobalID(path=itemInfo['name'], key_id=itemInfo['key_id'])
     full_remote_path_id = global_id.MakeGlobalID(path=itemInfo['path_id'], key_id=itemInfo['key_id'])
     _, percent, _, weakPercent = GetBackupRemoteStats(backupID)
@@ -950,7 +995,6 @@ def LocalFileReport(packetID=None, backupID=None, blockNum=None, supplierNum=Non
         local_backup_size()[backupID] += os.path.getsize(localDest)
     except:
         lg.exc()
-    # RepaintBackup(backupID)
 
 
 def LocalBlockReport(backupID, blockNumber, result):
@@ -1013,8 +1057,6 @@ def LocalBlockReport(backupID, blockNumber, result):
         local_max_block_numbers()[backupID] = -1
     if local_max_block_numbers()[backupID] < blockNum:
         local_max_block_numbers()[backupID] = blockNum
-    # if repaint_flag:
-    #     RepaintBackup(backupID)
 
 
 #------------------------------------------------------------------------------
@@ -1207,48 +1249,6 @@ def ScanBlocksToSend(backupID, limit_per_supplier=None):
 #------------------------------------------------------------------------------
 
 
-def RepaintBackup(backupID):
-    """
-    Mark given backup to be "repainted" in the GUI during the next "frame".
-    """
-    global _UpdatedBackupIDs
-    _UpdatedBackupIDs.add(backupID)
-
-
-def RepaintingProcess(on_off):
-    """
-    This method is called in loop to repaint the GUI.
-    """
-    global _UpdatedBackupIDs
-    global _BackupStatusNotifyCallback
-    global _RepaintingTask
-    global _RepaintingTaskDelay
-    if on_off is False:
-        _RepaintingTaskDelay = 2.0
-        if _RepaintingTask is not None:
-            if _RepaintingTask.active():
-                _RepaintingTask.cancel()
-            _RepaintingTask = None
-            _UpdatedBackupIDs.clear()
-            return
-    # TODO:
-    # Need to optimize that - do not call in loop!
-    # Just make a single call and pass _UpdatedBackupIDs as param.
-    for backupID in _UpdatedBackupIDs:
-        if _BackupStatusNotifyCallback is not None:
-            _BackupStatusNotifyCallback(backupID)
-    minDelay = 2.0
-    from bitdust.storage import backup_control
-    if backup_control.HasRunningBackup():
-        minDelay = 8.0
-    _RepaintingTaskDelay = misc.LoopAttenuation(_RepaintingTaskDelay, len(_UpdatedBackupIDs) > 0, minDelay, 8.0)
-    _UpdatedBackupIDs.clear()
-    _RepaintingTask = reactor.callLater(_RepaintingTaskDelay, RepaintingProcess, True)  # @UndefinedVariable
-
-
-#------------------------------------------------------------------------------
-
-
 def EraseBackupRemoteInfo(backupID):
     """
     Clear info only for given backup from "remote" matrix.
@@ -1291,7 +1291,7 @@ def ClearRemoteInfo():
     remote_max_block_numbers().clear()
 
 
-def ClearSupplierRemoteInfo(supplierNum, customer_idurl=None):
+def ClearSupplierRemoteInfo(supplierNum, customer_idurl=None, key_alias=None):
     """
     Clear only "single column" in the "remote" matrix corresponding to given
     supplier.
@@ -1299,9 +1299,11 @@ def ClearSupplierRemoteInfo(supplierNum, customer_idurl=None):
     if not customer_idurl:
         customer_idurl = my_id.getIDURL()
     files = 0
+    backups = 0
     for backupID in remote_files().keys():
-        _customer_idurl = packetid.CustomerIDURL(backupID)
-        if _customer_idurl == customer_idurl:
+        _key_alias, _customer_idurl = packetid.KeyAliasCustomer(backupID)
+        if _customer_idurl == customer_idurl and (key_alias is None or key_alias == 'master' or _key_alias == key_alias):
+            backups += 1
             for blockNum in remote_files()[backupID].keys():
                 try:
                     if remote_files()[backupID][blockNum]['D'][supplierNum] == 1:
@@ -1316,7 +1318,7 @@ def ClearSupplierRemoteInfo(supplierNum, customer_idurl=None):
                 except:
                     pass
     if _Debug:
-        lg.args(_DebugLevel, files_cleaned=files, supplier_pos=supplierNum, customer=customer_idurl)
+        lg.args(_DebugLevel, files_cleaned=files, backups_cleaned=backups, supplier_pos=supplierNum, c=customer_idurl, k=key_alias)
     return files
 
 
@@ -1468,7 +1470,7 @@ def GetBackupRemoteStats(backupID, only_available_files=True):
                 continue
             try:
                 remote_files()[backupID][blockNum]['D'][supplierNum]
-                remote_files()[backupID][blockNum]['D'][supplierNum]
+                remote_files()[backupID][blockNum]['P'][supplierNum]
             except:
                 goodSuppliers -= 1
                 continue

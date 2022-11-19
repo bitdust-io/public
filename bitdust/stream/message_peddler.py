@@ -395,22 +395,36 @@ def on_message_processed(processed_message):
 
 def on_consumer_notify(message_info):
     try:
-        payload = message_info['payload']
-        consumer_id = message_info['consumer_id']
         queue_id = message_info['queue_id']
+    except:
+        lg.exc('invalid incoming message: %r' % message_info)
+        return False
+    if not queue_id.startswith('group_'):
+        # ignore the message, it seems it is not a queue message but it is addressed to the same consumer
+        return False
+    try:
+        payload = message_info['payload']
+    except:
+        lg.exc('invalid incoming message: %r' % message_info)
+        return False
+    if 'sequence_id' not in payload:
+        # ignore the message, it seems it is not a queue message but it is addressed to the same consumer
+        return False
+    try:
+        consumer_id = message_info['consumer_id']
         packet_id = packetid.MakeQueueMessagePacketID(queue_id, packetid.UniqueID())
         sequence_id = payload['sequence_id']
         last_sequence_id = get_latest_sequence_id(queue_id)
         producer_id = payload['producer_id']
     except:
         lg.exc('invalid incoming message: %r' % message_info)
-        return True
+        return False
     group_key_id = global_id.GetGlobalQueueKeyID(queue_id)
     _, group_creator_idurl = my_keys.split_key_id(group_key_id)
     qk = queue_keeper.check_create(customer_idurl=group_creator_idurl, auto_create=False)
     if not qk:
         lg.exc(exc_value=Exception('not possible to notify consumer %r because queue keeper for %r is not running' % (consumer_id, group_creator_idurl)))
-        return True
+        return False
     if _Debug:
         lg.args(_DebugLevel, p=producer_id, c=consumer_id, q=queue_id, s=sequence_id, l=last_sequence_id, qk=qk, b=qk.cooperated_brokers)
     ret = message.send_message(
@@ -435,6 +449,7 @@ def on_consumer_notify(message_info):
         skip_handshake=True,
         fire_callbacks=False,
     )
+    ret.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, ignore=True, method='message_peddler.on_consumer_notify')
     if _Debug:
         lg.out(_DebugLevel, '>>> NOTIFY >>>    from %r by producer %r to consumer %r at sequence %d' % (queue_id, producer_id, consumer_id, sequence_id))
     return ret
@@ -926,7 +941,7 @@ def start_consumer(queue_id, consumer_id):
     if not p2p_queue.is_consumer_exists(consumer_id):
         p2p_queue.add_consumer(consumer_id)
     if not p2p_queue.is_callback_method_registered(consumer_id, on_consumer_notify):
-        p2p_queue.add_callback_method(consumer_id, on_consumer_notify)
+        p2p_queue.add_callback_method(consumer_id, on_consumer_notify, interested_queues_list=['group_'])
     if not p2p_queue.is_consumer_subscribed(consumer_id, queue_id):
         p2p_queue.subscribe_consumer(consumer_id, queue_id)
     streams()[queue_id]['consumers'][consumer_id]['active'] = True
@@ -1309,9 +1324,8 @@ class MessagePeddler(automat.Automat):
             group_key_info,
             result_defer,
         ))
-        if _Debug:
-            # TODO: need to cleanup registered key in case request was rejected or ID cache failed
-            dl.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='message_peddler.doStartJoinQueue')
+        # TODO: need to cleanup registered key in case request was rejected or ID cache failed
+        dl.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='message_peddler.doStartJoinQueue')
         dl.addErrback(self._on_group_creator_idurl_cache_failed, request_packet, result_defer)
 
     def doLeaveQueueStopKeeper(self, *args, **kwargs):
@@ -1523,8 +1537,7 @@ class MessagePeddler(automat.Automat):
         if not to_be_cached:
             return self._do_load_streams()
         d = identitycache.start_multiple(to_be_cached)
-        if _Debug:
-            d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='message_peddler._do_cache_known_customers')
+        d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='message_peddler._do_cache_known_customers')
         d.addBoth(self._do_load_streams)
         return d
 
@@ -1574,9 +1587,9 @@ class MessagePeddler(automat.Automat):
                 )
                 qk = queue_keeper.check_create(customer_idurl=customer_idurl, auto_create=True, event='skip-init')
                 # a small delay to avoid starting too many activities at once
-                reactor.callLater(
+                reactor.callLater(  # @UndefinedVariable
                     (self.total_keepers + 1)*1.0,
-                    qk.automat,  # @UndefinedVariable
+                    qk.automat,
                     event='restore',
                     desired_position=json_value['position'],
                     known_brokers=json_value['cooperated_brokers'],
@@ -1591,7 +1604,7 @@ class MessagePeddler(automat.Automat):
 
     def _do_send_past_messages(self, queue_id, consumer_id, list_messages):
         latest_sequence_id = get_latest_sequence_id(queue_id)
-        message.send_message(
+        d = message.send_message(
             json_data={
                 'msg_type': 'queue_message',
                 'action': 'read',
@@ -1601,11 +1614,11 @@ class MessagePeddler(automat.Automat):
             },
             recipient_global_id=my_keys.make_key_id(alias='master', creator_glob_id=consumer_id),
             packet_id=packetid.MakeQueueMessagePacketID(queue_id, packetid.UniqueID()),
-            message_ack_timeout=None,
-            ping_timeout=self.send_message_ack_timeout,
+            message_ack_timeout=self.send_message_ack_timeout,
             skip_handshake=True,
             fire_callbacks=False,
         )
+        d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, ignore=True, method='message_peddler._do_send_past_messages')
         if _Debug:
             lg.out(_DebugLevel, '>>> PAST MSG >>>    from %r to consumer %r with %d messages at sequence %d' % (queue_id, consumer_id, len(list_messages), latest_sequence_id))
 
@@ -1643,8 +1656,7 @@ class MessagePeddler(automat.Automat):
         if _Debug:
             lg.args(_DebugLevel, customer=customer_idurl, queue_id=queue_id, consumer_id=consumer_id, producer_id=producer_id, position=position, archive_folder_path=archive_folder_path, known_brokers=known_brokers)
         queue_keeper_result = Deferred()
-        if _Debug:
-            queue_keeper_result.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='message_peddler._do_check_create_queue_keeper')
+        queue_keeper_result.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='message_peddler._do_check_create_queue_keeper')
         queue_keeper_result.addCallback(
             self._on_queue_keeper_connect_result,
             consumer_id=consumer_id,
@@ -1703,9 +1715,8 @@ class MessagePeddler(automat.Automat):
                 fire_callbacks=False,
             )
             d.addCallback(self._on_replicate_message_success, message_in, other_broker_pos)
-            if _Debug:
-                d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='message_peddler._do_replicate_message')
             d.addErrback(self._on_replicate_message_failed, message_in, other_broker_pos)
+            d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, ignore=True, method='message_peddler._do_replicate_message')
             replicate_attempts += 1
         if replicate_attempts == 0:
             lg.err('message was not replicated: %r' % message_in)
@@ -2045,3 +2056,4 @@ class MessagePeddler(automat.Automat):
     def _on_replicate_message_failed(self, result, message_in, other_broker_pos):
         if _Debug:
             lg.args(_DebugLevel, result=result, message_in=message_in, other_broker_pos=other_broker_pos)
+        return None

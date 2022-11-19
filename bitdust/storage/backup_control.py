@@ -48,6 +48,7 @@ _DebugLevel = 12
 import os
 import sys
 import time
+import zlib
 import pprint
 
 #------------------------------------------------------------------------------
@@ -152,10 +153,12 @@ def shutdown():
 #------------------------------------------------------------------------------
 
 
-def Save(customer_idurl=None, key_alias='master', increase_revision=True):
+def SaveFSIndex(customer_idurl=None, key_alias='master', increase_revision=True):
     """
-    Save index data base to local file and notify "index_synchronizer()" state machine.
+    Save index data base to local file and notify "index_synchronizer()" or "shared_access_coordinator()" state machines.
     """
+    if _Debug:
+        lg.args(_DebugLevel, c=customer_idurl, k=key_alias, increase_revision=increase_revision)
     global _LoadingFlag
     if _LoadingFlag:
         return False
@@ -168,10 +171,15 @@ def Save(customer_idurl=None, key_alias='master', increase_revision=True):
             key_alias=key_alias,
         )
     backup_fs.SaveIndex(customer_idurl, key_alias)
-    if driver.is_on('service_backup_db'):
-        # TODO: switch to event
-        from bitdust.storage import index_synchronizer
-        index_synchronizer.A('push')
+    if increase_revision:
+        if key_alias == 'master':
+            if driver.is_on('service_backup_db'):
+                from bitdust.storage import index_synchronizer
+                index_synchronizer.A('push')
+        else:
+            if driver.is_on('service_shared_data'):
+                from bitdust.access import shared_access_coordinator
+                shared_access_coordinator.on_index_file_updated(customer_idurl, key_alias)
 
 
 #------------------------------------------------------------------------------
@@ -198,7 +206,7 @@ def on_files_received(newpacket, info):
             lg.dbg(_DebugLevel, 'incoming %r received, but %r is not my supplier' % (newpacket, newpacket.OwnerID))
         return False
     if _Debug:
-        lg.args(_DebugLevel, 'service_backups._on_inbox_packet_received: %r for us from %s at %s' % (newpacket, newpacket.CreatorID, info))
+        lg.dbg(_DebugLevel, '%r for us from %s' % (newpacket, newpacket.CreatorID))
     if IncomingSupplierListFiles(newpacket, list_files_global_id):
         p2p_service.SendAck(newpacket)
     else:
@@ -209,6 +217,14 @@ def on_files_received(newpacket, info):
 #------------------------------------------------------------------------------
 
 
+def UnpackListFiles(payload, method):
+    if method == 'Text':
+        return payload
+    elif method == 'Compressed':
+        return strng.to_text(zlib.decompress(strng.to_bin(payload)))
+    return payload
+
+
 def IncomingSupplierListFiles(newpacket, list_files_global_id):
     """
     Called when command "Files" were received from one of my suppliers.
@@ -216,13 +232,11 @@ def IncomingSupplierListFiles(newpacket, list_files_global_id):
     list of our files stored on his machine.
     """
     supplier_idurl = newpacket.OwnerID
-    # incoming_key_id = newpacket.PacketID.strip().split(':')[0]
     customer_idurl = list_files_global_id['idurl']
     num = contactsdb.supplier_position(supplier_idurl, customer_idurl=customer_idurl)
     if num < -1:
         lg.warn('unknown supplier: %s' % supplier_idurl)
         return False
-    from bitdust.supplier import list_files
     from bitdust.customer import list_files_orator
     target_key_id = my_keys.latest_key_id(list_files_global_id['key_id'])
     if not my_keys.is_key_private(target_key_id):
@@ -237,22 +251,20 @@ def IncomingSupplierListFiles(newpacket, list_files_global_id):
     except:
         lg.err('failed decrypting data from packet %r received from %r' % (newpacket, supplier_idurl))
         return False
-    list_files_raw = list_files.UnpackListFiles(input_data, settings.ListFilesFormat())
+    from bitdust.storage import index_synchronizer
+    is_in_sync = index_synchronizer.is_synchronized() and backup_fs.revision() > 0
+    list_files_raw = UnpackListFiles(input_data, settings.ListFilesFormat())
     remote_files_changed, backups2remove, paths2remove, missed_backups = backup_matrix.process_raw_list_files(
         supplier_num=num,
         list_files_text_body=list_files_raw,
         customer_idurl=None,
-        is_in_sync=None,
-        auto_create=False,
+        is_in_sync=is_in_sync,
     )
     list_files_orator.IncomingListFiles(newpacket)
     if remote_files_changed:
         backup_matrix.SaveLatestRawListFiles(supplier_idurl, list_files_raw)
     if _Debug:
-        lg.args(
-            _DebugLevel, supplier=nameurl.GetName(supplier_idurl), customer=nameurl.GetName(customer_idurl), backups2remove=len(backups2remove), paths2remove=len(paths2remove), files_changed=remote_files_changed,
-            missed_backups=len(missed_backups)
-        )
+        lg.args(_DebugLevel, s=nameurl.GetName(supplier_idurl), c=nameurl.GetName(customer_idurl), backups2remove=len(backups2remove), paths2remove=len(paths2remove), files_changed=remote_files_changed, missed_backups=len(missed_backups))
     if len(backups2remove) > 0:
         p2p_service.RequestDeleteListBackups(backups2remove)
         if _Debug:
@@ -273,7 +285,7 @@ def IncomingSupplierListFiles(newpacket, list_files_global_id):
     return True
 
 
-def IncomingSupplierBackupIndex(newpacket, key_id=None):
+def IncomingSupplierBackupIndex(newpacket, key_id=None, deleted_path_ids=[]):
     """
     Called by ``p2p.p2p_service`` when a remote copy of our local index data
     base ( in the "Data" packet ) is received from one of our suppliers.
@@ -307,15 +319,14 @@ def IncomingSupplierBackupIndex(newpacket, key_id=None):
     #                 newpacket.RemoteID, supplier_revision, backup_fs.revision(), ))
     #         return supplier_revision
     if _Debug:
-        lg.args(_DebugLevel, k=key_id, p=newpacket.PacketID, sz=len(text_data), inp=len(newpacket.Payload))
-    count, updated_customers_keys = backup_fs.ReadIndex(text_data, new_revision=supplier_revision)
+        lg.args(_DebugLevel, k=key_id, p=newpacket.PacketID, sz=len(text_data), inp=len(newpacket.Payload), deleted=len(deleted_path_ids))
+    count, updated_customers_keys = backup_fs.ReadIndex(text_data, new_revision=supplier_revision, deleted_path_ids=deleted_path_ids)
     if updated_customers_keys:
         # backup_fs.commit(supplier_revision)
         # backup_fs.Scan()
         # backup_fs.Calculate()
         for customer_idurl, key_alias in updated_customers_keys:
             backup_fs.SaveIndex(customer_idurl, key_alias)
-            # control.request_update()
             if _Debug:
                 lg.out(_DebugLevel, 'backup_control.IncomingSupplierBackupIndex updated to revision %d for %s of %s from %s' % (backup_fs.revision(customer_idurl, key_alias), customer_idurl, key_alias, newpacket.RemoteID))
     # else:
@@ -343,9 +354,7 @@ def DeleteAllBackups():
     # check and calculate used space
     backup_fs.Calculate()
     # save the index
-    Save()
-    # refresh the GUI
-    # control.request_update()
+    SaveFSIndex()
 
 
 def DeleteBackup(backupID, removeLocalFilesToo=True, saveDB=True, calculate=True):
@@ -364,6 +373,8 @@ def DeleteBackup(backupID, removeLocalFilesToo=True, saveDB=True, calculate=True
     10) save the modified index data base, soon it will be synchronized with "index_synchronizer()" state machine
     """
     backupID = global_id.CanonicalID(backupID)
+    key_alias, customer, _, _ = packetid.SplitBackupIDFull(backupID)
+    customer_idurl = global_id.GlobalUserToIDURL(customer)
     # if the user deletes a backup, make sure we remove any work we're doing on it
     # abort backup if it just started and is running at the moment
     if AbortRunningBackup(backupID):
@@ -378,7 +389,6 @@ def DeleteBackup(backupID, removeLocalFilesToo=True, saveDB=True, calculate=True
     io_throttle.DeleteBackupRequests(backupID)
     io_throttle.DeleteBackupSendings(backupID)
     # remove interests in transport_control
-    # callback.delete_backup_interest(backupID)
     # mark it as being deleted in the db, well... just remove it from the index now
     if not backup_fs.DeleteBackupID(backupID):
         return False
@@ -393,13 +403,12 @@ def DeleteBackup(backupID, removeLocalFilesToo=True, saveDB=True, calculate=True
     backup_rebuilder.RemoveAllBackupsToWork()
     backup_rebuilder.SetStoppedFlag()
     # check and calculate used space
-    if calculate:
-        backup_fs.Scan()
-        backup_fs.Calculate()
+    if calculate or key_alias != 'master':
+        backup_fs.Scan(customer_idurl=customer_idurl, key_alias=key_alias)
+        backup_fs.Calculate(iterID=backup_fs.fsID(customer_idurl, key_alias))
     # in some cases we want to save the DB later
-    if saveDB:
-        Save()
-        # control.request_update([('backupID', backupID), ])
+    if saveDB or key_alias != 'master':
+        SaveFSIndex(customer_idurl, key_alias)
     return True
 
 
@@ -432,7 +441,6 @@ def DeletePathBackups(pathID, removeLocalFilesToo=True, saveDB=True, calculate=T
         io_throttle.DeleteBackupRequests(backupID)
         io_throttle.DeleteBackupSendings(backupID)
         # remove interests in transport_control
-        # callback.delete_backup_interest(backupID)
         # remove local files for this backupID
         if removeLocalFilesToo:
             backup_fs.DeleteLocalBackup(settings.getLocalBackupsDir(), backupID)
@@ -447,13 +455,12 @@ def DeletePathBackups(pathID, removeLocalFilesToo=True, saveDB=True, calculate=T
     backup_rebuilder.RemoveAllBackupsToWork()
     backup_rebuilder.SetStoppedFlag()
     # check and calculate used space
-    if calculate:
-        backup_fs.Scan()
-        backup_fs.Calculate()
+    if calculate or key_alias != 'master':
+        backup_fs.Scan(customer_idurl=customer_idurl, key_alias=key_alias)
+        backup_fs.Calculate(iterID=backup_fs.fsID(customer_idurl, key_alias))
     # save the index if needed
-    if saveDB:
-        Save()
-        # control.request_update()
+    if saveDB or key_alias != 'master':
+        SaveFSIndex(customer_idurl, key_alias)
     return True
 
 
@@ -647,7 +654,6 @@ class Task():
             backup_fs.SaveIndex(customer_idurl=self.customerIDURL, key_alias=self.keyAlias)
             if self.keyAlias == 'master':
                 if driver.is_on('service_backup_db'):
-                    # TODO: switch to event
                     from bitdust.storage import index_synchronizer
                     index_synchronizer.A('push')
         jobs()[self.backupID].automat('start')
@@ -765,8 +771,8 @@ def OnFoundFolderSize(pth, sz, arg):
         item = backup_fs.GetByID(pathID, iterID=backup_fs.fsID(customerIDURL, keyAlias))
         if item:
             item.set_size(sz)
-            backup_fs.Calculate()
-            Save()
+            backup_fs.Calculate(iterID=backup_fs.fsID(customerIDURL, keyAlias))
+            SaveFSIndex(customerIDURL, keyAlias)
         if version:
             backupID = packetid.MakeBackupID(customerGlobID, pathID, version, key_alias=keyAlias)
             job = GetRunningBackupObject(backupID)
@@ -803,16 +809,13 @@ def OnJobDone(backupID, result):
                         backup_rebuilder.RemoveBackupToWork(backupID)
                         # io_throttle.DeleteBackupRequests(backupID)
                         # io_throttle.DeleteBackupSendings(backupID)
-                        # callback.delete_backup_interest(backupID)
                         backup_fs.DeleteLocalBackup(settings.getLocalBackupsDir(), backupID)
                         backup_matrix.EraseBackupLocalInfo(backupID)
                         backup_matrix.EraseBackupLocalInfo(backupID)
         backup_fs.ScanID(remotePath)
-        backup_fs.Calculate()
-        Save()
-        # control.request_update([('pathID', remotePath), ])
+        backup_fs.Calculate(iterID=backup_fs.fsID(customer_idurl, keyAlias))
+        SaveFSIndex(customer_idurl, keyAlias)
         # TODO: check used space, if we have over use - stop all tasks immediately
-        # backup_matrix.RepaintBackup(backupID)
     elif result == 'abort':
         DeleteBackup(backupID)
     if len(tasks()) == 0:

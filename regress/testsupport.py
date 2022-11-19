@@ -104,7 +104,7 @@ async def run_ssh_command_and_wait_async(host, cmd, loop, verbose=False):
         *cmd_args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        loop=loop,
+        # loop=loop,
     )
     ssh_proc = await create
     stdout, stderr = await ssh_proc.communicate()
@@ -297,7 +297,7 @@ async def open_tunnel_async(node, local_port, loop):
         *cmd_args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        loop=loop,
+        # loop=loop,
     )
     ssh_proc = await tunnel
     _SSHTunnels[node] = ssh_proc
@@ -423,7 +423,7 @@ def start_daemon(node, skip_initialize=False, verbose=False):
     if not skip_initialize:
         run_ssh_command_and_wait(node, 'mkdir -pv /root/.bitdust/metadata/')
         if os.environ.get('_DEBUG', '0') == '0':
-            run_ssh_command_and_wait(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = False/_Debug = False/g' {} +")
+            run_ssh_command_and_wait(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = True/_Debug = False/g' {} +")
     bitdust_daemon = run_ssh_command_and_wait(
         node, 'BITDUST_CRITICAL_PUSH_MESSAGE_FAILS=1 BITDUST_LOG_USE_COLORS=1 COVERAGE_PROCESS_START=/app/bitdust/.coverage_config bitdust daemon'
     )
@@ -440,7 +440,7 @@ def start_daemon(node, skip_initialize=False, verbose=False):
 async def start_daemon_async(node, loop, verbose=False):
     await run_ssh_command_and_wait_async(node, 'mkdir -pv /root/.bitdust/metadata/', loop)
     if os.environ.get('_DEBUG', '0') == '0':
-        await run_ssh_command_and_wait_async(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = False/_Debug = False/g' {} +", loop)
+        await run_ssh_command_and_wait_async(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = True/_Debug = False/g' {} +", loop)
     bitdust_daemon = await run_ssh_command_and_wait_async(
         node, 'BITDUST_CRITICAL_PUSH_MESSAGE_FAILS=1 BITDUST_LOG_USE_COLORS=1 COVERAGE_PROCESS_START=/app/bitdust/.coverage_config bitdust daemon', loop
     )
@@ -753,6 +753,7 @@ def start_dht_seed(node, wait_seconds=0, dht_seeds='', attached_layers='', verbo
     cmd += 'bitdust set logs/automat-events-enabled true;'
     cmd += 'bitdust set logs/automat-transitions-enabled true;'
     cmd += 'bitdust set logs/packet-enabled true;'
+    cmd += 'bitdust set services/gateway/p2p-timeout 20;'
     # use shorter key to run tests faster
     cmd += 'bitdust set personal/private-key-size 1024;'
     # disable unrelated services
@@ -790,6 +791,7 @@ async def start_identity_server_async(node, loop, verbose=True):
     cmd += 'bitdust set logs/automat-events-enabled true;'
     cmd += 'bitdust set logs/automat-transitions-enabled true;'
     cmd += 'bitdust set logs/packet-enabled true;'
+    cmd += 'bitdust set services/gateway/p2p-timeout 20;'
     cmd += 'bitdust set personal/private-key-size 1024;'
     cmd += 'bitdust set services/customer/enabled false;'
     cmd += 'bitdust set services/supplier/enabled false;'
@@ -819,6 +821,7 @@ async def start_stun_server_async(node, loop, dht_seeds=''):
     cmd += 'bitdust set logs/automat-events-enabled true;'
     cmd += 'bitdust set logs/automat-transitions-enabled true;'
     cmd += 'bitdust set logs/packet-enabled true;'
+    cmd += 'bitdust set services/gateway/p2p-timeout 20;'
     # use short key to run tests faster
     cmd += 'bitdust set personal/private-key-size 1024;'
     # disable unrelated services
@@ -855,6 +858,7 @@ async def start_proxy_server_async(
     cmd += 'bitdust set logs/automat-events-enabled true;'
     cmd += 'bitdust set logs/automat-transitions-enabled true;'
     cmd += 'bitdust set logs/packet-enabled true;'
+    cmd += 'bitdust set services/gateway/p2p-timeout 20;'
     # use short key to run tests faster
     cmd += 'bitdust set personal/private-key-size 1024;'
     # disable unrelated services
@@ -911,6 +915,7 @@ async def start_supplier_async(
     cmd += 'bitdust set logs/automat-events-enabled true;'
     cmd += 'bitdust set logs/automat-transitions-enabled true;'
     cmd += 'bitdust set logs/packet-enabled true;'
+    cmd += 'bitdust set services/gateway/p2p-timeout 20;'
     # use short key to run tests faster
     cmd += 'bitdust set personal/private-key-size 1024;'
     # disable unrelated services
@@ -975,6 +980,7 @@ async def start_message_broker_async(
     cmd += 'bitdust set logs/automat-events-enabled true;'
     cmd += 'bitdust set logs/automat-transitions-enabled true;'
     cmd += 'bitdust set logs/packet-enabled true;'
+    cmd += 'bitdust set services/gateway/p2p-timeout 20;'
     # use short key to run tests faster
     cmd += 'bitdust set personal/private-key-size 1024;'
     # disable unrelated services
@@ -1056,6 +1062,7 @@ async def start_customer_async(
     cmd += 'bitdust set logs/automat-events-enabled true;'
     cmd += 'bitdust set logs/automat-transitions-enabled true;'
     cmd += 'bitdust set logs/packet-enabled true;'
+    cmd += 'bitdust set services/gateway/p2p-timeout 20;'
     # use short key to run tests faster
     cmd += 'bitdust set personal/private-key-size 1024;'
     # disable unrelated services

@@ -52,7 +52,7 @@ from __future__ import absolute_import
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 10
+_DebugLevel = 16
 
 #------------------------------------------------------------------------------
 
@@ -154,55 +154,6 @@ def total_connectors():
         count += len(suppliers_list)
     return count
 
-
-#------------------------------------------------------------------------------
-
-# def on_supplier_file_modified(event_info):
-#     if _Debug:
-#         lg.args(_DebugLevel, e=event_info)
-#     return True
-#
-#
-# def start_consumer(customer_id, supplier_id):
-#     supplier_queue_id = global_id.MakeGlobalQueueID(
-#         queue_alias='supplier-file-modified',
-#         owner_id=customer_id,
-#         supplier_id=supplier_id,
-#     )
-#     if not p2p_queue.is_queue_exist(supplier_queue_id):
-#         try:
-#             p2p_queue.open_queue(supplier_queue_id)
-#         except Exception as exc:
-#             lg.warn('failed to open queue %s : %s' % (supplier_queue_id, str(exc)))
-#     if not p2p_queue.is_queue_exist(supplier_queue_id):
-#         lg.err('queue %s not exist' % supplier_queue_id)
-#         return False
-#     if not p2p_queue.is_consumer_exists(customer_id):
-#         p2p_queue.add_consumer(customer_id)
-#     if not p2p_queue.is_callback_method_registered(consumer_id=customer_id, callback_method=on_supplier_file_modified):
-#         p2p_queue.add_callback_method(consumer_id=customer_id, callback_method=on_supplier_file_modified)
-#     if not p2p_queue.is_consumer_subscribed(customer_id, supplier_queue_id):
-#         p2p_queue.subscribe_consumer(customer_id, supplier_queue_id)
-#     if _Debug:
-#         lg.args(_DebugLevel, q=supplier_queue_id)
-#     return True
-#
-#
-# def stop_consumer(customer_id, supplier_id):
-#     supplier_queue_id = global_id.MakeGlobalQueueID(
-#         queue_alias='supplier-file-modified',
-#         owner_id=customer_id,
-#         supplier_id=supplier_id,
-#     )
-#     if p2p_queue.is_consumer_subscribed(customer_id, supplier_queue_id):
-#         p2p_queue.unsubscribe_consumer(customer_id, supplier_queue_id, remove_empty=True)
-#     if p2p_queue.is_callback_method_registered(consumer_id=customer_id, callback_method=on_supplier_file_modified):
-#         p2p_queue.remove_callback_method(consumer_id=customer_id, callback_method=on_supplier_file_modified)
-#     if p2p_queue.is_queue_exist(supplier_queue_id):
-#         p2p_queue.close_queue(supplier_queue_id, remove_empty_consumers=True, remove_empty_producers=True)
-#     if _Debug:
-#         lg.args(_DebugLevel, q=supplier_queue_id)
-#     return True
 
 #------------------------------------------------------------------------------
 
@@ -470,8 +421,7 @@ class SupplierConnector(automat.Automat):
             family_position=family_position,
             family_snapshot=family_snapshot,
         ))
-        if _Debug:
-            d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='supplier_connector.doPingRequestService')
+        d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='supplier_connector.doPingRequestService')
         d.addErrback(lambda err: self.automat('fail', err))
 
     def doCancelService(self, *args, **kwargs):
@@ -509,6 +459,11 @@ class SupplierConnector(automat.Automat):
         if not self.queue_subscribe:
             reactor.callLater(0, self.automat, 'queue-skip')  # @UndefinedVariable
             return
+        queue_id = global_id.MakeGlobalQueueID(
+            queue_alias='supplier-file-modified',
+            owner_id=self.customer_id,
+            supplier_id=self.supplier_id,
+        )
         service_info = {
             'items': [
                 {
@@ -521,16 +476,15 @@ class SupplierConnector(automat.Automat):
                     'action': 'add_callback',
                     'consumer_id': self.customer_id,
                     'method': self.customer_idurl,
+                    'queues': [
+                        'supplier-file-modified',
+                    ],
                 },
                 {
                     'scope': 'consumer',
                     'action': 'subscribe',
                     'consumer_id': self.customer_id,
-                    'queue_id': global_id.MakeGlobalQueueID(
-                        queue_alias='supplier-file-modified',
-                        owner_id=self.customer_id,
-                        supplier_id=self.supplier_id,
-                    ),
+                    'queue_id': queue_id,
                 },
             ],
         }

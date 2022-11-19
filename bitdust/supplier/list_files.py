@@ -65,9 +65,7 @@ from bitdust.userid import global_id
 
 def send(customer_idurl, packet_id, format_type, key_id, remote_idurl, query_items=[]):
     if not query_items:
-        query_items = [
-            '*',
-        ]
+        query_items = ['*']
     key_id = my_keys.latest_key_id(key_id)
     parts = global_id.NormalizeGlobalID(key_id)
     if parts['key_alias'] == 'master' and parts['idurl'] != my_id.getIDURL():
@@ -122,13 +120,20 @@ def process_query_item(query_path, key_alias, ownerdir):
     ret = ''
     ret += 'Q%s\n' % query_path
     if query_path == '*':
+        if key_alias == 'master':
+            key_alias_dir = os.path.join(ownerdir, key_alias)
+            ret += TreeSummary(key_alias_dir, key_alias)
         for one_key_alias in os.listdir(ownerdir):
+            if one_key_alias == 'master':
+                continue
+            if key_alias and key_alias != 'master' and one_key_alias != key_alias:
+                continue
             if not misc.ValidKeyAlias(strng.to_text(one_key_alias)):
                 continue
             key_alias_dir = os.path.join(ownerdir, one_key_alias)
-            ret += TreeSummary(key_alias_dir, key_alias=one_key_alias)
+            ret += TreeSummary(key_alias_dir, one_key_alias)
         if _Debug:
-            lg.args(_DebugLevel, ownerdir=ownerdir, query_path=query_path, result_bytes=len(ret))
+            lg.args(_DebugLevel, o=ownerdir, q=query_path, k=key_alias, result_bytes=len(ret))
         return ret
     # TODO: more validations to be added
     clean_path = query_path.replace('.', '').replace('~', '').replace(':', '').replace('\\', '/').lstrip('/')
@@ -138,10 +143,9 @@ def process_query_item(query_path, key_alias, ownerdir):
     if not os.path.exists(local_path):
         lg.warn('local file or folder not exist: %r' % local_path)
         return ''
-    if os.path.isdir(local_path):
-        ret += TreeSummary(local_path, key_alias=key_alias)
+    ret += TreeSummary(local_path, key_alias)
     if _Debug:
-        lg.args(_DebugLevel, ownerdir=ownerdir, query_path=query_path, local_path=local_path, result_bytes=len(ret))
+        lg.args(_DebugLevel, o=ownerdir, q=query_path, k=key_alias, p=local_path, result_bytes=len(ret))
     return ret
 
 
@@ -172,21 +176,12 @@ def PackListFiles(plaintext, method):
     return ''
 
 
-def UnpackListFiles(payload, method):
-    if method == 'Text':
-        return payload
-    elif method == 'Compressed':
-        return strng.to_text(zlib.decompress(strng.to_bin(payload)))
-    return payload
-
-
 #------------------------------------------------------------------------------
 
 
-def TreeSummary(ownerdir, key_alias=None):
+def TreeSummary(ownerdir, key_alias):
     out = StringIO()
-    if key_alias is not None:
-        out.write('K%s\n' % key_alias)
+    out.write('K%s\n' % key_alias)
 
     def cb(result, realpath, subpath, name):
         if not os.access(realpath, os.R_OK):
