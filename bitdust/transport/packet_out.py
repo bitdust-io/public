@@ -57,7 +57,7 @@ from six.moves import range
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 12
+_DebugLevel = 16
 
 _PacketLogFileEnabled = False
 
@@ -485,12 +485,9 @@ class PacketOut(automat.Automat):
         self.response_info = None
         self.timeout = None
         if self.response_timeout:
-            self.timers['response-timeout'] = (
-                self.response_timeout,
-                [
-                    'RESPONSE?',
-                ],
-            )
+            self.timers['response-timeout'] = (self.response_timeout, [
+                'RESPONSE?',
+            ])
 
     def msg(self, msgid, *args, **kwargs):
         return self.MESSAGES.get(msgid, '')
@@ -730,7 +727,7 @@ class PacketOut(automat.Automat):
                 if self.response_timeout:
                     self.timeout = self.response_timeout
                 else:
-                    self.timeout = 30
+                    self.timeout = settings.P2PTimeOut()
             elif self.filesize > 1024*1024:
                 self.timeout = 5 + int(self.filesize/float(settings.SendingSpeedLimit()))
             else:

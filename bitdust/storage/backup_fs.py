@@ -92,6 +92,8 @@ from bitdust.system import bpio
 from bitdust.main import settings
 from bitdust.main import listeners
 
+from bitdust.services import driver
+
 from bitdust.lib import misc
 from bitdust.lib import packetid
 from bitdust.lib import jsn
@@ -451,10 +453,7 @@ class FSItemInfo():
         self.versions[version] = [-1, -1]
 
     def set_version_info(self, version, maxblocknum, sizebytes):
-        self.versions[version] = [
-            maxblocknum,
-            sizebytes,
-        ]
+        self.versions[version] = [maxblocknum, sizebytes]
 
     def get_version_info(self, version):
         return self.versions.get(version, [-1, -1])
@@ -517,13 +516,7 @@ class FSItemInfo():
                 } for v in self.list_versions(sorted=True)],
             }
         e = strng.to_text(self.unicodename, encoding=encoding)
-        return '%s %d %d %s\n%s\n' % (
-            self.path_id,
-            self.type,
-            self.size,
-            self.pack_versions(),
-            e,
-        )
+        return '%s %d %d %s\n%s\n' % (self.path_id, self.type, self.size, self.pack_versions(), e)
 
     def unserialize(self, src, decoding='utf-8', from_json=False):
         if from_json:
@@ -533,11 +526,7 @@ class FSItemInfo():
                 self.type = src['t']
                 self.size = src['s']
                 self.key_id = my_keys.latest_key_id(strng.to_text(src['k'], encoding=decoding))
-                self.versions = {strng.to_text(v['n']): [
-                    v['b'],
-                    v['s'],
-                ]
-                                 for v in src['v']}
+                self.versions = {strng.to_text(v['n']): [v['b'], v['s']] for v in src['v']}
             except:
                 lg.exc()
                 raise KeyError('Incorrect item format:\n%s' % src)
@@ -629,7 +618,7 @@ def AddFile(path, read_stats=False, iter=None, iterID=None, key_id=None):
         iterID = fsID(key_alias=key_alias)
     resultID = ''
     parentKeyID = None
-    # build all tree, skip the last part
+    # build whole tree, skip the last part
     for i in range(len(parts) - 1):
         name = parts[i]
         if not name:
@@ -637,8 +626,6 @@ def AddFile(path, read_stats=False, iter=None, iterID=None, key_id=None):
         p = '/'.join(parts[:i + 1])
         if bpio.Linux() or bpio.Mac():
             p = '/' + p
-        # if not bpio.pathIsDir(p):
-        #     raise Exception('Directory not exist: %s' % str(p))
         if name not in iter:
             # made a new ID for this folder, ID starts from 0. new folders will get the last ID +1
             # or it may find a free place in the middle, if some folders or files were removed before
@@ -701,8 +688,6 @@ def AddDir(path, read_stats=False, iter=None, iterID=None, key_id=None, force_pa
         p = '/'.join(parts[:i + 1])
         if bpio.Linux() or bpio.Mac():
             p = '/' + p
-        # if not bpio.pathIsDir(p):
-        #     raise Exception('Directory not exist: %s' % str(p))
         if name not in iter:
             id = 0
             if force_path_id_parts:
@@ -741,7 +726,7 @@ def AddLocalPath(localpath, read_stats=False, iter=None, iterID=None, key_id=Non
         if not os.access(path, os.R_OK):
             return c
         for localname in bpio.list_dir_safe(path):
-            p = os.path.join(path, localname)  # .encode("utf-8")
+            p = os.path.join(path, localname)
             name = strng.to_text(localname)
             if bpio.pathIsDir(p):
                 if name not in iter:
@@ -808,6 +793,8 @@ def SetFile(item, customer_idurl=None):
 
     This is used when loading index from file. Should create all parent
     items in the index.
+
+    Returns two boolean flags: success or not, modified or not
     """
     key_alias = item.key_alias()
     iter = fs(customer_idurl, key_alias)
@@ -820,7 +807,8 @@ def SetFile(item, customer_idurl=None):
             if item.name() not in iter:
                 iter[item.name()] = id
                 iterID[id] = item
-            return True
+                return True, True
+            return True, False
         found = False
         for name in iter.keys():
             if name == 0:
@@ -833,8 +821,8 @@ def SetFile(item, customer_idurl=None):
                     break
                 continue
         if not found:
-            return False
-    return False
+            return False, False
+    return False, False
 
 
 def SetDir(item, customer_idurl=None):
@@ -850,13 +838,21 @@ def SetDir(item, customer_idurl=None):
         part = parts[j]
         id = misc.ToInt(part, part)
         if j == len(parts) - 1:
+            modified = False
             if itemname not in iter:
                 iter[itemname] = {}
+                modified = True
+            if iter[itemname].get(0) != int(id):
+                modified = True
             iter[itemname][0] = int(id)
             if id not in iterID:
                 iterID[id] = {}
+                modified = True
+            cur_item = iterID[id].get(INFO_KEY)
+            if not cur_item:
+                modified = True
             iterID[id][INFO_KEY] = item
-            return True
+            return True, modified
         found = False
         for name in iter.keys():
             if name == 0:
@@ -879,8 +875,8 @@ def SetDir(item, customer_idurl=None):
                 continue
             raise Exception('wrong data type in the index')
         if not found:
-            return False
-    return False
+            return False, False
+    return False, False
 
 
 #------------------------------------------------------------------------------
@@ -1332,10 +1328,7 @@ def TraverseByID(callback, iterID=None, base_path_id=''):
                     i[id],  # item
                 )
             else:
-                raise Exception('wrong item of type %r in the index: %r' % (
-                    type(i[id]),
-                    i[id],
-                ))
+                raise Exception('wrong item of type %r in the index: %r' % (type(i[id]), i[id]))
 
     startpth = '' if bpio.Windows() else '/'
     recursive_traverse(iterID, base_path_id, startpth, callback)
@@ -1365,15 +1358,9 @@ def TraverseByIDSorted(callback, iterID=None):
             if id == INFO_KEY:
                 continue
             if isinstance(i[id], dict):
-                dirs.append((
-                    id,
-                    ResolvePath(path, i[id][INFO_KEY].name()),
-                ))
+                dirs.append((id, ResolvePath(path, i[id][INFO_KEY].name())))
             elif isinstance(i[id], FSItemInfo):
-                files.append((
-                    id,
-                    ResolvePath(path, i[id].name()),
-                ))
+                files.append((id, ResolvePath(path, i[id].name())))
             else:
                 raise Exception('wrong item type in the index')
         dirs.sort(key=lambda e: e[1])
@@ -1838,7 +1825,7 @@ def ClearAllIndexes():
 #------------------------------------------------------------------------------
 
 
-def Serialize(customer_idurl, key_alias=None, encoding='utf-8', filter_cb=None):
+def SerializeIndex(customer_idurl, key_alias=None, encoding='utf-8', filter_cb=None):
     """
     Use this to write index to the local file.
     """
@@ -1867,11 +1854,11 @@ def Serialize(customer_idurl, key_alias=None, encoding='utf-8', filter_cb=None):
             iterID=fsID(customer_idurl, k_alias),
         )
     if _Debug:
-        lg.out(_DebugLevel, 'backup_fs.Serialize done with %d indexed files of %d aliases for %r' % (cnt[0], len(key_aliases), customer_idurl))
+        lg.dbg(_DebugLevel, 'done with %d indexed files of %d aliases for %r' % (cnt[0], len(key_aliases), customer_idurl))
     return result
 
 
-def Unserialize(json_data, customer_idurl=None, new_revision=None, decoding='utf-8'):
+def UnserializeIndex(json_data, customer_idurl=None, new_revision=None, deleted_path_ids=[], decoding='utf-8'):
     """
     Read index from ``StringIO`` object.
     """
@@ -1879,51 +1866,122 @@ def Unserialize(json_data, customer_idurl=None, new_revision=None, decoding='utf
         customer_idurl = my_id.getIDURL()
     customer_idurl = id_url.field(customer_idurl)
     total_count = 0
+    total_modified_count = 0
     updated_keys = []
     for key_alias in json_data.keys():
         if new_revision is not None:
             cur_revision = revision(customer_idurl, key_alias)
-            if cur_revision > new_revision:
+            if cur_revision >= new_revision:
                 if _Debug:
-                    lg.dbg(_DebugLevel, 'ignore items for %r with alias %r because current revision is up to date: %d>%d' % (customer_idurl, key_alias, cur_revision, new_revision))
+                    lg.dbg(_DebugLevel, 'ignore items for %r with alias %r because current revision is up to date: %d >= %d' % (customer_idurl, key_alias, cur_revision, new_revision))
                 continue
-        Clear(customer_idurl, key_alias)
         count = 0
+        count_modified = 0
+        modified_items = set()
+        known_items = set()
+        new_files = []
+        to_be_removed_items = set()
+        to_be_removed_items.update(deleted_path_ids)
         for json_item in json_data[key_alias]['items']:
             item = FSItemInfo()
             item.unserialize(json_item, decoding=decoding, from_json=True)
+            if item.path_id in deleted_path_ids:
+                continue
+            known_items.add(item.path_id)
             if item.type == FILE:
-                if not SetFile(item, customer_idurl=customer_idurl):
+                success, modified = SetFile(item, customer_idurl=customer_idurl)
+                if not success:
                     lg.warn('Can not put FILE item into the tree: %s' % str(item))
                     raise ValueError('Can not put FILE item into the tree: %s' % str(item))
                 count += 1
+                if modified:
+                    count_modified += 1
+                    modified_items.add(item.path_id)
+                    new_files.append(item)
             elif item.type == DIR:
-                if not SetDir(item, customer_idurl=customer_idurl):
+                success, modified = SetDir(item, customer_idurl=customer_idurl)
+                if not success:
                     lg.warn('Can not put DIR item into the tree: %s' % str(item))
                     raise ValueError('Can not put DIR item into the tree: %s' % str(item))
                 count += 1
+                if modified:
+                    count_modified += 1
+                    modified_items.add(item.path_id)
             else:
                 raise ValueError('Incorrect entry type')
+
+        def _one_item(path_id, path, info):
+            if path_id not in known_items:
+                if path_id != settings.BackupIndexFileName():
+                    to_be_removed_items.add(path_id)
+
+        TraverseByID(_one_item, iterID=fsID(customer_idurl, key_alias))
+        if _Debug:
+            lg.dbg(_DebugLevel, 'from %d known items %d were modified and %d items marked to be removed' % (len(known_items), len(modified_items), len(to_be_removed_items)))
+        for path_id in to_be_removed_items:
+            deleted_info = {}
+            if key_alias.startswith('share_'):
+                deleted_iter_and_path = WalkByID(path_id, iterID=fsID(customer_idurl, key_alias))
+                if deleted_iter_and_path:
+                    deleted_file_item, deleted_file_path = deleted_iter_and_path
+                    full_glob_id = global_id.MakeGlobalID(idurl=customer_idurl, path=path_id, key_alias=key_alias)
+                    full_remote_path = global_id.MakeGlobalID(idurl=customer_idurl, path=deleted_file_path, key_alias=key_alias)
+                    deleted_info = dict(
+                        global_id=full_glob_id,
+                        remote_path=full_remote_path,
+                        size=max(0, deleted_file_item.size),
+                        type=TYPES.get(deleted_file_item.type, 'unknown').lower(),
+                        customer=customer_idurl.to_id(),
+                        versions=[dict(backup_id=v) for v in deleted_file_item.versions.keys()],
+                    )
+            DeleteByID(path_id, iter=fs(customer_idurl, key_alias), iterID=fsID(customer_idurl, key_alias))
+            count_modified += 1
+            if deleted_info:
+                listeners.push_snapshot(
+                    'shared_file', snap_id=full_glob_id, deleted=True, data=dict(
+                        global_id=deleted_info['global_id'],
+                        remote_path=deleted_info['remote_path'],
+                        size=deleted_info['size'],
+                        type=deleted_info['type'],
+                        customer=deleted_info['customer'],
+                        versions=deleted_info['versions'],
+                    )
+                )
+            if driver.is_on('service_shared_data'):
+                from bitdust.access import shared_access_coordinator
+                shared_access_coordinator.on_file_deleted(customer_idurl, key_alias, path_id)
+
         total_count += count
-        if count:
+        total_modified_count += count_modified
+        if new_revision is not None and new_revision > cur_revision:
             old_rev = None
             new_rev = None
-            if new_revision is not None:
-                old_rev, new_rev = commit(
-                    new_revision_number=new_revision,
-                    customer_idurl=customer_idurl,
-                    key_alias=key_alias,
-                )
-            Scan(
-                customer_idurl=customer_idurl,
-                key_alias=key_alias,
-            )
+            old_rev, new_rev = commit(new_revision_number=new_revision, customer_idurl=customer_idurl, key_alias=key_alias)
+            Scan(customer_idurl=customer_idurl, key_alias=key_alias)
             updated_keys.append(key_alias)
+            if key_alias.startswith('share_'):
+                for new_file_item in new_files:
+                    if new_file_item.path_id == settings.BackupIndexFileName():
+                        continue
+                    new_file_path = ToPath(new_file_item.path_id, iterID=fsID(customer_idurl, key_alias))
+                    if new_file_path:
+                        full_glob_id = global_id.MakeGlobalID(idurl=customer_idurl, path=new_file_item.path_id, key_alias=key_alias)
+                        full_remote_path = global_id.MakeGlobalID(idurl=customer_idurl, path=new_file_path, key_alias=key_alias)
+                        listeners.push_snapshot(
+                            'shared_file', snap_id=full_glob_id, data=dict(
+                                global_id=full_glob_id,
+                                remote_path=full_remote_path,
+                                size=max(0, new_file_item.size),
+                                type=TYPES.get(new_file_item.type, 'unknown').lower(),
+                                customer=customer_idurl.to_id(),
+                                versions=[dict(backup_id=v) for v in new_file_item.versions.keys()],
+                            )
+                        )
             if _Debug:
-                lg.args(_DebugLevel, count=count, customer=customer_idurl, k=key_alias, old_rev=old_rev, new_rev=new_rev)
+                lg.args(_DebugLevel, count=count, modified=count_modified, c=customer_idurl, k=key_alias, old_rev=old_rev, new_rev=new_rev)
     if _Debug:
-        lg.out(_DebugLevel, 'backup_fs.Unserialize done with %d updated items, loaded data for %d keys' % (total_count, len(updated_keys)))
-    return total_count, updated_keys
+        lg.dbg(_DebugLevel, 'done with %d total items and %d modified, loaded data for %d keys' % (total_count, total_modified_count, len(updated_keys)))
+    return total_count, total_modified_count, updated_keys
 
 
 #------------------------------------------------------------------------------
@@ -1938,7 +1996,7 @@ def SaveIndex(customer_idurl=None, key_alias='master', encoding='utf-8'):
     if not os.path.isdir(os.path.dirname(index_file_path)):
         os.makedirs(os.path.dirname(index_file_path))
     json_data = {}
-    json_data[customer_id] = Serialize(
+    json_data[customer_id] = SerializeIndex(
         customer_idurl=customer_idurl,
         key_alias=key_alias,
         encoding=encoding,
@@ -1956,19 +2014,17 @@ def SaveIndex(customer_idurl=None, key_alias='master', encoding='utf-8'):
     return bpio.WriteTextFile(index_file_path, src)
 
 
-def ReadIndex(text_data, new_revision=None, encoding='utf-8'):
+def ReadIndex(text_data, new_revision=None, deleted_path_ids=[], encoding='utf-8'):
     total_count = 0
+    total_modified_count = 0
     updated_customers_keys = []
     try:
-        json_data = jsn.loads(
-            text_data,
-            encoding=encoding,
-        )
+        json_data = jsn.loads(text_data, encoding=encoding)
     except:
         lg.exc()
         return 0, []
     if _Debug:
-        lg.args(_DebugLevel, json_data=json_data)
+        lg.args(_DebugLevel, new_revision=new_revision, sz=len(text_data), deleted=deleted_path_ids)
     if not json_data:
         return 0, []
     for customer_id in json_data.keys():
@@ -1978,23 +2034,22 @@ def ReadIndex(text_data, new_revision=None, encoding='utf-8'):
             identitycache.immediatelyCaching(customer_idurl, try_other_sources=False, ignore_errors=True)
             continue
         try:
-            count, updated_keys = Unserialize(
+            count, modified_count, updated_keys = UnserializeIndex(
                 json_data[customer_id],
                 customer_idurl=customer_idurl,
                 new_revision=new_revision,
+                deleted_path_ids=deleted_path_ids,
                 decoding=encoding,
             )
         except:
             lg.exc()
             continue
         total_count += count
+        total_modified_count += modified_count
         if updated_keys:
             for key_alias in updated_keys:
                 Calculate(iterID=fsID(customer_idurl, key_alias))
-                updated_customers_keys.append((
-                    customer_idurl,
-                    key_alias,
-                ))
+                updated_customers_keys.append((customer_idurl, key_alias))
     if _Debug:
         lg.out(_DebugLevel, 'backup_fs.ReadIndex %d items loaded for %d keys' % (total_count, len(updated_customers_keys)))
     return total_count, updated_customers_keys
@@ -2015,7 +2070,6 @@ def LoadIndex(index_file_path):
     inpt.close()
     count, _ = ReadIndex(raw_data, new_revision=new_revision)
     if not count:
-        lg.warn('catalog index reading failed')
         return False
     return count
 
@@ -2024,8 +2078,11 @@ def LoadAllIndexes():
     index_dir_path = os.path.join(settings.ServiceDir('service_backups'), 'index')
     if not os.path.isdir(index_dir_path):
         os.makedirs(index_dir_path)
-    for index_filename in os.listdir(index_dir_path):
-        index_file_path = os.path.join(index_dir_path, index_filename)
+    for key_id in os.listdir(index_dir_path):
+        if my_keys.latest_key_id(key_id) != key_id:
+            lg.warn('ignore old index file for rotated identity: %r' % key_id)
+            continue
+        index_file_path = os.path.join(index_dir_path, key_id)
         LoadIndex(index_file_path)
 
 
@@ -2100,10 +2157,7 @@ def _test():
     json_data = json.loads(inpt.read())
     inpt.close()
     for customer_id in json_data.keys():
-        count = Unserialize(json_data[customer_id])
-        # customer_id = 'test01@bitrex.ai'
-        # customer_idurl = global_id.GlobalUserToIDURL(customer_id)
-        # count = Unserialize(json_data[customer_id], from_json=True, iter=fs(customer_idurl))
+        count, modified_count, updated_keys = UnserializeIndex(json_data[customer_id])
         print(customer_id, count)
     Scan()
     Calculate()

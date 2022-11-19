@@ -699,9 +699,10 @@ def identity_create(username, preferred_servers=[], join_network=False):
         websocket.send('{"command": "api_call", "method": "identity_create", "kwargs": {"username": "alice", "join_network": 1} }');
     """
     from bitdust.lib import misc
-    from bitdust.userid import my_id
+    from bitdust.crypt import key
     from bitdust.userid import id_registrator
-    if my_id.isLocalIdentityReady() or my_id.isLocalIdentityExists():
+    from bitdust.userid import my_id
+    if my_id.isLocalIdentityReady() or (my_id.isLocalIdentityExists() and key.isMyKeyExists()):
         return ERROR('local identity already exist')
     try:
         username = strng.to_text(username)
@@ -783,10 +784,11 @@ def identity_recover(private_key_source, known_idurl=None, join_network=False):
     ###### WebSocket
         websocket.send('{"command": "api_call", "method": "identity_recover", "kwargs": {"private_key_source": "http://some-host.com/alice.xml\n-----BEGIN RSA PRIVATE KEY-----\nMIIEogIBAAKC..."} }');
     """
-    from bitdust.userid import my_id
+    from bitdust.crypt import key
     from bitdust.userid import id_url
     from bitdust.userid import id_restorer
-    if my_id.isLocalIdentityReady() or my_id.isLocalIdentityExists():
+    from bitdust.userid import my_id
+    if my_id.isLocalIdentityReady() or (my_id.isLocalIdentityExists() and key.isMyKeyExists()):
         return ERROR('local identity already exist')
     if not private_key_source:
         return ERROR('must provide private key in order to recover your identity')
@@ -1164,7 +1166,7 @@ def key_share(key_id, trusted_user_id, include_private=False, include_signature=
     return ret
 
 
-def key_audit(key_id, untrusted_user_id, is_private=False, timeout=10):
+def key_audit(key_id, untrusted_user_id, is_private=False, timeout=None):
     """
     Connects to remote node identified by `untrusted_user_id` parameter and request audit of given public or private key `key_id` on that node.
 
@@ -1590,26 +1592,27 @@ def file_info(remote_path, include_uploads=True, include_downloads=True):
         r['uploads']['running'] = running
         r['uploads']['pending'] = pending
     if include_downloads:
-        from bitdust.storage import restore_monitor
-        downloads = []
-        for backupID in restore_monitor.FindWorking(pathID=pathID):
-            d = restore_monitor.GetWorkingRestoreObject(backupID)
-            if d:
-                downloads.append(
-                    {
-                        'backup_id': d.backup_id,
-                        'creator_id': d.creator_id,
-                        'path_id': d.path_id,
-                        'version': d.version,
-                        'block_number': d.block_number,
-                        'bytes_processed': d.bytes_written,
-                        'created': time.asctime(time.localtime(d.Started)),
-                        'aborted': d.abort_flag,
-                        'done': d.done_flag,
-                        'eccmap': '' if not d.EccMap else d.EccMap.name,
-                    }
-                )
-        r['downloads'] = downloads
+        if driver.is_on('service_restores'):
+            from bitdust.storage import restore_monitor
+            downloads = []
+            for backupID in restore_monitor.FindWorking(pathID=pathID):
+                d = restore_monitor.GetWorkingRestoreObject(backupID)
+                if d:
+                    downloads.append(
+                        {
+                            'backup_id': d.backup_id,
+                            'creator_id': d.creator_id,
+                            'path_id': d.path_id,
+                            'version': d.version,
+                            'block_number': d.block_number,
+                            'bytes_processed': d.bytes_written,
+                            'created': time.asctime(time.localtime(d.Started)),
+                            'aborted': d.abort_flag,
+                            'done': d.done_flag,
+                            'eccmap': '' if not d.EccMap else d.EccMap.name,
+                        }
+                    )
+            r['downloads'] = downloads
     if _Debug:
         lg.out(_DebugLevel, 'api.file_info : %r' % pathID)
     r['revision'] = backup_fs.revision()
@@ -1635,7 +1638,6 @@ def file_create(remote_path, as_folder=False, exist_ok=False, force_path_id=None
     from bitdust.storage import backup_fs
     from bitdust.storage import backup_control
     from bitdust.system import bpio
-    # from bitdust.main import control
     from bitdust.main import listeners
     from bitdust.crypt import my_keys
     from bitdust.userid import id_url
@@ -1652,14 +1654,6 @@ def file_create(remote_path, as_folder=False, exist_ok=False, force_path_id=None
     itemInfo = None
     if _Debug:
         lg.args(_DebugLevel, remote_path=remote_path, as_folder=as_folder, path_id=pathID, customer_idurl=customer_idurl, force_path_id=force_path_id)
-
-
-#     if pathID is not None:
-#         existingItemInfo = backup_fs.GetByID(pathID, iterID=backup_fs.fsID(customer_idurl, key_alias))
-#         if not existingItemInfo:
-#             return ERROR('failed reading already existing item from catalog: %r' % pathID)
-#         if existingItemInfo.key_id != keyID:
-#             return ERROR('another item with same remote path but different key already exist in catalog')
     if pathID is not None:
         if exist_ok:
             fullRemotePath = global_id.MakeGlobalID(customer=parts['customer'], path=parts['path'], key_alias=key_alias)
@@ -1719,8 +1713,7 @@ def file_create(remote_path, as_folder=False, exist_ok=False, force_path_id=None
         )
         if not newPathID:
             return ERROR('remote path can not be assigned, failed to create new item %s' % path)
-    backup_control.Save(customer_idurl, key_alias)
-    # control.request_update([('pathID', newPathID), ])
+    backup_control.SaveFSIndex(customer_idurl, key_alias)
     full_glob_id = global_id.MakeGlobalID(customer=parts['customer'], path=newPathID, key_alias=key_alias)
     full_remote_path = global_id.MakeGlobalID(customer=parts['customer'], path=parts['path'], key_alias=key_alias)
     if id_url.is_the_same(customer_idurl, my_id.getIDURL()) and key_alias == 'master':
@@ -1808,7 +1801,11 @@ def file_delete(remote_path):
     backup_fs.DeleteByID(pathID, iter=backup_fs.fs(customer_idurl, key_alias), iterID=backup_fs.fsID(customer_idurl, key_alias))
     backup_fs.Scan(customer_idurl=customer_idurl, key_alias=key_alias)
     backup_fs.Calculate(iterID=backup_fs.fsID(customer_idurl, key_alias))
-    backup_control.Save(customer_idurl, key_alias)
+    if key_alias != 'master':
+        if driver.is_on('service_shared_data'):
+            from bitdust.access import shared_access_coordinator
+            shared_access_coordinator.on_file_deleted(customer_idurl, key_alias, pathID)
+    backup_control.SaveFSIndex(customer_idurl, key_alias)
     backup_monitor.A('restart')
     if id_url.is_the_same(parts['idurl'], my_id.getIDURL()) and key_alias == 'master':
         listeners.push_snapshot(
@@ -1922,7 +1919,6 @@ def file_upload_start(local_path, remote_path, wait_result=False, publish_events
     from bitdust.storage import backup_fs
     from bitdust.storage import backup_control
     from bitdust.lib import packetid
-    # from bitdust.main import control
     from bitdust.userid import global_id
     from bitdust.crypt import my_keys
     if not bpio.pathExist(local_path):
@@ -1948,19 +1944,17 @@ def file_upload_start(local_path, remote_path, wait_result=False, publish_events
         if not driver.is_on('service_shared_data'):
             return ERROR('service_shared_data() is not started')
 
-    def _restart_active_share(result):
-        if _Debug:
-            lg.args(_DebugLevel, result=result, key_id=keyID, path=path, pathID=pathID)
-        if key_alias != 'master':
-            from bitdust.access import shared_access_coordinator
-            active_share = shared_access_coordinator.get_active_share(keyID)
-            if not active_share:
-                active_share = shared_access_coordinator.SharedAccessCoordinator(
-                    key_id=keyID,
-                    publish_events=publish_events,
-                )
-            active_share.automat('restart')
-        return result
+
+#     def _restart_active_share(result):
+#         if _Debug:
+#             lg.args(_DebugLevel, result=result, key_id=keyID, path=path, pathID=pathID)
+#         if key_alias != 'master':
+#             from bitdust.access import shared_access_coordinator
+#             active_share = shared_access_coordinator.get_active_share(keyID)
+#             if not active_share:
+#                 active_share = shared_access_coordinator.SharedAccessCoordinator(key_id=keyID, publish_events=publish_events)
+#             active_share.automat('restart')
+#         return result
 
     if wait_result:
         task_created_defer = Deferred()
@@ -1969,8 +1963,8 @@ def file_upload_start(local_path, remote_path, wait_result=False, publish_events
             localPath=local_path,
             keyID=keyID,
         )
-        if key_alias != 'master':
-            tsk.result_defer.addCallback(_restart_active_share)
+        # if key_alias != 'master':
+        #     tsk.result_defer.addCallback(_restart_active_share)
         tsk.result_defer.addCallback(
             lambda result: task_created_defer.callback(
                 OK(
@@ -1995,8 +1989,7 @@ def file_upload_start(local_path, remote_path, wait_result=False, publish_events
             api_method='file_upload_start',
         ), ), )
         backup_fs.Calculate(iterID=backup_fs.fsID(customer_idurl, key_alias))
-        backup_control.Save(customer_idurl, key_alias)
-        # control.request_update([('pathID', pathIDfull), ])
+        backup_control.SaveFSIndex(customer_idurl, key_alias)
         if _Debug:
             lg.out(_DebugLevel, 'api.file_upload_start %s with %s, wait_result=True' % (remote_path, pathIDfull))
         return task_created_defer
@@ -2006,12 +1999,11 @@ def file_upload_start(local_path, remote_path, wait_result=False, publish_events
         localPath=local_path,
         keyID=keyID,
     )
-    if key_alias != 'master':
-        tsk.result_defer.addCallback(_restart_active_share)
+    # if key_alias != 'master':
+    #     tsk.result_defer.addCallback(_restart_active_share)
     tsk.result_defer.addErrback(lambda result: lg.err('errback from api.file_upload_start.task(%s) failed with %s' % (result[0], result[1])))
     backup_fs.Calculate(iterID=backup_fs.fsID(customer_idurl, key_alias))
-    backup_control.Save(customer_idurl, key_alias)
-    # control.request_update([('pathID', pathIDfull), ])
+    backup_control.SaveFSIndex(customer_idurl, key_alias)
     if _Debug:
         lg.out(_DebugLevel, 'api.file_upload_start %s with %s' % (remote_path, pathIDfull))
     return OK(
@@ -2245,14 +2237,12 @@ def file_download_start(remote_path, destination_path=None, wait_result=False, p
             lg.out(_DebugLevel, 'api.file_download_start._start_restore %s to %s, wait_result=%s' % (backupID, destination_path, wait_result))
         if wait_result:
             restore_monitor.Start(backupID, destination_path, keyID=key_id, callback=_on_result)
-            # control.request_update([('pathID', knownPath), ])
             return ret
         restore_monitor.Start(
             backupID,
             destination_path,
             keyID=key_id,
         )
-        # control.request_update([('pathID', knownPath), ])
         ret.callback(
             OK(
                 {
@@ -2441,6 +2431,7 @@ def shares_list(only_active=False, include_mine=True, include_granted=True):
     if not driver.is_on('service_shared_data'):
         return ERROR('service_shared_data() is not started')
     from bitdust.access import shared_access_coordinator
+    from bitdust.storage import backup_fs
     from bitdust.crypt import my_keys
     from bitdust.userid import global_id
     from bitdust.userid import my_id
@@ -2484,6 +2475,7 @@ def shares_list(only_active=False, include_mine=True, include_granted=True):
                 'creator': creator_idurl.to_id(),
                 'suppliers': [],
                 'ecc_map': None,
+                'revision': backup_fs.revision(creator_idurl, key_alias),
                 'index': None,
                 'id': None,
                 'name': None,
@@ -2510,6 +2502,7 @@ def share_info(key_id):
         return ERROR('invalid share id')
     from bitdust.crypt import my_keys
     from bitdust.access import shared_access_coordinator
+    from bitdust.storage import backup_fs
     from bitdust.userid import global_id
     if not my_keys.is_active(key_id):
         glob_id = global_id.NormalizeGlobalID(key_id)
@@ -2522,6 +2515,7 @@ def share_info(key_id):
                 'creator': glob_id['idurl'].to_id(),
                 'suppliers': [],
                 'ecc_map': None,
+                'revision': backup_fs.revision(glob_id['idurl'], glob_id['key_alias']),
                 'index': None,
                 'id': None,
                 'name': None,
@@ -2539,6 +2533,7 @@ def share_info(key_id):
                 'creator': glob_id['idurl'].to_id(),
                 'suppliers': None,
                 'ecc_map': None,
+                'revision': backup_fs.revision(glob_id['idurl'], glob_id['key_alias']),
                 'index': None,
                 'id': None,
                 'name': None,
@@ -2875,7 +2870,7 @@ def groups_list(only_active=False, include_mine=True, include_granted=True):
     return RESULT(results)
 
 
-def group_create(creator_id=None, key_size=None, label='', timeout=20):
+def group_create(creator_id=None, key_size=None, label='', timeout=30):
     """
     Creates a new messaging group.
 
@@ -3305,11 +3300,10 @@ def friend_add(trusted_user_id, alias='', share_person_key=True):
                     trusted_idurl=idurl,
                     include_private=False,
                     include_signature=False,
-                    timeout=15,
+                    timeout=None,
                 )])
 
-        if _Debug:
-            d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='api.friend_add')
+        d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='api.friend_add')
         if added:
             result_defer.callback(OK(message='new friend has been added', api_method='friend_add'))
         else:
@@ -3374,7 +3368,7 @@ def friend_remove(user_id):
 #------------------------------------------------------------------------------
 
 
-def user_ping(user_id, timeout=15, retries=1):
+def user_ping(user_id, timeout=None, retries=1):
     """
     Sends `Identity` packet to remote peer and wait for an `Ack` packet to check connection status.
 
@@ -3388,8 +3382,11 @@ def user_ping(user_id, timeout=15, retries=1):
     """
     if not driver.is_on('service_identity_propagate'):
         return ERROR('service_identity_propagate() is not started')
+    from bitdust.main import settings
     from bitdust.p2p import online_status
     from bitdust.userid import global_id
+    if timeout is None:
+        timeout = settings.P2PTimeOut()
     idurl = user_id
     if global_id.IsValidGlobalUser(idurl):
         idurl = global_id.GlobalUserToIDURL(idurl, as_field=False)
@@ -3397,7 +3394,7 @@ def user_ping(user_id, timeout=15, retries=1):
     ret = Deferred()
     d = online_status.handshake(
         idurl,
-        ack_timeout=int(timeout),
+        ack_timeout=timeout,
         ping_retries=int(retries),
         channel='api_user_ping',
         keep_alive=False,
@@ -3439,7 +3436,7 @@ def user_status(user_id):
     })
 
 
-def user_status_check(user_id, timeout=5):
+def user_status_check(user_id, timeout=None):
     """
     Returns current online status of a user and only if node is known but disconnected performs "ping" operation.
 
@@ -3451,9 +3448,12 @@ def user_status_check(user_id, timeout=5):
     """
     if not driver.is_on('service_identity_propagate'):
         return ERROR('service_identity_propagate() is not started')
+    from bitdust.main import settings
     from bitdust.p2p import online_status
     from bitdust.userid import global_id
     from bitdust.userid import id_url
+    if timeout is None:
+        timeout = settings.P2PTimeOut()
     idurl = user_id
     if global_id.IsValidGlobalUser(idurl):
         idurl = global_id.GlobalUserToIDURL(idurl)
@@ -3474,8 +3474,7 @@ def user_status_check(user_id, timeout=5):
             api_method='user_status_check',
         ))
     )
-    if _Debug:
-        ping_result.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='api.user_status_check')
+    ping_result.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='api.user_status_check')
     ping_result.addErrback(lambda err: ret.errback(err))
     peer_status.automat('ping-now', ping_result, channel=None, ack_timeout=timeout, ping_retries=0)
     return ret
@@ -4825,12 +4824,24 @@ def queue_consumers_list():
     if not driver.is_on('service_p2p_notifications'):
         return ERROR('service_p2p_notifications() is not started')
     from bitdust.stream import p2p_queue
-    return RESULT([{
-        'consumer_id': consumer_info.consumer_id,
-        'queues': consumer_info.queues,
-        'state': consumer_info.state,
-        'consumed': consumer_info.consumed_messages,
-    } for consumer_info in p2p_queue.consumer().values()])
+
+    def _cmd_name(c):
+        try:
+            return c.__name__
+        except:
+            return c
+
+    return RESULT(
+        [
+            {
+                'consumer_id': consumer_info.consumer_id,
+                'queues': consumer_info.queues,
+                'commands': ['%s: %s' % (_cmd_name(com), ','.join(q_lst) if q_lst else '*') for com, q_lst in consumer_info.commands.items()],
+                'state': consumer_info.state,
+                'consumed': consumer_info.consumed_messages,
+            } for consumer_info in p2p_queue.consumer().values()
+        ]
+    )
 
 
 def queue_producers_list():
@@ -5394,7 +5405,7 @@ def dht_user_random(layer_id=0, count=1):
     )
     tsk.result_defer.addCallback(_cb)
     tsk.result_defer.addErrback(_eb)
-    tsk.result_defer.addTimeout(timeout=25, clock=reactor)
+    tsk.result_defer.addTimeout(timeout=30, clock=reactor)
     return ret
 
 

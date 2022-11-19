@@ -86,7 +86,7 @@ from __future__ import absolute_import
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 8
+_DebugLevel = 16
 
 #------------------------------------------------------------------------------
 
@@ -139,10 +139,7 @@ def is_synchronized():
         return False
     if A().state == 'IN_SYNC!':
         return True
-    if A().state in [
-        'REQUEST?',
-        'SENDING',
-    ]:
+    if A().state in ['REQUEST?', 'SENDING']:
         if A().last_time_in_sync > 0 and time.time() - A().last_time_in_sync < 30:
             return True
     return False
@@ -151,10 +148,7 @@ def is_synchronized():
 def is_synchronizing():
     if not A():
         return False
-    return A().state in [
-        'REQUEST?',
-        'SENDING',
-    ]
+    return A().state in ['REQUEST?', 'SENDING']
 
 
 #------------------------------------------------------------------------------
@@ -357,7 +351,6 @@ class IndexSynchronizer(automat.Automat):
         Action method.
         """
         self.ping_required = False
-        data = bpio.ReadBinaryFile(settings.BackupIndexFilePath())
 
     def doSuppliersRequestIndexFile(self, *args, **kwargs):
         """
@@ -489,15 +482,7 @@ class IndexSynchronizer(automat.Automat):
         supplier_revision = backup_control.IncomingSupplierBackupIndex(wrapped_packet)
         self.requesting_suppliers.discard(supplier_idurl)
         if supplier_revision is not None:
-            reactor.callLater(
-                0,
-                self.automat,
-                'index-file-received',
-                (
-                    newpacket,
-                    supplier_revision,
-                ),
-            )  # @UndefinedVariable
+            reactor.callLater(0, self.automat, 'index-file-received', (newpacket, supplier_revision))  # @UndefinedVariable
         if _Debug:
             lg.out(_DebugLevel, 'index_synchronizer._on_supplier_response %s from %r, rev:%s, pending: %d, total: %d' % (newpacket, supplier_idurl, supplier_revision, len(self.requesting_suppliers), self.requested_suppliers_number))
         if len(self.requesting_suppliers) == 0:
@@ -546,7 +531,7 @@ class IndexSynchronizer(automat.Automat):
                 creatorID=localID,
                 packetID=packetID,
                 remoteID=supplier_idurl,
-                response_timeout=30,
+                response_timeout=settings.P2PTimeOut(),
                 callbacks={
                     commands.Data(): self._on_supplier_response,
                     commands.Fail(): self._on_supplier_fail,

@@ -282,10 +282,9 @@ class BackupMonitor(automat.Automat):
         Action method.
         """
         from bitdust.stream import io_throttle
-        # supplierList = contactsdb.suppliers()
-        # take a list of suppliers positions that was changed
+        # take a list of suppliers positions that ware changed
         changedSupplierNums = backup_matrix.SuppliersChangedNumbers(self.current_suppliers)
-        # notify io_throttle that we do not neeed already this suppliers
+        # notify io_throttle that we do not need already those suppliers
         for supplierNum in changedSupplierNums:
             suplier_idurl = self.current_suppliers[supplierNum]
             if suplier_idurl:
@@ -378,9 +377,7 @@ class BackupMonitor(automat.Automat):
         if delete_count > 0:
             backup_fs.Scan()
             backup_fs.Calculate()
-            backup_control.Save()
-            # from bitdust.main import control
-            # control.request_update()
+            backup_control.SaveFSIndex()
         collected = gc.collect()
         if self.backups_progress_last_iteration > 0:
             if _Debug:

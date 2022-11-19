@@ -267,8 +267,7 @@ class SharedAccessDonor(automat.Automat):
         master_key_id = my_keys.make_key_id(alias='master', creator_idurl=self.remote_idurl)
         d = key_ring.audit_private_key(master_key_id, self.remote_idurl)
         d.addCallback(lambda audit_result: (self.automat('audit-ok') if audit_result else self.automat('fail', Exception('remote user master key audit process failed')), ))
-        if _Debug:
-            d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='shared_access_donor.doAuditUserMasterKey')
+        d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='shared_access_donor.doAuditUserMasterKey')
         d.addErrback(lambda err: self.automat('fail', err))
 
     def doSendPubKeyToSuppliers(self, *args, **kwargs):
@@ -308,7 +307,7 @@ class SharedAccessDonor(automat.Automat):
         self.automat('list-files-ok')
         return
         # TODO: cleanup
-        json_list_files = backup_fs.Serialize(
+        json_list_files = backup_fs.SerializeIndex(
             customer_idurl=global_id.glob2idurl(self.key_id),
             to_json=True,
             filter_cb=lambda path_id, path, info: True if strng.to_text(info.key_id) == strng.to_text(self.key_id) else False,

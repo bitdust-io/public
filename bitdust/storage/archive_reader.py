@@ -94,7 +94,7 @@ class ArchiveReader(automat.Automat):
     """
     This class implements all the functionality of ``archive_reader()`` state machine.
     """
-    def __init__(self, debug_level=0, log_events=False, log_transitions=False, publish_events=False, **kwargs):
+    def __init__(self, debug_level=_DebugLevel, log_events=_Debug, log_transitions=_Debug, publish_events=False, **kwargs):
         """
         Builds `archive_reader()` state machine.
         """
@@ -274,10 +274,7 @@ class ArchiveReader(automat.Automat):
             outpacket = p2p_service.SendListFiles(
                 target_supplier=supplier_idurl,
                 key_id=self.group_key_id,
-                query_items=[
-                    self.queue_alias,
-                ],
-                timeout=30,
+                query_items=[self.queue_alias],
                 callbacks={
                     commands.Fail(): lambda resp, info: self._on_list_files_failed(supplier_pos),
                     None: lambda pkt_out: self._on_list_files_failed(supplier_pos),
@@ -285,7 +282,7 @@ class ArchiveReader(automat.Automat):
             )
             self.requested_list_files[supplier_pos] = None if outpacket else False
         if _Debug:
-            lg.args(_DebugLevel, requested=self.requested_list_files)
+            lg.args(_DebugLevel, queue_alias=self.queue_alias, requested=self.requested_list_files)
         self.request_list_files_timer = reactor.callLater(30, self._on_request_list_files_timeout)  # @UndefinedVariable
 
     def _do_select_archive_snapshots(self):
@@ -354,8 +351,7 @@ class ArchiveReader(automat.Automat):
         )
         rw = restore_worker.RestoreWorker(backup_id, outfd, KeyID=self.group_key_id)
         rw.MyDeferred.addCallback(self._on_restore_done, backup_id, outfd, outfilename, backup_index)
-        if _Debug:
-            rw.MyDeferred.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='archive_reader.doStartRestoreWorker')
+        rw.MyDeferred.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='archive_reader.doStartRestoreWorker')
         rw.MyDeferred.addErrback(self._on_restore_failed, backup_id, outfd, outfilename, backup_index)
         rw.automat('init')
 

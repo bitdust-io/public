@@ -70,10 +70,7 @@ from bitdust.crypt import key
 from bitdust.crypt import my_keys
 from bitdust.crypt import encrypted
 
-from bitdust.storage import backup_control
 from bitdust.storage import backup_matrix
-
-from bitdust.supplier import list_files
 
 from bitdust.interface import api
 
@@ -105,6 +102,7 @@ def _do_request_service_keys_registry(key_id, idurl, include_private, include_si
     p2p_service.SendRequestService(
         idurl,
         'service_keys_registry',
+        timeout=timeout,
         callbacks={
             commands.Ack(): lambda response, info: _on_service_keys_registry_response(response, info, key_id, idurl, include_private, include_signature, result, timeout),
             commands.Fail(): lambda response, info: result.errback(Exception('"service_keys_registry" not started on remote node')),
@@ -160,12 +158,14 @@ def _on_transfer_key_response(response, info, key_id, result):
     return None
 
 
-def transfer_key(key_id, trusted_idurl, include_private=False, include_signature=False, timeout=10, result=None):
+def transfer_key(key_id, trusted_idurl, include_private=False, include_signature=False, timeout=None, result=None):
     """
     Actually sending given key to remote user.
     """
     if _Debug:
         lg.out(_DebugLevel, 'key_ring.transfer_key  %s -> %s' % (key_id, trusted_idurl))
+    if not timeout:
+        timeout = settings.P2PTimeOut()
     key_id = my_keys.latest_key_id(key_id)
     if not result:
         result = Deferred()
@@ -225,7 +225,7 @@ def transfer_key(key_id, trusted_idurl, include_private=False, include_signature
     return result
 
 
-def share_key(key_id, trusted_idurl, include_private=False, include_signature=False, timeout=15):
+def share_key(key_id, trusted_idurl, include_private=False, include_signature=False, timeout=None):
     """
     Method to be used to send given key to one trusted user.
     Make sure remote user is identified and connected.
@@ -233,6 +233,8 @@ def share_key(key_id, trusted_idurl, include_private=False, include_signature=Fa
     """
     if _Debug:
         lg.args(_DebugLevel, key_id=key_id, trusted_idurl=trusted_idurl)
+    if timeout is None:
+        timeout = settings.P2PTimeOut()
     key_id = my_keys.latest_key_id(key_id)
     result = Deferred()
     d = online_status.ping(
@@ -283,7 +285,7 @@ def _on_audit_public_key_response(response, info, key_id, untrusted_idurl, test_
     return False
 
 
-def audit_public_key(key_id, untrusted_idurl, timeout=10):
+def audit_public_key(key_id, untrusted_idurl, timeout=None):
     """
     Be sure remote user stores given public key.
     I also need to stores that public key in order to do such audit.
@@ -293,6 +295,8 @@ def audit_public_key(key_id, untrusted_idurl, timeout=10):
     """
     if _Debug:
         lg.out(_DebugLevel, 'key_ring.audit_public_key   testing %s from %s' % (key_id, untrusted_idurl))
+    if not timeout:
+        timeout = settings.P2PTimeOut()
     key_id = my_keys.latest_key_id(key_id)
     result = Deferred()
     recipient_id_obj = identitycache.FromCache(untrusted_idurl)
@@ -364,7 +368,7 @@ def _on_audit_private_key_response(response, info, key_id, untrusted_idurl, test
     return False
 
 
-def audit_private_key(key_id, untrusted_idurl, timeout=10):
+def audit_private_key(key_id, untrusted_idurl, timeout=None):
     """
     Be sure remote user possess given private key.
     I need to possess the public key to be able to audit.
@@ -374,6 +378,8 @@ def audit_private_key(key_id, untrusted_idurl, timeout=10):
     """
     if _Debug:
         lg.out(_DebugLevel, 'key_ring.audit_private_key   testing %s from %s' % (key_id, untrusted_idurl))
+    if not timeout:
+        timeout = settings.P2PTimeOut()
     key_id = my_keys.latest_key_id(key_id)
     result = Deferred()
     recipient_id_obj = identitycache.FromCache(untrusted_idurl)
@@ -586,6 +592,7 @@ def do_backup_key(key_id, keys_folder=None):
     global_key_path = global_id.MakeGlobalID(key_alias='master', customer=my_id.getGlobalID(), path=remote_path_for_key)
     res = api.file_exists(global_key_path)
     if res['status'] == 'OK' and res['result'] and res['result'].get('exist'):
+        from bitdust.storage import backup_control
         lg.warn('key %s already exists in catalog' % global_key_path)
         global_key_path_id = res['result'].get('path_id')
         if global_key_path_id and backup_control.IsPathInProcess(global_key_path_id):
@@ -597,8 +604,7 @@ def do_backup_key(key_id, keys_folder=None):
                 if backup_job:
                     backup_result = Deferred()
                     backup_job.resultDefer.addCallback(lambda resp: backup_result.callback(True) if resp == 'done' else backup_result.errback(Exception('failed to upload key "%s", task was not started: %r' % (global_key_path, resp))))
-                    if _Debug:
-                        backup_job.resultDefer.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='key_ring.do_backup_key')
+                    backup_job.resultDefer.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='key_ring.do_backup_key')
                     backup_job.resultDefer.addErrback(backup_result.errback)
                     if _Debug:
                         lg.args(_DebugLevel, backup_id=backup_id, global_key_path_id=global_key_path_id)
@@ -740,12 +746,10 @@ def on_files_received(newpacket, info):
     if not list_files_global_id['idurl']:
         lg.warn('invalid PacketID: %s' % newpacket.PacketID)
         return False
-    trusted_customer_idurl = list_files_global_id['idurl']
     incoming_key_id = list_files_global_id['key_id']
     if not my_keys.is_valid_key_id(incoming_key_id):
         lg.warn('ignore, invalid key id in packet %s' % newpacket)
         return False
-    # if trusted_customer_idurl == my_id.getIDURL():
     if list_files_global_id['key_alias'] == 'master':
         if _Debug:
             lg.dbg(_DebugLevel, 'ignore %s packet which seems to came from my own supplier' % newpacket)
@@ -755,11 +759,12 @@ def on_files_received(newpacket, info):
         lg.warn('private key is not registered : %s' % incoming_key_id)
         p2p_service.SendFail(newpacket, 'private key is not registered')
         return False
+    if list_files_global_id['key_alias'].startswith('share_'):
+        from bitdust.access import shared_access_coordinator
+        return shared_access_coordinator.on_list_files_verified(newpacket, list_files_global_id)
+    # for other shared files that are not controlled by shared_access_coordinator(): message archive keys are starting with "group_"
     try:
-        block = encrypted.Unserialize(
-            newpacket.Payload,
-            decrypt_key=incoming_key_id,
-        )
+        block = encrypted.Unserialize(newpacket.Payload, decrypt_key=incoming_key_id)
     except:
         lg.exc(newpacket.Payload)
         return False
@@ -771,51 +776,26 @@ def on_files_received(newpacket, info):
     except:
         lg.exc()
         return False
-
-
-#     if block.CreatorID == trusted_customer_idurl:
-#         # this is a trusted guy sending some shared files to me
-#         return False
-#         try:
-#             json_data = serialization.BytesToDict(raw_files, keys_to_text=True, encoding='utf-8')
-#         except:
-#             lg.exc()
-#             return False
-#         count, updated_keys = backup_fs.Unserialize(
-#             json_data=json_data,
-#             customer_idurl=trusted_customer_idurl,
-#         )
-#         p2p_service.SendAck(newpacket)
-#         if not updated_keys:
-#             lg.warn('no files were imported during file sharing')
-#         else:
-#             for key_alias in updated_keys:
-#                 backup_fs.SaveIndex(trusted_customer_idurl, key_alias)
-#             # backup_control.Save()
-#             lg.info('imported %d shared files from %s, key_id=%s' % (
-#                 count, trusted_customer_idurl, incoming_key_id, ))
-#         events.send('shared-list-files-received', data=dict(
-#             customer_idurl=trusted_customer_idurl,
-#             new_items=count,
-#         ))
-#         return True
-
-# otherwise this must be an external supplier sending us a files he stores for trusted customer
+    from bitdust.storage import index_synchronizer
+    from bitdust.storage import backup_control
+    from bitdust.storage import backup_fs
+    # otherwise this must be an external supplier sending us a files he stores for trusted customer
     external_supplier_idurl = block.CreatorID
     try:
-        supplier_raw_list_files = list_files.UnpackListFiles(raw_files, settings.ListFilesFormat())
+        supplier_raw_list_files = backup_control.UnpackListFiles(raw_files, settings.ListFilesFormat())
     except:
         lg.exc()
         return False
     # need to detect supplier position from the list of packets
     # and place that supplier on the correct position in contactsdb
     supplier_pos = backup_matrix.DetectSupplierPosition(supplier_raw_list_files)
+    trusted_customer_idurl = list_files_global_id['idurl']
     known_supplier_pos = contactsdb.supplier_position(external_supplier_idurl, trusted_customer_idurl)
     if known_supplier_pos < 0:
         lg.warn('received %r from an unknown node %r which is not a supplier of %r' % (newpacket, external_supplier_idurl, trusted_customer_idurl))
         return False
     if _Debug:
-        lg.args(_DebugLevel, supplier_pos=supplier_pos, known_supplier_pos=known_supplier_pos, external_supplier=external_supplier_idurl, trusted_customer=trusted_customer_idurl, key_id=incoming_key_id)
+        lg.args(_DebugLevel, sz=len(supplier_raw_list_files), s=external_supplier_idurl, pos=supplier_pos, known_pos=known_supplier_pos, pid=newpacket.PacketID)
     if supplier_pos >= 0:
         if known_supplier_pos != supplier_pos:
             lg.err('known external supplier %r position %d is not matching with received list files position %d for customer %s' % (external_supplier_idurl, known_supplier_pos, supplier_pos, trusted_customer_idurl))
@@ -823,12 +803,12 @@ def on_files_received(newpacket, info):
     else:
         lg.warn('not possible to detect external supplier position for customer %s from received list files, known position is %s' % (trusted_customer_idurl, known_supplier_pos))
         supplier_pos = known_supplier_pos
+    is_in_sync = index_synchronizer.is_synchronized() and backup_fs.revision() > 0
     remote_files_changed, _, _, _ = backup_matrix.process_raw_list_files(
         supplier_num=supplier_pos,
         list_files_text_body=supplier_raw_list_files,
         customer_idurl=trusted_customer_idurl,
-        is_in_sync=True,
-        auto_create=True,
+        is_in_sync=is_in_sync,
     )
     if remote_files_changed:
         backup_matrix.SaveLatestRawListFiles(
