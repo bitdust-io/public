@@ -78,6 +78,7 @@ from bitdust.system import bpio
 
 from bitdust.lib import strng
 from bitdust.lib import serialization
+from bitdust.lib import packetid
 
 from bitdust.main import events
 from bitdust.main import settings
@@ -215,10 +216,10 @@ def open_known_shares():
         active_share.automat('restart')
         if populate_shared_files:
             backup_fs.populate_shared_files(key_id=key_id)
-    if populate_shared_files:
-        listeners.populate_later().remove('shared_file')
+    # if populate_shared_files:
+    # listeners.populate_later().remove('shared_file')
     if listeners.is_populate_requered('shared_location'):
-        listeners.populate_later().remove('shared_location')
+        # listeners.populate_later().remove('shared_location')
         populate_shares()
 
 
@@ -684,10 +685,10 @@ class SharedAccessCoordinator(automat.Automat):
                 else:
                     self.to_be_restarted = True
             else:
-                remote_path, _, _ = remote_path.rpartition('/')
+                _, remote_path, _, _ = packetid.SplitVersionFilename(remote_path)
                 iter_path = backup_fs.WalkByID(remote_path, iterID=backup_fs.fsID(self.customer_idurl, self.key_alias))
                 if not iter_path:
-                    lg.warn('did not found modified file %r in the catalog, restarting %r' % (remote_path, self))
+                    lg.warn('did not found modified file %r in the catalog, restarting %r' % (kwargs['remote_path'], self))
                     self.automat('restart')
                 else:
                     sc = supplier_connector.by_idurl(
@@ -783,10 +784,7 @@ class SharedAccessCoordinator(automat.Automat):
         supplier_idurl = kwargs['supplier_idurl']
         if supplier_idurl in self.suppliers_in_progress:
             self.suppliers_in_progress.remove(supplier_idurl)
-            if event in [
-                'index-sent',
-                'index-up-to-date',
-            ]:
+            if event in ['index-sent', 'index-up-to-date']:
                 if supplier_idurl not in self.suppliers_succeed:
                     self.suppliers_succeed.append(supplier_idurl)
         if _Debug:
