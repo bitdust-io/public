@@ -423,7 +423,7 @@ def start_daemon(node, skip_initialize=False, verbose=False):
     if not skip_initialize:
         run_ssh_command_and_wait(node, 'mkdir -pv /root/.bitdust/metadata/')
         if os.environ.get('_DEBUG', '0') == '0':
-            run_ssh_command_and_wait(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = True/_Debug = False/g' {} +")
+            run_ssh_command_and_wait(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = False/_Debug = False/g' {} +")
     bitdust_daemon = run_ssh_command_and_wait(
         node, 'BITDUST_CRITICAL_PUSH_MESSAGE_FAILS=1 BITDUST_LOG_USE_COLORS=1 COVERAGE_PROCESS_START=/app/bitdust/.coverage_config bitdust daemon'
     )
@@ -440,7 +440,7 @@ def start_daemon(node, skip_initialize=False, verbose=False):
 async def start_daemon_async(node, loop, verbose=False):
     await run_ssh_command_and_wait_async(node, 'mkdir -pv /root/.bitdust/metadata/', loop)
     if os.environ.get('_DEBUG', '0') == '0':
-        await run_ssh_command_and_wait_async(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = True/_Debug = False/g' {} +", loop)
+        await run_ssh_command_and_wait_async(node, "find /app/bitdust -type f -name '*.py' -exec sed -i -e 's/_Debug = False/_Debug = False/g' {} +", loop)
     bitdust_daemon = await run_ssh_command_and_wait_async(
         node, 'BITDUST_CRITICAL_PUSH_MESSAGE_FAILS=1 BITDUST_LOG_USE_COLORS=1 COVERAGE_PROCESS_START=/app/bitdust/.coverage_config bitdust daemon', loop
     )
@@ -980,7 +980,7 @@ async def start_message_broker_async(
     cmd += 'bitdust set logs/automat-events-enabled true;'
     cmd += 'bitdust set logs/automat-transitions-enabled true;'
     cmd += 'bitdust set logs/packet-enabled true;'
-    cmd += 'bitdust set services/gateway/p2p-timeout 20;'
+    cmd += 'bitdust set services/gateway/p2p-timeout 30;'
     # use short key to run tests faster
     cmd += 'bitdust set personal/private-key-size 1024;'
     # disable unrelated services
@@ -1318,14 +1318,14 @@ async def clean_one_node_async(node, event_loop, verbose=False):
     )
 
 
-#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/backups', event_loop)
-#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/metadata', event_loop)
-#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/identitycache', event_loop)
-#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/identityserver', event_loop)
-#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/keys', event_loop)
-#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/customers', event_loop)
-#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/suppliers', event_loop)
-#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/messages', event_loop)
+#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/regression/backups', event_loop)
+#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/regression/metadata', event_loop)
+#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/regression/identitycache', event_loop)
+#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/regression/identityserver', event_loop)
+#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/regression/keys', event_loop)
+#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/regression/customers', event_loop)
+#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/regression/suppliers', event_loop)
+#     await run_ssh_command_and_wait_async(node, 'rm -rf /root/.bitdust/regression/messages', event_loop)
 
 
 async def clean_one_customer_async(node, event_loop, verbose=False):
@@ -1341,7 +1341,7 @@ async def collect_coverage_one_node_async(node, event_loop, wait_before=3, verbo
         [
             'mkdir',
             '-p',
-            '/app/coverage/%s' % node,
+            '/app/coverage/%s' % node
         ],
         event_loop,
         verbose=verbose,
