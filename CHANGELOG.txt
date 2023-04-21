@@ -1,6 +1,12 @@
 Change Log
 ==========
 
+2023-04-21 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
+* renamed main process to BitDust-node for OSX release
+* bump cryptography from 39.0.0 to 39.0.1
+
+
 
 2023-02-21 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
@@ -10,12 +16,6 @@ Change Log
 * use internal Android app data location for restore
 * Android fixes related to internal storage location
 * removed some legacy scripts
-
-
-
-2023-02-08 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
-
-* Bump cryptography from 39.0.0 to 39.0.1
 
 
 
