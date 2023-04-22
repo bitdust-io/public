@@ -1,10 +1,12 @@
 Change Log
 ==========
 
-2023-04-21 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+2023-04-22 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
-* renamed main process to BitDust-node for OSX release
-* bump cryptography from 39.0.0 to 39.0.1
+* bug fix in service_message_history()
+* bug fix in group_member()
+* removed two seed nodes
+* renamed main process to BitDust-node for OSX release (#183)
 
 
 
