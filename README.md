@@ -64,14 +64,14 @@ On Raspberry PI you will need to install those packages:
 
 #### Get BitDust to your local machine
 
-Second step is to get the BitDust sources. To have a full control over BitDust process running on your local machine you better make a fork of the Public BitDist repository on GitHub at https://github.com/bitdust-io/public and clone it on your local machine:
+The second step is to get the BitDust sources. To have full control over the BitDust process running on your local machine, you better make a fork of the Public BitDist repository on GitHub at https://github.com/bitdust-io/public and clone it on your local machine:
 
         git clone https://github.com/<your GitHub username>/<name of BitDust fork>.git bitdust
 
 
-The software will periodically run `git fetch` and `git rebase` to check for recent commits in the repo. This way, we ensure that everyone is running the program's latest version. Once you make a fork, you must manually update your Fork and pull commits from the Public BitDust repository if you trust them.
+The software will periodically run `git fetch` and `git rebase` to check for recent commits in the repo. This way, we ensure everyone runs the program's latest version. Once you make a fork, you must manually update your Fork and pull commits from the Public BitDust repository if you trust them.
 
-However, if you just trust BitDust contributors, you can simply clone the Public repository directly, and software will be up to date with the "official" public code base:
+However, if you trust BitDust contributors, you can simply clone the Public repository directly, and the software will be up to date with the "official" public code base:
 
         git clone https://github.com/bitdust-io/public.git bitdust
 
