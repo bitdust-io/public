@@ -11,11 +11,12 @@ import time
 import threading
 
 # Logical timeout
-LTIMEOUT = 45
+LTIMEOUT = 15
 # Fixed header length
 SLEN = 10
 
-__version__ = '0.1.7'
+
+__version__ = '0.1.10'
 
 
 class Connection(object):
@@ -26,25 +27,33 @@ class Connection(object):
     def __init__(self, ipport, verbose=False, raw=False):
         """ipport is an (ip, port) tuple"""
         self.ipport = ipport
+        if ':' in ipport:
+            ip, port = ipport.split(':')
+            self.ipport = (ip, int(port))
         self.verbose = verbose
         self.raw = raw
         self.sdef = None
         self.last_activity = 0
         self.command_lock = threading.Lock()
         self.check_connection()
+        if self.verbose:
+            print('New connection with', self.ipport)
 
     def check_connection(self):
         """Check connection state and reconnect if needed."""
         if not self.sdef:
             try:
                 if self.verbose:
-                    print('Connecting to', self.ipport)
+                    print("Connecting to", self.ipport)
                 self.sdef = socket.socket()
+                self.sdef.settimeout(LTIMEOUT)
                 self.sdef.connect(self.ipport)
                 self.last_activity = time.time()
             except Exception as e:
-                self.sdef = None
-                raise RuntimeError('Connections: {}'.format(e))
+                if self.verbose:
+                    print('Check connection failed with', e)
+                self.close()
+                raise RuntimeError("Connections: {}".format(e))
 
     def _send(self, data, slen=SLEN, retry=True):
         """Sends something to the server"""
@@ -53,65 +62,66 @@ class Connection(object):
             self.sdef.settimeout(LTIMEOUT)
             # Make sure the packet is sent in one call
             sdata = str(json.dumps(data))
-            res = self.sdef.sendall(str(len(sdata)).encode('utf-8').zfill(slen) + sdata.encode('utf-8'))
+            res = self.sdef.sendall(str(len(sdata)).encode("utf-8").zfill(slen)+sdata.encode("utf-8"))
             if self.raw:
-                print('sending raw:')
-                print(str(len(sdata)).encode('utf-8').zfill(slen) + sdata.encode('utf-8'))
+                print("sending raw:")
+                print(str(len(sdata)).encode("utf-8").zfill(slen)+sdata.encode("utf-8"))
             self.last_activity = time.time()
             # res is always 0 on linux
-            if self.verbose:
-                print('send ', data)
+            # if self.verbose:
+            #     print("send ", data)
             return True
         except Exception as e:
             # send failed, try to reconnect
             # TODO: handle tries #
-            self.sdef = None
+            self.close()
             if retry:
                 if self.verbose:
-                    print('Send failed ({}), trying to reconnect'.format(e))
+                    print("Send failed ({}), trying to reconnect".format(e))
                 self.check_connection()
             else:
                 if self.verbose:
-                    print('Send failed ({}), not retrying.'.format(e))
+                    print("Send failed ({}), not retrying.".format(e))
                 return False
             try:
                 self.sdef.settimeout(LTIMEOUT)
                 # Make sure the packet is sent in one call
-                self.sdef.sendall(str(len(str(json.dumps(data)))).encode('utf-8').zfill(slen) + str(json.dumps(data)).encode('utf-8'))
+                self.sdef.sendall(str(len(str(json.dumps(data)))).encode("utf-8").zfill(slen)+str(json.dumps(data)).encode("utf-8"))
                 return True
             except Exception as e:
-                self.sdef = None
-                raise RuntimeError('Connections: {}'.format(e))
+                self.close()
+                raise RuntimeError("Connections: {}".format(e))
 
-    def _receive(self, slen=SLEN):
+    def _receive(self, slen=SLEN, timeout=LTIMEOUT):
         """Wait for an answer, for LTIMEOUT sec."""
         self.check_connection()
-        self.sdef.settimeout(LTIMEOUT)
+        self.sdef.settimeout(timeout)
         if self.raw:
-            print('getting raw:')
+            print("getting raw:")
         try:
             data = self.sdef.recv(slen)
             if self.raw:
                 raw = data
             if not data:
-                raise RuntimeError('Socket EOF')
+                self.close()
+                raise RuntimeError("Socket EOF")
             data = int(data)  # receive length
         except socket.timeout as e:
-            self.sdef = None
-            return ''
+            self.close()
+            return ""
         try:
             chunks = []
             bytes_recd = 0
             while bytes_recd < data:
                 chunk = self.sdef.recv(min(data - bytes_recd, 2048))
                 if not chunk:
-                    raise RuntimeError('Socket EOF2')
+                    raise RuntimeError("Socket EOF2")
                 chunks.append(chunk)
                 bytes_recd = bytes_recd + len(chunk)
             self.last_activity = time.time()
             if self.raw:
                 print(raw + b''.join(chunks))
-            segments = b''.join(chunks).decode('utf-8')
+            segments = b''.join(chunks).decode("utf-8")
             return json.loads(segments)
         except Exception as e:
             """
@@ -119,14 +129,14 @@ class Connection(object):
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             print(exc_type, fname, exc_tb.tb_lineno)
             """
-            self.sdef = None
-            raise RuntimeError('Connections: {}'.format(e))
+            self.close()
+            raise RuntimeError("Connections: {}".format(e))
 
     def command(self, command, options=None):
         """
-        Sends a command and return it's raw result.
+        Sends a command and return its raw result.
         options has to be a list.
-        Each item of options will be sent separately. So If you want to send a list, pass a list of list.
+        Each item of options will be sent separately. So If you ant to send a list, pass a list of list.
         """
         with self.command_lock:
             try:
@@ -144,7 +154,8 @@ class Connection(object):
                 """
                 # TODO : better handling of tries and delay between
                 if self.verbose:
-                    print('Error <{}> sending command, trying to reconnect.'.format(e))
+                    print("Error <{}> sending command, trying to reconnect.".format(e))
+                self.close()
                 self.check_connection()
                 self._send(command)
                 if options:
@@ -155,11 +166,17 @@ class Connection(object):
 
     def close(self):
         """Close the socket"""
-        try:
-            self.sdef.close()
-        except Exception as e:
-            pass
+        if self.verbose:
+            print('Closing connection with', self.ipport)
+        if self.sdef:
+            try:
+                self.sdef.close()
+            except Exception as e:
+                if self.verbose:
+                    print('Failed closing connection with', self.ipport, 'because of', e)
+            finally:
+                self.sdef = None
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     print("I'm a module, can't run!")

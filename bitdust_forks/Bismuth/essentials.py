@@ -30,6 +30,10 @@ For temp. code compatibility, dup code moved to polysign module
 """
 
 
+DUST_FEE = 0.00001
+OPENFIELD_SIZE = 100000
+
+
 def address_validate(address: str) -> bool:
     return SignerFactory.address_is_valid(address)
 
@@ -90,12 +94,12 @@ def download_file(url: str, filename: str) -> None:
             for chunk in r.iter_content(chunk_size=1024):
                 if chunk:
                     chunkno = chunkno + 1
-                    if chunkno % 10000 == 0:  # every x chunks
-                        print(f'Downloaded {int(100 * (chunkno / total_size))} %')
+                    # if chunkno % 10000 == 0:  # every x chunks
+                    #     print(f'Downloaded {int(100 * (chunkno / total_size))} %')
 
                     fp.write(chunk)
                     fp.flush()
-            print('Downloaded 100 %')
+            # print('Downloaded 100 %')
     except:
         raise
 
@@ -173,14 +177,14 @@ def sign_rsa(timestamp, address, recipient, amount, operation, openfield, key, p
         return False
 
 
-def keys_check(app_log, keyfile_name: str) -> None:
+def keys_check(app_log, keyfile_name: str, data_dir='.') -> None:
     # TODO: move, make use of polysign module
     # key maintenance
-    if os.path.isfile('privkey.der') is True:
+    if os.path.isfile(os.path.join(data_dir, 'privkey.der')) is True:
         app_log.warning('privkey.der found')
-    elif os.path.isfile('privkey_encrypted.der') is True:
+    elif os.path.isfile(os.path.join(data_dir, 'privkey_encrypted.der')) is True:
         app_log.warning('privkey_encrypted.der found')
-        os.rename('privkey_encrypted.der', 'privkey.der')
+        os.rename(os.path.join(data_dir, 'privkey_encrypted.der'), os.path.join(data_dir, 'privkey.der'))
 
     elif os.path.isfile(keyfile_name) is True:
         app_log.warning('{} found'.format(keyfile_name))
@@ -213,11 +217,11 @@ def keys_save(private_key_readable: str, public_key_readable: str, address: str,
         json.dump(wallet_dict, keyfile)
 
 
-def keys_load(privkey_filename: str = 'privkey.der', pubkey_filename: str = 'pubkey.der'):
+def keys_load(privkey_filename: str = 'privkey.der', pubkey_filename: str = 'pubkey.der', wallet_filename: str ='wallet.der'):
     keyfile = 'wallet.der'
-    if os.path.exists('wallet.der'):
-        print('Using modern wallet method')
-        return keys_load_new('wallet.der')
+    if wallet_filename and os.path.exists(wallet_filename):
+        # print('Using modern wallet method')
+        return keys_load_new(wallet_filename)
 
     else:
         # print("loaded",privkey, pubkey)
@@ -246,10 +250,10 @@ def keys_load(privkey_filename: str = 'privkey.der', pubkey_filename: str = 'pub
         public_key_b64encoded = base64.b64encode(public_key_readable.encode('utf-8'))
         address = hashlib.sha224(public_key_readable.encode('utf-8')).hexdigest()
 
-        print('Upgrading wallet')
-        keys_save(private_key_readable, public_key_readable, address, keyfile)
+        # print('Upgrading wallet')
+        keys_save(private_key_readable, public_key_readable, address, wallet_filename or keyfile)
 
-        return key, public_key_readable, private_key_readable, encrypted, unlocked, public_key_b64encoded, address, keyfile
+        return key, public_key_readable, private_key_readable, encrypted, unlocked, public_key_b64encoded, address, wallet_filename or keyfile
 
 
 def keys_unlock(private_key_encrypted: str) -> tuple:
@@ -292,7 +296,7 @@ def keys_load_new(keyfile='wallet.der'):
 
 def fee_calculate(openfield: str, operation: str = '', block: int = 0) -> Decimal:
     # block var will be removed after HF
-    fee = Decimal('0.01') + (Decimal(len(openfield))/Decimal('100000'))  # 0.01 dust
+    fee = Decimal('{}'.format(DUST_FEE)) + (Decimal(len(openfield))/Decimal('{}'.format(OPENFIELD_SIZE)))  # dust + openfield cost
     if operation == 'token:issue':
         fee = Decimal(fee) + Decimal('10')
     if openfield.startswith('alias='):

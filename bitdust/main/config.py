@@ -163,7 +163,20 @@ class BaseConfig(object):
             return default
 
     def setInt(self, entryPath, value):
-        return self._set(entryPath, str(value))
+        return self._set(entryPath, str(int(value)))
+
+    def getFloat(self, entryPath, default=None):
+        s = self.getData(entryPath)
+        if s is None:
+            return default
+        try:
+            s = str(s).strip().strip('"')
+            return float(s)
+        except ValueError:
+            return default
+
+    def setFloat(self, entryPath, value):
+        return self._set(entryPath, str(float(value)))
 
     def getBool(self, entryPath, default=None):
         data = self.getData(entryPath)
@@ -177,18 +190,17 @@ class BaseConfig(object):
         ] else False
 
     def setBool(self, entryPath, value):
-        return self._set(entryPath, 'true' if value else 'false')
+        return self._set(entryPath, 'true' if bool(value) else 'false')
 
-    def getString(self, entryPath, default=None):
+    def getString(self, entryPath, default=''):
         data = self.getData(entryPath)
         if data is None:
             return default
         data = str(data).strip()
         if len(data) < 2:
             return default
-        if not (data[0] == data[-1] == '"'):
-            return default
-        data = data[1:-1]
+        if data[0] == data[-1] == '"':
+            data = data[1:-1]
         try:
             out = []
             i = 0
@@ -206,7 +218,7 @@ class BaseConfig(object):
 
     def setString(self, entryPath, value):
         out = ['"']
-        for x in value:
+        for x in str(value):
             if x in '\\"':
                 out.append('\\')
             out.append(x)
@@ -382,6 +394,8 @@ class NotifiableConfig(DefaultsConfig):
 
 
 class FixedTypesConfig(NotifiableConfig):
+    # TODO: verify value against type of the field when populating every option
+
     def __init__(self, configDir):
         super(FixedTypesConfig, self).__init__(configDir)
         try:
@@ -419,6 +433,9 @@ class FixedTypesConfig(NotifiableConfig):
             config_types.TYPE_PASSWORD,
             config_types.TYPE_INTEGER,
             config_types.TYPE_BOOLEAN,
+            config_types.TYPE_FLOATING_POINT,
+            config_types.TYPE_POSITIVE_FLOATING_POINT,
+            config_types.TYPE_NON_ZERO_POSITIVE_FLOATING_POINT,
         ]:
             return {}
         if typ == config_types.TYPE_POSITIVE_INTEGER:
@@ -450,7 +467,7 @@ class FixedTypesConfig(NotifiableConfig):
                 raise TypeError('unexpected option type for %r' % entryPath)
         return {}
 
-    def getValueOfType(self, entryPath):
+    def getValueOfType(self, entryPath, default=None):
         from bitdust.main import config_types
         typ = self.getType(entryPath)
         value = None
@@ -459,24 +476,24 @@ class FixedTypesConfig(NotifiableConfig):
             config_types.TYPE_TEXT,
             config_types.TYPE_UNDEFINED,
         ]:
-            value = self.getData(entryPath)
+            value = self.getString(entryPath, default=default)
         elif typ in [
             config_types.TYPE_BOOLEAN,
         ]:
-            value = self.getBool(entryPath)
+            value = self.getBool(entryPath, default=default)
         elif typ in [
             config_types.TYPE_INTEGER,
             config_types.TYPE_POSITIVE_INTEGER,
             config_types.TYPE_NON_ZERO_POSITIVE_INTEGER,
             config_types.TYPE_PORT_NUMBER,
         ]:
-            value = self.getInt(entryPath)
+            value = self.getInt(entryPath, default=default)
         elif typ in [
             config_types.TYPE_FOLDER_PATH,
             config_types.TYPE_FILE_PATH,
             config_types.TYPE_PASSWORD,
         ]:
-            value = self.getString(entryPath) or ''
+            value = self.getString(entryPath, default=default) or ''
             if typ in [
                 config_types.TYPE_FOLDER_PATH,
             ]:
@@ -489,11 +506,17 @@ class FixedTypesConfig(NotifiableConfig):
                         value = value + u'/'
         elif typ == config_types.TYPE_COMBO_BOX:
             if entryPath == 'services/customer/suppliers-number':
-                value = self.getInt(entryPath)
+                value = self.getInt(entryPath, default=default)
             else:
                 raise TypeError('unexpected option type for %r' % entryPath)
+        elif typ in [
+            config_types.TYPE_FLOATING_POINT,
+            config_types.TYPE_POSITIVE_FLOATING_POINT,
+            config_types.TYPE_NON_ZERO_POSITIVE_FLOATING_POINT,
+        ]:
+            value = self.getFloat(entryPath, default=default)
         else:
-            value = self.getData(entryPath)
+            value = self.getData(entryPath, default=default)
         return value
 
     def setValueOfType(self, entryPath, value):
@@ -504,16 +527,12 @@ class FixedTypesConfig(NotifiableConfig):
             config_types.TYPE_TEXT,
             config_types.TYPE_UNDEFINED,
         ]:
-            self.setData(entryPath, strng.text_type(value))
+            self.setString(entryPath, strng.text_type(value))
         elif typ in [
             config_types.TYPE_BOOLEAN,
         ]:
             if strng.is_string(value):
-                vl = strng.to_text(value).strip().lower() in [
-                    'true',
-                    '1',
-                    'on',
-                ]
+                vl = strng.to_text(value).strip().lower() in ['true', '1', 'on']
             else:
                 vl = bool(value)
             self.setBool(entryPath, vl)
@@ -523,7 +542,7 @@ class FixedTypesConfig(NotifiableConfig):
             config_types.TYPE_NON_ZERO_POSITIVE_INTEGER,
             config_types.TYPE_PORT_NUMBER,
         ]:
-            self.setInt(entryPath, int(value))
+            self.setInt(entryPath, value)
         elif typ in [
             config_types.TYPE_FOLDER_PATH,
             config_types.TYPE_FILE_PATH,
@@ -535,6 +554,12 @@ class FixedTypesConfig(NotifiableConfig):
                 value = self.setInt(entryPath, int(value))
             else:
                 raise TypeError('unexpected option type for %r' % entryPath)
+        elif typ in [
+            config_types.TYPE_FLOATING_POINT,
+            config_types.TYPE_POSITIVE_FLOATING_POINT,
+            config_types.TYPE_NON_ZERO_POSITIVE_FLOATING_POINT,
+        ]:
+            self.setFloat(entryPath, value)
         else:
             self.setData(entryPath, strng.text_type(value))
         return True

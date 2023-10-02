@@ -42,6 +42,9 @@ TYPE_COMBO_BOX = 9
 TYPE_PASSWORD = 10
 TYPE_DISK_SPACE = 11
 TYPE_PORT_NUMBER = 12
+TYPE_FLOATING_POINT = 13
+TYPE_POSITIVE_FLOATING_POINT = 14
+TYPE_NON_ZERO_POSITIVE_FLOATING_POINT = 15
 
 
 def labels():
@@ -59,6 +62,9 @@ def labels():
         TYPE_PASSWORD: 'password',
         TYPE_DISK_SPACE: 'disk space',
         TYPE_PORT_NUMBER: 'port number',
+        TYPE_FLOATING_POINT: 'floating point',
+        TYPE_POSITIVE_FLOATING_POINT: 'non negative floating point',
+        TYPE_NON_ZERO_POSITIVE_FLOATING_POINT: 'non zero positive floating point',
     }
 
 
@@ -90,7 +96,7 @@ def defaults():
         'paths/messages': TYPE_FOLDER_PATH,
         'paths/receipts': TYPE_FOLDER_PATH,
         'paths/restore': TYPE_FOLDER_PATH,
-        'personal/private-key-size': TYPE_STRING,
+        'personal/private-key-size': TYPE_POSITIVE_INTEGER,
         'services/accountant/enabled': TYPE_BOOLEAN,
         'services/backup-db/enabled': TYPE_BOOLEAN,
         'services/backups/block-size': TYPE_DISK_SPACE,
@@ -99,14 +105,31 @@ def defaults():
         'services/backups/max-block-size': TYPE_DISK_SPACE,
         'services/backups/max-copies': TYPE_POSITIVE_INTEGER,
         'services/backups/wait-suppliers-enabled': TYPE_BOOLEAN,
-        'services/blockchain/enabled': TYPE_BOOLEAN,
-        'services/blockchain/host': TYPE_STRING,
-        'services/blockchain/port': TYPE_PORT_NUMBER,
-        'services/blockchain/explorer/enabled': TYPE_BOOLEAN,
-        'services/blockchain/explorer/port': TYPE_PORT_NUMBER,
-        'services/blockchain/wallet/enabled': TYPE_BOOLEAN,
-        'services/blockchain/wallet/port': TYPE_PORT_NUMBER,
-        'services/blockchain/miner/enabled': TYPE_BOOLEAN,
+        # 'services/blockchain/enabled': TYPE_BOOLEAN,
+        # 'services/blockchain/host': TYPE_STRING,
+        # 'services/blockchain/port': TYPE_PORT_NUMBER,
+        # 'services/blockchain/explorer/enabled': TYPE_BOOLEAN,
+        # 'services/blockchain/explorer/port': TYPE_PORT_NUMBER,
+        # 'services/blockchain/wallet/enabled': TYPE_BOOLEAN,
+        # 'services/blockchain/wallet/port': TYPE_PORT_NUMBER,
+        # 'services/blockchain/miner/enabled': TYPE_BOOLEAN,
+        'services/blockchain-id/enabled': TYPE_BOOLEAN,
+        'services/blockchain-authority/enabled': TYPE_BOOLEAN,
+        'services/blockchain-authority/registration-bonus-coins': TYPE_POSITIVE_INTEGER,
+        'services/blockchain-authority/requests-reading-offset': TYPE_POSITIVE_INTEGER,
+        'services/blockchain-authority/requests-reading-limit': TYPE_NON_ZERO_POSITIVE_INTEGER,
+        'services/bismuth-blockchain/enabled': TYPE_BOOLEAN,
+        'services/bismuth-node/enabled': TYPE_BOOLEAN,
+        'services/bismuth-node/host': TYPE_STRING,
+        'services/bismuth-node/tcp-port': TYPE_PORT_NUMBER,
+        'services/bismuth-wallet/enabled': TYPE_BOOLEAN,
+        'services/bismuth-pool/enabled': TYPE_BOOLEAN,
+        'services/bismuth-pool/host': TYPE_STRING,
+        'services/bismuth-pool/tcp-port': TYPE_PORT_NUMBER,
+        'services/bismuth-miner/enabled': TYPE_BOOLEAN,
+        'services/bismuth-miner/pool-host': TYPE_STRING,
+        'services/bismuth-miner/pool-tcp-port': TYPE_PORT_NUMBER,
+        'services/bismuth-identity/enabled': TYPE_BOOLEAN,
         'services/broadcasting/enabled': TYPE_BOOLEAN,
         'services/broadcasting/routing-enabled': TYPE_BOOLEAN,
         'services/broadcasting/max-broadcast-connections': TYPE_NON_ZERO_POSITIVE_INTEGER,
@@ -199,6 +222,8 @@ def defaults():
         'services/supplier/donated-space': TYPE_DISK_SPACE,
         'services/supplier/enabled': TYPE_BOOLEAN,
         'services/supplier-contracts/enabled': TYPE_BOOLEAN,
+        'services/supplier-contracts/initial-duration-hours': TYPE_NON_ZERO_POSITIVE_INTEGER,
+        'services/supplier-contracts/duration-raise-factor': TYPE_NON_ZERO_POSITIVE_FLOATING_POINT,
         'services/tcp-connections/enabled': TYPE_BOOLEAN,
         'services/tcp-connections/tcp-port': TYPE_PORT_NUMBER,
         'services/tcp-connections/upnp-enabled': TYPE_BOOLEAN,

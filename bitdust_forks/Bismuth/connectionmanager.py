@@ -10,11 +10,10 @@ class ConnectionManager(threading.Thread):
         self.mp = mp
 
     def run(self):
-
         self.connection_manager()
 
     def connection_manager(self):
-        self.node.logger.app_log.warning('Status: Starting connection manager')
+        # self.node.logger.app_log.warning('Status: Starting connection manager')
         until_purge = 0
 
         while not self.node.IS_STOPPING:
@@ -32,18 +31,18 @@ class ConnectionManager(threading.Thread):
                 if not self.node.is_regnet:
                     # regnet never tries to connect
                     self.node.peers.client_loop(self.node, this_target=worker)
-                self.node.logger.app_log.warning(f'Status: Threads at {threading.active_count()} / {self.node.thread_limit}')
-                self.node.logger.app_log.info(f'Status: Syncing nodes: {self.node.syncing}')
-                self.node.logger.app_log.info(f'Status: Syncing nodes: {len(self.node.syncing)}/3')
+                # self.node.logger.app_log.warning(f'Status: Threads at {threading.active_count()} / {self.node.thread_limit}')
+                # self.node.logger.app_log.info(f'Status: Syncing nodes: {self.node.syncing}')
+                # self.node.logger.app_log.info(f'Status: Syncing nodes: {len(self.node.syncing)}/3')
 
                 # Status display for Peers related info
-                self.node.peers.status_log()
+                # self.node.peers.status_log()
                 self.mp.MEMPOOL.status()
                 # last block
                 if self.node.last_block_ago:
                     self.node.last_block_ago = time.time() - int(self.node.last_block_timestamp)
-                    self.node.logger.app_log.warning(f'Status: Last block {self.node.last_block} was generated '
-                                                     f"{'%.2f' % (self.node.last_block_ago / 60) } minutes ago", )
+                    # self.node.logger.app_log.warning(f'Status: Last block {self.node.last_block} was generated '
+                    #                                  f"{'%.2f' % (self.node.last_block_ago / 60) } minutes ago", )
                 # status Hook
                 uptime = int(time.time() - self.node.startup_time)
                 status = {
@@ -65,7 +64,7 @@ class ConnectionManager(threading.Thread):
                 self.node.plugin_manager.execute_action_hook('status', status)
                 # end status hook
 
-                # logger.app_log.info(threading.enumerate() all threads)
+                # self.node.logger.app_log.warning('Current: {} All: {}'.format(threading.current_thread(), threading.enumerate()))
                 # time.sleep(30)
                 for i in range(30):
                     # faster stop

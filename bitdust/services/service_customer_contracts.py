@@ -45,36 +45,20 @@ class CustomerContractsService(LocalService):
     def dependent_on(self):
         return [
             'service_customer',
-            'service_contract_chain',
+            'service_blockchain_id',
         ]
 
-    def installed(self):
-        # TODO: to be continue...
-        return False
-
     def start(self):
-        from bitdust.main import events
-        from bitdust.contacts import contactsdb
-        from coins import customer_contract_executor
-        for supplier_idurl in contactsdb.suppliers():
-            customer_contract_executor.init_contract(supplier_idurl)
-        events.add_subscriber(self._on_supplier_modified, 'supplier-modified')
+        from twisted.internet import task
+        self.payment_loop = task.LoopingCall(self.on_payment_task)
+        self.payment_loop.start(60*60)
         return True
 
     def stop(self):
-        from bitdust.main import events
-        from coins import customer_contract_executor
-        events.remove_subscriber(self._on_supplier_modified, 'supplier-modified')
-        for supplier_idurl in list(customer_contract_executor.all_contracts.keys()):
-            customer_contract_executor.shutdown_contract(supplier_idurl)
+        self.payment_loop.stop()
+        self.payment_loop = None
         return True
 
-    def health_check(self):
-        return True
-
-    def _on_supplier_modified(self, evt):
-        from coins import customer_contract_executor
-        if evt.data['old_idurl']:
-            customer_contract_executor.recheck_contract(evt.data['old_idurl'])
-        if evt.data['new_idurl']:
-            customer_contract_executor.recheck_contract(evt.data['new_idurl'])
+    def on_payment_task(self):
+        from bitdust.customer import payment
+        payment.pay_for_storage()

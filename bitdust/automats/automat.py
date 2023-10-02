@@ -539,7 +539,8 @@ class Automat(object):
         if self.fast:
             self.event(event, *args, **kwargs)
         else:
-            reactor.callLater(0, self.event, event, *args, **kwargs)  # @UndefinedVariable
+            delay = kwargs.pop('delay', 0)
+            reactor.callLater(delay, self.event, event, *args, **kwargs)  # @UndefinedVariable
         return self
 
     def event(self, event, *args, **kwargs):
@@ -680,7 +681,7 @@ class Automat(object):
         exc_traceback = _tb if exc_traceback is None else exc_traceback
         e = ''
         if exc_value is not None or exc_traceback is not None:
-            e = traceback.format_exception(etype=exc_type, value=exc_value, tb=exc_traceback)
+            e = traceback.format_exception(exc_type, value=exc_value, tb=exc_traceback)
         else:
             e = traceback.format_exc()
         if to_logfile and _LogFile is not None:

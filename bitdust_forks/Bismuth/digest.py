@@ -1,21 +1,30 @@
-import hashlib
 import os
 import sys
+import time
+import hashlib
+import threading
+
+from decimal import Decimal
 
 import essentials
-import mempool as mp
 import mining_heavy3
-from difficulty import *
+import regnet
+import mempool as mp
+import tokensv2 as tokens
+from difficulty import difficulty
 from essentials import address_is_rsa, checkpoint_set, ledger_balance3
 from polysign.signerfactory import SignerFactory
+from quantizer import quantize_two, quantize_eight
 from fork import Fork
-import tokensv2 as tokens
-from decimal import Decimal
 
 fork = Fork()
 
 
 def digest_block(node, data, sdef, peer_ip, db_handler):
+
+    # if not mining_heavy3.MMAP:
+    #     mining_heavy3.mining_open(node.heavy3_path)
+
     """node param for imports"""
     class Transaction:
         def __init__(self):
@@ -61,7 +70,7 @@ def digest_block(node, data, sdef, peer_ip, db_handler):
         else:
             if node.last_block > fork.POW_FORK:
                 if not fork.check_postfork_reward(db_handler):
-                    print('Rolling back')
+                    # print('Rolling back')
                     db_handler.rollback_under(fork.POW_FORK - 1)
                     raise ValueError('Rolling back chain due to old fork data')
         # fork handling
@@ -213,15 +222,17 @@ def digest_block(node, data, sdef, peer_ip, db_handler):
                 if tx_index == block_instance.tx_count - 1:
                     db_amount = 0  # prevent spending from another address, because mining txs allow delegation
 
-                    if node.is_testnet and node.last_block >= fork.POW_FORK_TESTNET:
-                        block_instance.mining_reward = 15 - (block_instance.block_height_new - fork.POW_FORK_TESTNET)/1100000 - 9.5
-                    elif node.is_mainnet and node.last_block >= fork.POW_FORK:
-                        block_instance.mining_reward = 15 - (block_instance.block_height_new - fork.POW_FORK)/1100000 - 9.5
-                    else:
-                        block_instance.mining_reward = 15 - (quantize_eight(block_instance.block_height_new)/quantize_eight(1000000/2)) - Decimal('2.4')
-
-                    if block_instance.mining_reward < 0.5:
-                        block_instance.mining_reward = 0.5
+                    # if node.is_testnet and node.last_block >= fork.POW_FORK_TESTNET:
+                    #     block_instance.mining_reward = 15 - (block_instance.block_height_new - fork.POW_FORK_TESTNET)/1100000 - 9.5
+                    # elif node.is_mainnet and node.last_block >= fork.POW_FORK:
+                    #     block_instance.mining_reward = 15 - (block_instance.block_height_new - fork.POW_FORK)/1100000 - 9.5
+                    # else:
+                    #     block_instance.mining_reward = 15 - (quantize_eight(block_instance.block_height_new)/quantize_eight(1000000/2)) - Decimal('2.4')
+                    # if block_instance.mining_reward < 0.5:
+                    #    block_instance.mining_reward = 0.5
+                    block_instance.mining_reward = node.REGULAR_MINER_REWARD
+                    if miner_tx.miner_address in node.FOUNDATION_MINERS and block_instance.tx_count == 1:
+                        block_instance.mining_reward = node.FOUNDATION_MINER_REWARD
 
                     reward = '{:.8f}'.format(Decimal(block_instance.mining_reward) + sum(fees_block))
 
@@ -296,7 +307,7 @@ def digest_block(node, data, sdef, peer_ip, db_handler):
                 block_instance.block_height_new = node.last_block + 1
                 block_instance.start_time_block = quantize_two(time.time())
 
-                fork_reward_check()
+                # fork_reward_check()
 
                 # sort_transactions also computes several hidden variables, like miner_tx.q_block_timestamp
                 # So it has to be run before the check
@@ -309,24 +320,35 @@ def digest_block(node, data, sdef, peer_ip, db_handler):
                     raise ValueError(f'!Block is older {miner_tx.q_block_timestamp} '
                                      f'than the previous one {node.last_block_timestamp} , will be rejected', )
 
+                if len(block) == 1:
+                    if miner_tx.miner_address not in node.FOUNDATION_MINERS:
+                        transaction = block[0]
+                        received_operation = str(transaction[6])[:30]
+                        received_amount = float(transaction[3])
+                        if received_operation.startswith('identity') and received_amount == 0:
+                            pass
+                        else:
+                            # only allow foundation miners to mine empty blocks
+                            raise ValueError('Only foundation miners are allowed to mine empty blocks')
+
                 check_signature(block)
 
                 # calculate current difficulty (is done for each block in block array, not super easy to isolate)
                 diff = difficulty(node, db_handler)
                 node.difficulty = diff
 
-                node.logger.app_log.warning(f"Time to generate block {node.last_block + 1}: {'%.2f' % diff[2]}")
-                node.logger.app_log.warning(f'Current difficulty: {diff[3]}')
-                node.logger.app_log.warning(f'Current blocktime: {diff[4]}')
-                node.logger.app_log.warning(f'Current hashrate: {diff[5]}')
-                node.logger.app_log.warning(f'Difficulty adjustment: {diff[6]}')
-                node.logger.app_log.warning(f'Difficulty: {diff[0]} {diff[1]}')
+                # node.logger.app_log.warning(f"Time to generate block {node.last_block + 1}: {'%.2f' % diff[2]}")
+                # node.logger.app_log.warning(f'Current difficulty: {diff[3]}')
+                # node.logger.app_log.warning(f'Current blocktime: {diff[4]}')
+                # node.logger.app_log.warning(f'Current hashrate: {diff[5]}')
+                # node.logger.app_log.warning(f'Difficulty adjustment: {diff[6]}')
+                # node.logger.app_log.warning(f'Difficulty: {diff[0]} {diff[1]}')
 
                 block_instance.block_hash = hashlib.sha224((str(block_instance.transaction_list_converted) + node.last_block_hash).encode('utf-8')).hexdigest()
                 del block_instance.transaction_list_converted[:]
 
                 # node.logger.app_log.info("Last block sha_hash: {}".format(block_hash))
-                node.logger.app_log.info(f'Calculated block sha_hash: {block_instance.block_hash}')
+                # node.logger.app_log.info(f'Calculated block sha_hash: {block_instance.block_hash}')
                 # node.logger.app_log.info("Nonce: {}".format(nonce))
 
                 # check if we already have the sha_hash
@@ -335,6 +357,7 @@ def digest_block(node, data, sdef, peer_ip, db_handler):
                 if dummy:
                     raise ValueError('Skipping digestion of block {} from {}, because we already have it on block_height {}'.format(block_instance.block_hash[:10], peer_ip, dummy[0]))
 
+                mining_heavy3.mining_open(node.heavy3_path)
                 if node.is_mainnet:
                     diff_save = mining_heavy3.check_block(
                         block_instance.block_height_new,
@@ -460,6 +483,7 @@ def digest_block(node, data, sdef, peer_ip, db_handler):
             print(exc_type, fname, exc_tb.tb_lineno)
             raise
 
+    #--- digest start
     # TODO: no def in def, unreadable. we are 10 screens down the prototype of that function.
     # digestion begins here
     if node.peers.is_banned(peer_ip):
@@ -474,7 +498,7 @@ def digest_block(node, data, sdef, peer_ip, db_handler):
     if not node.db_lock.locked():
 
         node.db_lock.acquire()
-        node.logger.app_log.warning(f'Database lock acquired')
+        node.logger.app_log.warning(f'Database lock acquired in {threading.current_thread().name}')
 
         while mp.MEMPOOL.lock.locked():
             time.sleep(0.1)
@@ -519,7 +543,7 @@ def digest_block(node, data, sdef, peer_ip, db_handler):
             db_handler.db_to_drive(node)
 
             node.db_lock.release()
-            node.logger.app_log.warning(f'Database lock released')
+            node.logger.app_log.warning(f'Database lock released in {threading.current_thread().name}')
 
             delta_t = time.time() - float(block_instance.start_time_block)
             # node.logger.app_log.warning("Block: {}: {} digestion completed in {}s."
@@ -529,3 +553,4 @@ def digest_block(node, data, sdef, peer_ip, db_handler):
     else:
         node.logger.app_log.warning(f'Chain: Skipping processing from {peer_ip}, someone delivered data faster')
         node.plugin_manager.execute_action_hook('digestblock', {'failed': 'skipped', 'ip': peer_ip})
+    #--- digest end
