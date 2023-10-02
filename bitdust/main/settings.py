@@ -449,7 +449,10 @@ def P2PTimeOut():
     """
     global _P2PTimeOut
     if _P2PTimeOut is None:
-        _P2PTimeOut = config.conf().getInt('services/gateway/p2p-timeout', 15)
+        if config.conf():
+            _P2PTimeOut = config.conf().getInt('services/gateway/p2p-timeout', 15)
+        else:
+            _P2PTimeOut = 15
     return _P2PTimeOut
 
 
@@ -567,6 +570,15 @@ def BackupDBSynchronizeDelay():
     Save backup index database no more than one time per every 5 min.
     """
     return 60*5
+
+
+def SupplierContractBillingPeriodDays():
+    """
+    To prevent overhead on blockchain transactions, there is a limit.
+    To pay for storage, you can send only one transaction to any user per billing period.
+    So multiple contracts are paid at once.
+    """
+    return 30
 
 
 #------------------------------------------------------------------------------
@@ -1383,11 +1395,11 @@ def enableFTPServer(enable=None):
 
 
 def getIdServerHost():
-    return config.conf().getData('services/identity-server/host').strip()
+    return config.conf().getString('services/identity-server/host').strip()
 
 
 def setIdServerHost(hostname_or_ip):
-    return config.conf().setData('services/identity-server/host', hostname_or_ip)
+    return config.conf().setString('services/identity-server/host', hostname_or_ip)
 
 
 def getIdServerWebPort():

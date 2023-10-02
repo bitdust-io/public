@@ -2,12 +2,20 @@ from decimal import Decimal
 import regnet
 import math
 import time
-from fork import *
-from quantizer import quantize_two, quantize_ten
 from fork import Fork
+from quantizer import quantize_two, quantize_ten
+
+
+_Debug = False
+
+DEFAULT_DIFFICULTY = 10
 
 
 def difficulty(node, db_handler):
+
+    difficulty = [DEFAULT_DIFFICULTY, DEFAULT_DIFFICULTY, 0, 0, 0, 0, 0, 0]
+    return difficulty
+
     try:
         fork = Fork()
 
@@ -42,11 +50,16 @@ def difficulty(node, db_handler):
         if node.is_regnet:
             return (float('%.10f' % regnet.REGNET_DIFF), float('%.10f' % (regnet.REGNET_DIFF - 8)), float(time_to_generate), float(regnet.REGNET_DIFF), float(block_time), float(0), float(0), block_height)
 
-        hashrate = pow(2, diff_block_previous/Decimal(2.0))/(block_time*math.ceil(28 - diff_block_previous/Decimal(16.0)))
-        # Calculate new difficulty for desired blocktime of 60 seconds
-        target = Decimal(60.00)
-        ##D0 = diff_block_previous
-        difficulty_new = Decimal((2/math.log(2))*math.log(hashrate*target*math.ceil(28 - diff_block_previous/Decimal(16.0))))
+        try:
+            hashrate = pow(2, diff_block_previous/Decimal(2.0))/(block_time*math.ceil(28 - diff_block_previous/Decimal(16.0)))
+            # Calculate new difficulty for desired blocktime of 60 seconds
+            target = Decimal(60.00)
+            ##D0 = diff_block_previous
+            difficulty_new = Decimal((2/math.log(2))*math.log(hashrate*target*math.ceil(28 - diff_block_previous/Decimal(16.0))))
+        except:
+            hashrate = 1
+            difficulty_new = 10
+
         # Feedback controller
         Kd = 10
         difficulty_new = difficulty_new - Kd*(block_time - block_time_prev)
@@ -59,9 +72,9 @@ def difficulty(node, db_handler):
         difficulty = difficulty_new_adjusted
 
         #fork handling
-        if node.is_mainnet:
-            if block_height == fork.POW_FORK - fork.FORK_AHEAD:
-                fork.limit_version(node)
+        # if node.is_mainnet:
+        #     if block_height == fork.POW_FORK - fork.FORK_AHEAD:
+        #         fork.limit_version(node)
         #fork handling
 
         diff_drop_time = Decimal(180)
@@ -83,8 +96,8 @@ def difficulty(node, db_handler):
             diff_dropped = 50
 
         # TODO: Verify!
-        difficulty = 10
-        diff_dropped = 10
+        difficulty = DEFAULT_DIFFICULTY
+        diff_dropped = DEFAULT_DIFFICULTY
 
         return (
             float('%.10f' % difficulty),
@@ -97,6 +110,9 @@ def difficulty(node, db_handler):
             block_height,
         )  # need to keep float here for database inserts support
     except Exception as e:  #new chain or regnet
-        print('Failed to calculate difficulty (default difficulty will be used):', e)
-        difficulty = [10, 10, 0, 0, 0, 0, 0, 0]
+        if _Debug:
+            print('Failed to calculate difficulty (default difficulty will be used):', e)
+        # import traceback
+        # traceback.print_exc()
+        difficulty = [DEFAULT_DIFFICULTY, DEFAULT_DIFFICULTY, 0, 0, 0, 0, 0, 0]
         return difficulty

@@ -10,11 +10,12 @@ import mmap
 import os
 import struct
 import sys
+import threading
 from hashlib import sha224
+
 from hmac_drbg import DRBG
 from quantizer import quantize_ten
 from decimal import Decimal
-
 import regnet
 
 from fork import Fork
@@ -23,7 +24,7 @@ fork = Fork()
 
 __version__ = '0.1.4'
 
-print('Mining_Heavy3 v{}'.format(__version__))
+# print('Mining_Heavy3 v{}'.format(__version__))
 
 RND_LEN = 0
 
@@ -45,6 +46,7 @@ def anneal3(mmap, n):
     :param n: a 224 = 7x32 bits
     :return:  56 char in hex encoding.
     """
+    # print('anneal3', threading.current_thread(), mmap, RND_LEN, id(RND_LEN))
     h7 = n & 0xffffffff
     n = n >> 32
     index = ((h7 & ~0x7) % RND_LEN)*4
@@ -149,18 +151,20 @@ def check_block(block_height_new, miner_address, nonce, db_block_hash, diff0, re
         return diff_save
     except Exception as e:
         # Left for edge cases debug
-        print('MH3 check block', e)
+        # print('MH3 check block', e)
+        # import traceback
+        # traceback.print_exc()
         exc_type, exc_obj, exc_tb = sys.exc_info()
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print(exc_type, fname, exc_tb.tb_lineno)
+        # print(exc_type, fname, exc_tb.tb_lineno)
         raise
 
 
 def create_heavy3a(file_name='heavy3a.bin'):
     if (not heavy) and is_regnet:
-        print('Regnet, no heavy file')
+        # print('Regnet, no heavy file')
         return
-    print('Creating Junction Noise file, this usually takes a few minutes...')
+    # print('Creating Junction Noise file, this usually takes a few minutes...')
     gen = DRBG(b'Bismuth is a chemical element with symbol Bi and atomic number 83. It is a pentavalent post-transition metal and one of the pnictogens with chemical properties resembling its lighter homologs arsenic and antimony.')
     # Size in Gb - No more than 4Gb from a single seed
     GB = 1
@@ -177,21 +181,26 @@ def mining_open(file_name='heavy3a.bin'):
     Opens the Junction MMapped file
     """
     if (not heavy) and is_regnet:
-        print('Regnet, no heavy file to open')
+        # print('Regnet, no heavy file to open')
         return
     global F
     global MMAP
     global RND_LEN
+    if MMAP:
+        print(f'Junction memory-map file already loaded in {threading.current_thread().name}')
+        return
+    print(f'Loading Junction memory-map file from {file_name} in {threading.current_thread().name}')
     if os.path.isfile(file_name):
         size = os.path.getsize(file_name)
         if size != 1073741824:
-            print('Invalid size of heavy file {}.'.format(file_name))
+            # print('Invalid size of heavy file {}.'.format(file_name))
             try:
                 os.remove(file_name)
-                print('Deleted, Will be re-created')
+                # print('Deleted, Will be re-created')
             except Exception as e:
-                print(e)
-                sys.exit()
+                # print('mining_open', e)
+                # sys.exit()
+                raise e
     if not os.path.isfile(file_name):
         create_heavy3a(file_name)
     try:
@@ -204,8 +213,10 @@ def mining_open(file_name='heavy3a.bin'):
         if read_int_from_map(MMAP, 1024) != 1742706086:
             raise ValueError('Wrong file: {}'.format(file_name))
     except Exception as e:
-        print('Error while loading Junction file: {}'.format(e))
-        sys.exit()
+        # print('error while loading Junction file: {}'.format(e))
+        # sys.exit()
+        raise e
+    # print('mining_open', file_name, threading.current_thread())
 
 
 def mining_close():
@@ -213,7 +224,7 @@ def mining_close():
     Close the MMAP access, HAS to be called at end of program.
     """
     if (not heavy) and is_regnet:
-        print('Regnet, no heavy file to close')
+        # print('Regnet, no heavy file to close')
         return
     global F
     global MMAP
@@ -222,9 +233,11 @@ def mining_close():
         MMAP.close()
     except:
         pass
+    MMAP = None
 
     try:
         assert F
         F.close()
     except:
         pass
+    F = None
