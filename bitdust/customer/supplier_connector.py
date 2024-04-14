@@ -52,7 +52,7 @@ from __future__ import absolute_import
 #------------------------------------------------------------------------------
 
 _Debug = False
-_DebugLevel = 16
+_DebugLevel = 12
 
 #------------------------------------------------------------------------------
 
@@ -68,7 +68,6 @@ from bitdust.logs import lg
 from bitdust.automats import automat
 
 from bitdust.system import bpio
-from bitdust.system import local_fs
 
 from bitdust.main import settings
 from bitdust.main import events
@@ -76,10 +75,7 @@ from bitdust.main import events
 from bitdust.lib import strng
 from bitdust.lib import nameurl
 from bitdust.lib import diskspace
-from bitdust.lib import utime
 from bitdust.lib import jsn
-
-from bitdust.crypt import key
 
 from bitdust.contacts import contactsdb
 
@@ -167,39 +163,6 @@ def total_connectors():
 #------------------------------------------------------------------------------
 
 
-def get_supplier_contracts_dir(supplier_idurl):
-    supplier_idurl = id_url.field(supplier_idurl)
-    supplier_contracts_prefix = '{}_{}'.format(
-        supplier_idurl.username,
-        strng.to_text(key.HashSHA(supplier_idurl.to_public_key(), hexdigest=True)),
-    )
-    return os.path.join(settings.ServiceDir('service_customer_contracts'), supplier_contracts_prefix)
-
-
-def save_storage_contract(supplier_idurl, json_data):
-    supplier_contracts_dir = get_supplier_contracts_dir(supplier_idurl)
-    if not os.path.isdir(supplier_contracts_dir):
-        bpio._dirs_make(supplier_contracts_dir)
-    contract_path = os.path.join(supplier_contracts_dir, str(utime.unpack_time(json_data['started'])))
-    local_fs.WriteTextFile(contract_path, jsn.dumps(json_data))
-    return contract_path
-
-
-def list_storage_contracts(supplier_idurl):
-    supplier_contracts_dir = get_supplier_contracts_dir(supplier_idurl)
-    if not os.path.isdir(supplier_contracts_dir):
-        return []
-    l = []
-    for contract_filename in os.listdir(supplier_contracts_dir):
-        contract_path = os.path.join(supplier_contracts_dir, contract_filename)
-        json_data = jsn.loads_text(local_fs.ReadTextFile(contract_path))
-        l.append(json_data)
-    return l
-
-
-#------------------------------------------------------------------------------
-
-
 class SupplierConnector(automat.Automat):
     """
     This class implements all the functionality of the ``supplier_connector()``
@@ -229,13 +192,15 @@ class SupplierConnector(automat.Automat):
         self.request_queue_packet_id = None
         self.latest_supplier_ack = None
         self.callbacks = {}
+        self.storage_contract = None
         try:
             st = bpio.ReadTextFile(settings.SupplierServiceFilename(
-                idurl=self.supplier_idurl,
+                supplier_idurl=self.supplier_idurl,
                 customer_idurl=self.customer_idurl,
             )).strip()
         except:
-            st = 'DISCONNECTED'
+            lg.exc()
+        st = st or 'DISCONNECTED'
         automat.Automat.__init__(
             self,
             name,
@@ -275,7 +240,7 @@ class SupplierConnector(automat.Automat):
                     lg.exc()
                     return
             bpio.WriteTextFile(
-                settings.SupplierServiceFilename(self.supplier_idurl, customer_idurl=self.customer_idurl),
+                settings.SupplierServiceFilename(supplier_idurl=self.supplier_idurl, customer_idurl=self.customer_idurl),
                 newstate,
             )
         if newstate == 'CONNECTED':
@@ -296,15 +261,15 @@ class SupplierConnector(automat.Automat):
     def set_callback(self, name, cb):
         if name not in self.callbacks:
             self.callbacks[name] = []
+        if cb in self.callbacks[name]:
+            lg.warn('callback %r is already registered in %r with name %s' % (cb, self, name))
         self.callbacks[name].append(cb)
 
     def remove_callback(self, name, cb=None):
         if name in self.callbacks:
             if cb:
-                if cb in self.callbacks[name]:
+                while cb in self.callbacks[name]:
                     self.callbacks[name].remove(cb)
-                else:
-                    lg.warn('callback %r not registered in %r with name %s' % (cb, self, name))
             else:
                 self.callbacks.pop(name)
         else:
@@ -657,14 +622,16 @@ class SupplierConnector(automat.Automat):
             except:
                 lg.exc()
             if _Debug:
-                lg.args(_DebugLevel, response=response, info=info)
+                lg.args(_DebugLevel, response=response, info=info, contract=the_contract)
+            self.storage_contract = the_contract
             if the_contract:
                 if not accounting.verify_storage_contract(the_contract):
                     lg.err('received storage contract from %r is not valid' % self.supplier_idurl)
                     self.latest_supplier_ack = None
                     self.automat('fail', None)
                     return
-                save_storage_contract(self.supplier_idurl, the_contract)
+                from bitdust.customer import payment
+                payment.save_storage_contract(self.supplier_idurl, the_contract)
         self.automat('ack', response)
 
     def _supplier_service_failed(self, response, info):
@@ -707,8 +674,8 @@ class SupplierConnector(automat.Automat):
         service_info = {
             'customer_id': self.customer_id,
             'needed_bytes': self.needed_bytes,
-            'minimum_duration_hours': 6,
-            'maximum_duration_hours': 24*30,
+            # 'minimum_duration_hours': 6,
+            # 'maximum_duration_hours': 24*30,
         }
         # TODO: re-think again about the customer key, do we really need it?
         # my_customer_key_id = my_id.getGlobalID(key_alias='customer')

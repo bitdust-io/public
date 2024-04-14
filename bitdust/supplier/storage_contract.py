@@ -88,6 +88,9 @@ def get_current_customer_contract(customer_idurl):
     if not accounting.verify_storage_contract(json_data):
         lg.err('current storage contract with %r is not valid' % customer_idurl)
         return None
+    if 'my_position' in json_data:
+        # TODO: remove later...
+        json_data['ecc_position'] = json_data.pop('my_position')
     return json_data
 
 
@@ -122,6 +125,9 @@ def list_customer_contracts(customer_idurl):
             if not accounting.verify_storage_contract(current_contract):
                 current_contract = None
                 lg.err('current storage contract is invalid')
+            if 'my_position' in current_contract:
+                # TODO: remove later...
+                current_contract['ecc_position'] = current_contract.pop('my_position')
             continue
         try:
             started_time = int(fname.split('.')[0])
@@ -134,6 +140,9 @@ def list_customer_contracts(customer_idurl):
         if not accounting.verify_storage_contract(json_data):
             lg.err('invalid storage contract found: %r' % fname)
             continue
+        if 'my_position' in json_data:
+            # TODO: remove later...
+            json_data['ecc_position'] = json_data.pop('my_position')
         json_data['filename'] = fname
         customer_contracts[started_time] = json_data
         if started_time > latest_contract_started_time:
@@ -318,7 +327,7 @@ def start_current_customer_contract(customer_idurl, details, started_time, compl
         'value': float(duration_hours)*(details['allocated_bytes']/(1024.0*1024.0*1024.0)),
         'allocated_bytes': details['allocated_bytes'],
         'duration_hours': duration_hours,
-        'my_position': details['my_position'],
+        'ecc_position': details['ecc_position'],
         'ecc_map': details['ecc_map'],
         'raise_factor': raise_factor,
         'wallet_address': bismuth_wallet.my_wallet_address(),
@@ -387,8 +396,8 @@ def change_current_customer_contract(customer_idurl, details):
         }
     if details.get('ecc_map'):
         current_contract['ecc_map'] = details['ecc_map']
-    if details.get('my_position') is not None:
-        current_contract['my_position'] = details['my_position']
+    if details.get('ecc_position') is not None:
+        current_contract['ecc_position'] = details['ecc_position']
     if details['allocated_bytes'] != current_contract['allocated_bytes']:
         current_value = current_contract['value']
         new_duration_hours = int(current_value/(details['allocated_bytes']/(1024.0*1024.0*1024.0)))

@@ -1,9 +1,9 @@
 #!/usr/bin/python
-# service_customer_contracts.py
+# service_miner.py
 #
 # Copyright (C) 2008 Veselin Penev, https://bitdust.io
 #
-# This file (service_customer_contracts.py) is part of BitDust Software.
+# This file (service_miner.py) is part of BitDust Software.
 #
 # BitDust is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -26,7 +26,7 @@
 """
 ..
 
-module:: service_customer_contracts
+module:: service_miner
 """
 
 from __future__ import absolute_import
@@ -34,31 +34,43 @@ from bitdust.services.local_service import LocalService
 
 
 def create_service():
-    return CustomerContractsService()
+    return MinerService()
 
 
-class CustomerContractsService(LocalService):
+class MinerService(LocalService):
 
-    service_name = 'service_customer_contracts'
-    config_path = 'services/customer-contracts/enabled'
+    service_name = 'service_miner'
+    config_path = 'services/miner/enabled'
 
     def dependent_on(self):
         return [
-            'service_customer',
-            'service_blockchain_id',
+            'service_nodes_lookup',
+            # 'service_blockchain',
         ]
 
+    def installed(self):
+        # TODO: to be continue...
+        return False
+
     def start(self):
-        from twisted.internet import task  # @UnresolvedImport
-        self.payment_loop = task.LoopingCall(self.on_payment_task)
-        self.payment_loop.start(60*60, now=True)
+        from coins import coins_miner
+        coins_miner.A('init')
+        coins_miner.A('start')
         return True
 
     def stop(self):
-        self.payment_loop.stop()
-        self.payment_loop = None
+        from coins import coins_miner
+        coins_miner.A('stop')
+        coins_miner.A('shutdown')
         return True
 
-    def on_payment_task(self):
-        from bitdust.customer import payment
-        payment.pay_for_storage()
+    def request(self, json_payload, newpacket, info):
+        # TODO: work in progress
+        # TODO: we can add some limit for number of connections here
+        from bitdust.p2p import p2p_service
+        return p2p_service.SendAck(newpacket, 'accepted')
+
+    def cancel(self, json_payload, request, info):
+        # TODO: work in progress
+        from bitdust.p2p import p2p_service
+        return p2p_service.SendAck(request, 'accepted')
