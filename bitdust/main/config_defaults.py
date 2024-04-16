@@ -85,22 +85,16 @@ def reset(conf_obj):
     conf_obj.setDefaultValue('services/backups/keep-local-copies-enabled', 'true')
     conf_obj.setDefaultValue('services/backups/wait-suppliers-enabled', 'true')
 
-    # conf_obj.setDefaultValue('services/blockchain/enabled', 'false')
-    # conf_obj.setDefaultValue('services/blockchain/host', '127.0.0.1')
-    # conf_obj.setDefaultValue('services/blockchain/port', 9100)
-    # conf_obj.setDefaultValue('services/blockchain/seeds', '')
-    # conf_obj.setDefaultValue('services/blockchain/explorer/enabled', 'true')
-    # conf_obj.setDefaultValue('services/blockchain/explorer/port', 9180)
-    # conf_obj.setDefaultValue('services/blockchain/wallet/enabled', 'true')
-    # conf_obj.setDefaultValue('services/blockchain/wallet/port', 9280)
-    # conf_obj.setDefaultValue('services/blockchain/miner/enabled', 'false')
-
     conf_obj.setDefaultValue('services/blockchain-id/enabled', 'false')
 
     conf_obj.setDefaultValue('services/blockchain-authority/enabled', 'false')
     conf_obj.setDefaultValue('services/blockchain-authority/registration-bonus-coins', 100)
     conf_obj.setDefaultValue('services/blockchain-authority/requests-reading-offset', 0)
     conf_obj.setDefaultValue('services/blockchain-authority/requests-reading-limit', 50)
+
+    conf_obj.setDefaultValue('services/blockchain-explorer/enabled', 'false')
+    conf_obj.setDefaultValue('services/blockchain-explorer/host', '127.0.0.1')
+    conf_obj.setDefaultValue('services/blockchain-explorer/web-port', 19080)
 
     conf_obj.setDefaultValue('services/bismuth-blockchain/enabled', 'false')
 

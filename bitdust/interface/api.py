@@ -1049,12 +1049,10 @@ def config_get(key, include_info=False):
         return ERROR('empty key')
     if _Debug:
         lg.out(_DebugLevel, 'api.config_get [%s]' % key)
-    if not config.conf().exist(key):
+    if not config.conf().registered(key):
         return ERROR('option %s does not exist' % key)
     if not config.conf().hasChilds(key):
-        return RESULT([
-            config.conf().toJson(key, include_info=include_info),
-        ])
+        return RESULT([config.conf().toJson(key, include_info=include_info)])
     known_childs = sorted(config.conf().listEntries(key))
     if key.startswith('services/') and key.count('/') == 1:
         svc_enabled_key = key + '/enabled'
@@ -1085,6 +1083,8 @@ def config_set(key, value):
     """
     key = strng.to_text(key)
     v = {}
+    if not config.conf().registered(key):
+        return ERROR('option %s does not exist' % key)
     if config.conf().exist(key):
         v['old_value'] = config.conf().getValueOfType(key)
     typ_label = config.conf().getTypeLabel(key)
@@ -3715,7 +3715,7 @@ def friends_list():
     result = []
     for idurl, alias in contactsdb.correspondents():
         glob_id = global_id.ParseIDURL(idurl)
-        contact_status = 'offline'
+        # contact_status = 'offline'
         contact_state = 'OFFLINE'
         friend = {
             'idurl': idurl,
@@ -3723,7 +3723,7 @@ def friends_list():
             'idhost': glob_id['idhost'],
             'username': glob_id['user'],
             'alias': alias,
-            'contact_status': contact_status,
+            # 'contact_status': contact_status,
             'contact_state': contact_state,
         }
         if driver.is_on('service_identity_propagate'):
@@ -3731,7 +3731,7 @@ def friends_list():
             state_machine_inst = online_status.getInstance(idurl, autocreate=False)
             if state_machine_inst:
                 friend.update(state_machine_inst.to_json())
-                friend['contact_status'] = online_status.stateToLabel(state_machine_inst.state)
+                # friend['contact_status'] = online_status.stateToLabel(state_machine_inst.state)
                 friend['contact_state'] = state_machine_inst.state
         result.append(friend)
     return RESULT(result)
@@ -3921,7 +3921,7 @@ def user_status(user_id):
     # if not state_machine_inst:
     #     return ERROR('error fetching user status')
     return OK({
-        'contact_status': online_status.getStatusLabel(idurl),
+        # 'contact_status': online_status.getStatusLabel(idurl),
         'contact_state': online_status.getCurrentState(idurl),
         'idurl': idurl,
         'global_id': global_id.UrlToGlobalID(idurl),
@@ -3961,7 +3961,7 @@ def user_status_check(user_id, timeout=None):
                 idurl=idurl,
                 global_id=global_id.UrlToGlobalID(idurl),
                 contact_state=peer_status.state,
-                contact_status=online_status.stateToLabel(peer_status.state),
+                # contact_status=online_status.stateToLabel(peer_status.state),
             ),
             api_method='user_status_check',
         ))
@@ -4454,7 +4454,7 @@ def suppliers_list(customer_id=None, verbose=False):
     from bitdust.userid import my_id
     from bitdust.userid import id_url
     from bitdust.userid import global_id
-    from bitdust.storage import backup_matrix
+    # from bitdust.storage import backup_matrix
     customer_idurl = strng.to_bin(customer_id)
     if not customer_idurl:
         customer_idurl = my_id.getIDURL().to_bin()
@@ -4474,35 +4474,40 @@ def suppliers_list(customer_id=None, verbose=False):
                 'global_id': '',
                 'supplier_state': None,
                 'connected': None,
-                'contact_status': 'offline',
+                # 'contact_status': 'offline',
                 'contact_state': 'OFFLINE',
             }
             results.append(r)
             continue
+        sc = None
+        if supplier_connector.is_supplier(supplier_idurl, customer_idurl):
+            sc = supplier_connector.by_idurl(supplier_idurl, customer_idurl)
         r = {
             'position': pos,
             'idurl': supplier_idurl,
             'global_id': global_id.UrlToGlobalID(supplier_idurl),
-            'supplier_state': None if not supplier_connector.is_supplier(supplier_idurl, customer_idurl) else supplier_connector.by_idurl(supplier_idurl, customer_idurl).state,
+            'supplier_state': None if not sc else sc.state,
             'connected': misc.readSupplierData(supplier_idurl, 'connected', customer_idurl),
-            'contact_status': 'offline',
+            # 'contact_status': 'offline',
             'contact_state': 'OFFLINE',
         }
         if online_status.isKnown(supplier_idurl):
-            r['contact_status'] = online_status.getStatusLabel(supplier_idurl)
+            # r['contact_status'] = online_status.getStatusLabel(supplier_idurl)
             r['contact_state'] = online_status.getCurrentState(supplier_idurl)
         # if contact_status.isKnown(supplier_idurl):
         #     cur_state = contact_status.getInstance(supplier_idurl).state
         #     r['contact_status'] = contact_status.stateToLabel(cur_state)
         #     r['contact_state'] = cur_state
         if verbose:
-            _files, _total, _report = backup_matrix.GetSupplierStats(pos, customer_idurl=customer_idurl)
-            r['listfiles'] = misc.readSupplierData(supplier_idurl, 'listfiles', customer_idurl)
-            r['fragments'] = {
-                'items': _files,
-                'files': _total,
-                'details': _report,
-            }
+            # TODO: create separate api method for that: api.supplier_list_files()
+            # _files, _total, _report = backup_matrix.GetSupplierStats(pos, customer_idurl=customer_idurl)
+            # r['listfiles'] = misc.readSupplierData(supplier_idurl, 'listfiles', customer_idurl).split('\n')
+            # r['fragments'] = {
+            #     'items': _files,
+            #     'files': _total,
+            #     'details': _report,
+            # }
+            r['contract'] = None if not sc else sc.storage_contract
         results.append(r)
     return RESULT(results)
 
@@ -4642,6 +4647,10 @@ def customers_list(verbose=False):
     if driver.is_on('service_customer_support'):
         service_customer_support_on = True
         from bitdust.supplier import customer_assistant
+    service_supplier_contracts_on = False
+    if driver.is_on('service_supplier_contracts'):
+        service_supplier_contracts_on = True
+        from bitdust.supplier import storage_contract
     from bitdust.contacts import contactsdb
     from bitdust.p2p import online_status
     from bitdust.userid import global_id
@@ -4652,9 +4661,9 @@ def customers_list(verbose=False):
                 'position': pos,
                 'global_id': '',
                 'idurl': '',
-                'contact_status': 'offline',
+                # 'contact_status': 'offline',
                 'contact_state': 'OFFLINE',
-                'customer_assistant_state': 'OFFLINE',
+                # 'customer_assistant_state': 'OFFLINE',
             }
             results.append(r)
             continue
@@ -4662,17 +4671,20 @@ def customers_list(verbose=False):
             'position': pos,
             'global_id': global_id.UrlToGlobalID(customer_idurl),
             'idurl': customer_idurl,
-            'contact_status': 'offline',
+            # 'contact_status': 'offline',
             'contact_state': 'OFFLINE',
-            'customer_assistant_state': 'OFFLINE',
+            # 'customer_assistant_state': 'OFFLINE',
         }
         if online_status.isKnown(customer_idurl):
-            r['contact_status'] = online_status.getStatusLabel(customer_idurl)
+            # r['contact_status'] = online_status.getStatusLabel(customer_idurl)
             r['contact_state'] = online_status.getCurrentState(customer_idurl)
-        if service_customer_support_on:
-            assistant = customer_assistant.by_idurl(customer_idurl)
-            if assistant:
-                r['customer_assistant_state'] = assistant.state
+        if verbose:
+            if service_customer_support_on:
+                assistant = customer_assistant.by_idurl(customer_idurl)
+                if assistant:
+                    r['customer_assistant_state'] = assistant.state
+            if service_supplier_contracts_on:
+                r['contract'] = storage_contract.get_current_customer_contract(customer_idurl)
         results.append(r)
     return RESULT(results)
 
@@ -4817,7 +4829,7 @@ def space_local():
 #------------------------------------------------------------------------------
 
 
-def services_list(with_configs=False):
+def services_list(with_configs=False, as_tree=False):
     """
     Returns detailed info about all currently running network services.
 
@@ -4832,13 +4844,19 @@ def services_list(with_configs=False):
         websocket.send('{"command": "api_call", "method": "services_list", "kwargs": {"with_configs": 1} }');
     """
     result = []
-    for _, svc in sorted(list(driver.services().items()), key=lambda i: i[0]):
+    if as_tree:
+        ordered = sorted(list(driver.services().items()), key=lambda i: driver.root_distance(i[0]))
+    else:
+        ordered = sorted(list(driver.services().items()), key=lambda i: i[0])
+    for svc_name, svc in ordered:
         svc_info = svc.to_json()
         if with_configs:
             svc_configs = []
             for child in config.conf().listEntries(svc.config_path.replace('/enabled', '')):
                 svc_configs.append(config.conf().toJson(child, include_info=False))
             svc_info['configs'] = svc_configs
+        if as_tree:
+            svc_info['root_distance'] = driver.root_distance(svc_name)
         result.append(svc_info)
     if _Debug:
         lg.out(_DebugLevel, 'api.services_list responded with %d items' % len(result))
@@ -5828,11 +5846,7 @@ def blockchain_info():
         }
     if driver.is_on('service_bismuth_wallet'):
         from bitdust.blockchain import bismuth_wallet
-        try:
-            cur_balance = bismuth_wallet.my_balance()
-        except:
-            lg.exc()
-            cur_balance = 'N/A'
+        cur_balance = bismuth_wallet.my_balance()
         ret['wallet'] = {
             'balance': cur_balance,
             'address': bismuth_wallet.my_wallet_address(),
@@ -5860,11 +5874,7 @@ def blockchain_wallet_balance():
     if not driver.is_on('service_bismuth_wallet'):
         return ERROR('service_bismuth_wallet() is not started')
     from bitdust.blockchain import bismuth_wallet
-    try:
-        cur_balance = bismuth_wallet.my_balance()
-    except:
-        lg.exc()
-        cur_balance = 'N/A'
+    cur_balance = bismuth_wallet.my_balance()
     return OK({
         'balance': cur_balance,
         'address': bismuth_wallet.my_wallet_address(),
