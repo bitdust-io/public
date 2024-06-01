@@ -79,6 +79,7 @@ def A(event=None, *args, **kwargs):
 
 
 class AuthorityNode(automat.Automat):
+
     """
     This class implements all the functionality of ``authority_node()`` state machine.
     """

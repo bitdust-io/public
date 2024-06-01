@@ -29,24 +29,24 @@ services:
   id-a:
     image: bitdust/app
     ports:
-      - "10101:22"
+      - "10801:22"
 
   dht-1:
     image: bitdust/app
     ports:
-      - "10111:22"
+      - "10811:22"
 
   dht-2:
     image: bitdust/app
     ports:
-      - "10112:22"
+      - "10812:22"
     links:
       - dht-1
 
   dht-3:
     image: bitdust/app
     ports:
-      - "10113:22"
+      - "10813:22"
     links:
       - dht-1
       - dht-2
@@ -54,7 +54,7 @@ services:
   stun-1:
     image: bitdust/app
     ports:
-      - "10121:22"
+      - "10821:22"
     links:
       - dht-2
       - dht-3
@@ -62,7 +62,7 @@ services:
   supplier-1:
     image: bitdust/app
     ports:
-      - "10141:22"
+      - "10841:22"
     links:
       - dht-2
       - dht-3
@@ -72,7 +72,7 @@ services:
   supplier-2:
     image: bitdust/app
     ports:
-      - "10142:22"
+      - "10842:22"
     links:
       - dht-2
       - dht-3
@@ -82,7 +82,7 @@ services:
   customer-1:
     image: bitdust/app
     ports:
-      - "10151:22"
+      - "10851:22"
     volumes:
       - customer_1:/customer_1
     links:
@@ -94,7 +94,7 @@ services:
   customer-2:
     image: bitdust/app
     ports:
-      - "10152:22"
+      - "10852:22"
     volumes:
       - customer_2:/customer_2
     links:
@@ -106,49 +106,9 @@ services:
   customer-3:
     image: bitdust/app
     ports:
-      - "10153:22"
+      - "10853:22"
     volumes:
       - customer_3:/customer_3
-    links:
-      - dht-2
-      - dht-3
-      - stun-1
-      - id-a
-
-  broker-1:
-    image: bitdust/app
-    ports:
-      - "10161:22"
-    links:
-      - dht-2
-      - dht-3
-      - stun-1
-      - id-a
-
-  broker-2:
-    image: bitdust/app
-    ports:
-      - "10162:22"
-    links:
-      - dht-2
-      - dht-3
-      - stun-1
-      - id-a
-
-  broker-3:
-    image: bitdust/app
-    ports:
-      - "10163:22"
-    links:
-      - dht-2
-      - dht-3
-      - stun-1
-      - id-a
-
-  broker-4:
-    image: bitdust/app
-    ports:
-      - "10164:22"
     links:
       - dht-2
       - dht-3
@@ -175,10 +135,6 @@ services:
       - customer-1
       - customer-2
       - customer-3
-      - broker-1
-      - broker-2
-      - broker-3
-      - broker-4
 
     volumes:
       - customer_1:/customer_1
