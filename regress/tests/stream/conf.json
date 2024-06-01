@@ -1,6 +1,6 @@
 {
     "default_image": "bitdust/app",
-    "ports_offset": 100,
+    "ports_offset": 800,
     "pause_before": 0,
     "containers": {
         "id-a": {
@@ -110,8 +110,7 @@
                 "preferred_routers": "",
                 "block_size": "10 KB",
                 "num_suppliers": 2,
-                "supplier_candidates": "http://id-a:8084/supplier-1.xml,http://id-a:8084/supplier-2.xml",
-                "preferred_brokers": ""
+                "supplier_candidates": "http://id-a:8084/supplier-1.xml,http://id-a:8084/supplier-2.xml"
             }
         },
         "customer-2": {
@@ -134,8 +133,7 @@
                 "preferred_routers": "",
                 "block_size": "10 KB",
                 "num_suppliers": 2,
-                "supplier_candidates": "http://id-a:8084/supplier-1.xml,http://id-a:8084/supplier-2.xml",
-                "preferred_brokers": ""
+                "supplier_candidates": "http://id-a:8084/supplier-1.xml,http://id-a:8084/supplier-2.xml"
             }
         },
         "customer-3": {
@@ -158,82 +156,10 @@
                 "preferred_routers": "",
                 "block_size": "10 KB",
                 "num_suppliers": 2,
-                "supplier_candidates": "http://id-a:8084/supplier-1.xml,http://id-a:8084/supplier-2.xml",
-                "preferred_brokers": ""
-            }
-        },
-        "broker-1": {
-            "links": [
-                "dht-2",
-                "dht-3",
-                "stun-1",
-                "id-a"
-            ],
-            "ports": "10061:22",
-            "node": {
-                "role": "message-broker",
-                "name": "broker-1",
-                "join_network": true,
-                "known_id_servers": "id-a:8084",
-                "known_dht_seeds": "dht-2:14441,dht-3:14441",
-                "preferred_routers": "",
-                "preferred_brokers": ""
-            }
-        },
-        "broker-2": {
-            "links": [
-                "dht-2",
-                "dht-3",
-                "stun-1",
-                "id-a"
-            ],
-            "ports": "10062:22",
-            "node": {
-                "role": "message-broker",
-                "name": "broker-2",
-                "join_network": true,
-                "known_id_servers": "id-a:8084",
-                "known_dht_seeds": "dht-2:14441,dht-3:14441",
-                "preferred_routers": "",
-                "preferred_brokers": ""
-            }
-        },
-        "broker-3": {
-            "links": [
-                "dht-2",
-                "dht-3",
-                "stun-1",
-                "id-a"
-            ],
-            "ports": "10063:22",
-            "node": {
-                "role": "message-broker",
-                "name": "broker-3",
-                "join_network": true,
-                "known_id_servers": "id-a:8084",
-                "known_dht_seeds": "dht-2:14441,dht-3:14441",
-                "preferred_routers": "",
-                "preferred_brokers": ""
-            }
-        },
-        "broker-4": {
-            "links": [
-                "dht-2",
-                "dht-3",
-                "stun-1",
-                "id-a"
-            ],
-            "ports": "10064:22",
-            "node": {
-                "role": "message-broker",
-                "name": "broker-4",
-                "join_network": true,
-                "known_id_servers": "id-a:8084",
-                "known_dht_seeds": "dht-2:14441,dht-3:14441",
-                "preferred_routers": "",
-                "preferred_brokers": ""
+                "supplier_candidates": "http://id-a:8084/supplier-1.xml,http://id-a:8084/supplier-2.xml"
             }
         }
+
     },
     "containers_volumes": [
         "customer_1:",
@@ -250,11 +176,7 @@
         "supplier-2",
         "customer-1",
         "customer-2",
-        "customer-3",
-        "broker-1",
-        "broker-2",
-        "broker-3",
-        "broker-4"
+        "customer-3"
     ],
     "tester_volumes": [
         "customer_1:/customer_1",

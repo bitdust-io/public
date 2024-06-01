@@ -49,7 +49,16 @@ class SupplierContractsService(LocalService):
         ]
 
     def start(self):
+        from bitdust.main import events
+        events.add_subscriber(self.on_blockchain_transaction_received, 'blockchain-transaction-received')
         return True
 
     def stop(self):
+        from bitdust.main import events
+        events.remove_subscriber(self.on_blockchain_transaction_received, 'blockchain-transaction-received')
         return True
+
+    def on_blockchain_transaction_received(self, evt):
+        if evt.data.get('operation') == 'storage':
+            from bitdust.supplier import storage_contract
+            storage_contract.verify_accept_storage_payment(evt.data)

@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-# test_brokers.py
+# test_stream.py
 #
 # Copyright (C) 2008 Veselin Penev  https://bitdust.io
 #
-# This file (test_brokers.py) is part of BitDust Software.
+# This file (test_stream.py) is part of BitDust Software.
 #
 # BitDust is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -20,17 +20,6 @@
 #
 # Please contact us if you have any questions at bitdust.io@gmail.com
 """
-SCENARIO 3: customer-1 is able to send private message to customer-2
-
-SCENARIO 22: broker-2 was restarted quickly but still is connected to the stream
-
-SCENARIO 8: customer-3 receive all archived messages from message broker
-
-SCENARIO 18: customer-2 sent message to the group but active broker-1 is offline
-
-SCENARIO 21: broker-1 was stopped and started again but disconnected from previous streams
-
-SCENARIO 20: customer-3 stopped and started again but still connected to the group
 
 """
 
@@ -42,7 +31,7 @@ import keywords as kw  # @UnresolvedImport
 import scenarios  # @UnresolvedImport
 
 
-def test_brokers():
+def test_stream():
     if os.environ.get('RUN_TESTS', '1') == '0':
         return pytest.skip()  # @UndefinedVariable
 
@@ -51,21 +40,14 @@ def test_brokers():
     #--- SCENARIO 3: customer-1 send private message to customer-2
     scenarios.scenario3()
 
-    #--- SCENARIO 8: customer-3 receive all archived messages from message broker
-    scenarios.scenario8()
+    #--- SCENARIO 25: customer-3 receive all past messages from other group participants
+    scenarios.scenario25()
 
-    #--- SCENARIO 18: customer-2 sent message to the group but active broker-1 is offline
-    scenarios.scenario18()
+    #--- SCENARIO 26: customer-3 stopped and started again but still connected to the group
+    scenarios.scenario26()
 
-    #--- SCENARIO 21: broker-1 was stopped and started again but disconnected from previous streams
-    scenarios.scenario21()
-
-    #--- SCENARIO 20: customer-3 stopped and started again but still connected to the group
-    scenarios.scenario20()
-
-    #--- SCENARIO 22: customer-1 group chat with customer-2 but broker-2 was restarted quickly
-    scenarios.scenario22()
-
+    #--- SCENARIO 27: customer-2 sent message to the group but active supplier-1 is offline
+    scenarios.scenario27()
 
 #------------------------------------------------------------------------------
 
@@ -76,8 +58,7 @@ def prepare():
     kw.wait_service_state(scenarios.SUPPLIERS_IDS_12, 'service_supplier', 'ON')
     kw.wait_service_state(scenarios.CUSTOMERS_IDS_123, 'service_customer', 'ON')
     kw.wait_service_state(scenarios.CUSTOMERS_IDS_123, 'service_shared_data', 'ON')
-    # kw.wait_service_state(scenarios.CUSTOMERS_IDS_123, 'service_personal_messages', 'ON')
     kw.wait_service_state(scenarios.CUSTOMERS_IDS_123, 'service_private_groups', 'ON')
     kw.wait_service_state(scenarios.CUSTOMERS_IDS_123, 'service_message_history', 'ON')
-    kw.wait_service_state(scenarios.BROKERS_IDS, 'service_message_broker', 'ON')
-    kw.wait_packets_finished(scenarios.CUSTOMERS_IDS_123 + scenarios.BROKERS_IDS + scenarios.SUPPLIERS_IDS_12)
+    kw.wait_service_state(scenarios.SUPPLIERS_IDS_12, 'service_joint_postman', 'ON')
+    kw.wait_packets_finished(scenarios.CUSTOMERS_IDS_123 + scenarios.SUPPLIERS_IDS_12)
