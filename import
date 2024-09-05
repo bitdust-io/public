@@ -11,14 +11,16 @@
 #     ./import ../bitdust/
 
 tmppath="$1.import"
+rm -rf "$tmppath"
+mkdir -p "$tmppath"
 curpath=`pwd`
 git pull
 cd "$1"
 sourcepath=`pwd`
-mkdir "$tmppath"
+mkdir -p "$tmppath"
 git checkout-index -a -f --prefix="$tmppath/"
 cd "$tmppath"
 cp -r -v * "$curpath"
-rm -rf "$tmppath"
 cd "$curpath"
+rm -rf "$tmppath"
 exit 0
