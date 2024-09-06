@@ -187,7 +187,7 @@ def report_consumed_storage():
     result['suppliers_num'] = contactsdb.num_suppliers()
     result['needed'] = settings.getNeededBytes()
     # result['needed_str'] = diskspace.MakeStringFromBytes(result['needed'])
-    result['used'] = int(backup_fs.sizebackups()/2)
+    result['used'] = int(backup_fs.sizebackups())
     # result['used_str'] = diskspace.MakeStringFromBytes(result['used'])
     result['available'] = result['needed'] - result['used']
     # result['available_str'] = diskspace.MakeStringFromBytes(result['available'])
@@ -330,6 +330,13 @@ def report_local_storage():
 
 
 def verify_storage_contract(json_data):
+    try:
+        deny = json_data.get('deny')
+    except:
+        deny = False
+    if deny:
+        lg.warn(repr(json_data))
+        return False
     try:
         utime.unpack_time(json_data['started'])
         utime.unpack_time(json_data['complete_after'])
