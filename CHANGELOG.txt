@@ -1,6 +1,16 @@
 Change Log
 ==========
 
+2024-09-14 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
+* changed one of the seed nodes
+* block uploading of a file when there is insufficient storage space expected
+* populate details about service_proxy_server() inf the api.network_status()
+* keep track of files/folders/backups statistics for individual customers in the catalog
+* bug fix in storage_contract.py
+* IDURL fix in shared_access_coordinator()
+
+
 
 2024-09-04 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
