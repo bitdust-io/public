@@ -17,7 +17,7 @@ curpath=`pwd`
 git pull
 cd "$1"
 sourcepath=`pwd`
-mkdir -p "$tmppath"
+mkdir "$tmppath"
 git checkout-index -a -f --prefix="$tmppath/"
 cd "$tmppath"
 cp -r -v * "$curpath"
