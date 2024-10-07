@@ -242,6 +242,8 @@ def commit(new_revision_number=None, customer_idurl=None, key_alias='master'):
     new_v = _RevisionNumber[customer_idurl][key_alias]
     if _Debug:
         lg.args(_DebugLevel, old=old_v, new=new_v, c=customer_idurl, k=key_alias)
+    if old_v == -1 and new_v > old_v:
+        lg.info('committed first revision %r for customer:%s key_alias:%s' % (new_v, customer_idurl, key_alias))
     return old_v, new_v
 
 
@@ -626,7 +628,7 @@ def MakeID(itr, randomized=True):
     for k in itr.keys():
         if k == 0:
             continue
-        if k == settings.BackupIndexFileName():
+        if k == settings.BackupIndexFileName() or packetid.IsIndexFileName(k):
             continue
         try:
             if isinstance(itr[k], int):
@@ -1937,7 +1939,7 @@ def UnserializeIndex(json_data, customer_idurl=None, new_revision=None, deleted_
             cur_revision = revision(customer_idurl, key_alias)
             if cur_revision >= new_revision:
                 if _Debug:
-                    lg.dbg(_DebugLevel, 'ignore items for %r with alias %r because current revision is up to date: %d >= %d' % (customer_idurl, key_alias, cur_revision, new_revision))
+                    lg.dbg(_DebugLevel, 'ignoring items for %r with alias %r because current revision is up to date: %d >= %d' % (customer_idurl, key_alias, cur_revision, new_revision))
                 continue
         count = 0
         count_modified = 0
@@ -1979,7 +1981,9 @@ def UnserializeIndex(json_data, customer_idurl=None, new_revision=None, deleted_
 
         def _one_item(path_id, path, info):
             if path_id not in known_items:
-                if path_id != settings.BackupIndexFileName():
+                if path_id == settings.BackupIndexFileName() or packetid.IsIndexFileName(path_id):
+                    pass
+                else:
                     to_be_removed_items.add(path_id)
 
         TraverseByID(_one_item, iterID=fsID(customer_idurl, key_alias))
@@ -2027,7 +2031,7 @@ def UnserializeIndex(json_data, customer_idurl=None, new_revision=None, deleted_
             updated_keys.append(key_alias)
             if key_alias.startswith('share_'):
                 for new_file_item in new_files:
-                    if new_file_item.path_id == settings.BackupIndexFileName():
+                    if new_file_item.path_id == settings.BackupIndexFileName() or packetid.IsIndexFileName(new_file_item.path_id):
                         continue
                     new_file_path = ToPath(new_file_item.path_id, iterID=fsID(customer_idurl, key_alias))
                     if new_file_path:

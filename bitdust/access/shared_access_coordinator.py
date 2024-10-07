@@ -179,47 +179,48 @@ def populate_shares():
 
 
 def open_known_shares():
-    known_offline_shares = []
+    to_be_opened = []
+    to_be_cached = []
     for key_id in my_keys.known_keys():
         if not key_id.startswith('share_'):
+            continue
+        if not my_keys.is_key_private(key_id):
             continue
         if not my_keys.is_active(key_id):
             continue
         active_share = get_active_share(key_id)
         if active_share:
             continue
-        known_offline_shares.append(key_id)
-    to_be_opened = []
-    for customer_idurl in backup_fs.known_customers():
-        for key_alias in backup_fs.known_keys_aliases(customer_idurl):
-            if not key_alias.startswith('share_'):
-                continue
-            key_id = my_keys.make_key_id(alias=key_alias, creator_idurl=customer_idurl)
-            if not key_id:
-                continue
-            if my_keys.latest_key_id(key_id) != key_id:
-                continue
-            if key_id in to_be_opened:
-                continue
-            if key_id not in known_offline_shares:
-                continue
-            if not my_keys.is_key_private(key_id):
-                continue
-            if not my_keys.is_active(key_id):
-                continue
-            to_be_opened.append(key_id)
+        to_be_opened.append(key_id)
+        _, customer_idurl = my_keys.split_key_id(key_id)
+        if not id_url.is_cached(customer_idurl):
+            to_be_cached.append(customer_idurl)
     if _Debug:
-        lg.args(_DebugLevel, known_offline_shares=known_offline_shares, to_be_opened=to_be_opened)
+        lg.args(_DebugLevel, to_be_opened=to_be_opened, to_be_cached=to_be_cached)
+    if to_be_cached:
+        d = identitycache.start_multiple(to_be_cached)
+        d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='shared_access_coordinator.open_known_shares')
+        d.addBoth(lambda _: start_known_shares(to_be_opened))
+        return
+    start_known_shares(to_be_opened)
+
+
+def start_known_shares(to_be_opened):
     populate_shared_files = listeners.is_populate_required('shared_file')
     for key_id in to_be_opened:
-        active_share = SharedAccessCoordinator(key_id, log_events=True, publish_events=False)
+        _, customer_idurl = my_keys.split_key_id(key_id)
+        if not id_url.is_cached(customer_idurl):
+            lg.err('not able to open share %r, customer IDURL %r still was not cached' % (key_id, customer_idurl))
+            continue
+        try:
+            active_share = SharedAccessCoordinator(key_id, log_events=True, publish_events=False)
+        except:
+            lg.exc()
+            continue
         active_share.automat('restart')
         if populate_shared_files:
             backup_fs.populate_shared_files(key_id=key_id)
-    # if populate_shared_files:
-    # listeners.populate_later().remove('shared_file')
     if listeners.is_populate_required('shared_location'):
-        # listeners.populate_later().remove('shared_location')
         populate_shares()
 
 
@@ -487,6 +488,7 @@ class SharedAccessCoordinator(automat.Automat):
         self.customer_idurl = self.glob_id['idurl']
         self.known_suppliers_list = []
         self.known_ecc_map = None
+        self.critical_suppliers_number = 1
         self.dht_lookup_use_cache = True
         self.received_index_file_revision = {}
         self.last_time_in_sync = -1
@@ -594,18 +596,12 @@ class SharedAccessCoordinator(automat.Automat):
             if event == 'shutdown':
                 self.state = 'CLOSED'
                 self.doDestroyMe(*args, **kwargs)
-            elif event == 'timer-30sec' or event == 'all-suppliers-disconnected':
-                self.state = 'DISCONNECTED'
-                self.doReportDisconnected(*args, **kwargs)
             elif event == 'list-files-received':
                 self.doSupplierSendIndexFile(*args, **kwargs)
             elif event == 'key-not-registered':
                 self.doSupplierTransferPubKey(*args, **kwargs)
             elif event == 'supplier-connected' or event == 'key-sent':
                 self.doSupplierRequestIndexFile(*args, **kwargs)
-            elif event == 'all-suppliers-connected':
-                self.state = 'CONNECTED'
-                self.doReportConnected(*args, **kwargs)
             elif event == 'index-sent' or event == 'index-up-to-date' or event == 'index-failed' or event == 'list-files-failed' or event == 'supplier-failed':
                 self.doRemember(event, *args, **kwargs)
                 self.doCheckAllConnected(*args, **kwargs)
@@ -613,6 +609,12 @@ class SharedAccessCoordinator(automat.Automat):
                 self.doSupplierProcessListFiles(*args, **kwargs)
             elif event == 'supplier-file-modified' or event == 'index-received' or event == 'index-missing':
                 self.doSupplierRequestListFiles(event, *args, **kwargs)
+            elif (event == 'timer-30sec' and not self.isEnoughConnected(*args, **kwargs)) or event == 'all-suppliers-disconnected':
+                self.state = 'DISCONNECTED'
+                self.doReportDisconnected(*args, **kwargs)
+            elif (event == 'timer-30sec' and self.isEnoughConnected(*args, **kwargs)) or event == 'all-suppliers-connected':
+                self.state = 'CONNECTED'
+                self.doReportConnected(*args, **kwargs)
         #---DISCONNECTED---
         elif self.state == 'DISCONNECTED':
             if event == 'shutdown':
@@ -637,6 +639,14 @@ class SharedAccessCoordinator(automat.Automat):
         elif self.state == 'CLOSED':
             pass
         return None
+
+    def isEnoughConnected(self, *args, **kwargs):
+        """
+        Action method.
+        """
+        if _Debug:
+            lg.args(_DebugLevel, progress=len(self.suppliers_in_progress), succeed=self.suppliers_succeed, critical_suppliers_number=self.critical_suppliers_number)
+        return len(self.suppliers_succeed) >= self.critical_suppliers_number
 
     def doInit(self, *args, **kwargs):
         """
@@ -666,6 +676,10 @@ class SharedAccessCoordinator(automat.Automat):
             self.automat('all-suppliers-disconnected')
             return
         self.known_ecc_map = args[0].get('ecc_map')
+        self.critical_suppliers_number = 1
+        if self.known_ecc_map:
+            from bitdust.raid import eccmap
+            self.critical_suppliers_number = eccmap.GetCorrectableErrors(eccmap.GetEccMapSuppliersNumber(self.known_ecc_map))
         self.suppliers_in_progress.clear()
         self.suppliers_succeed.clear()
         for supplier_idurl in self.known_suppliers_list:
@@ -693,7 +707,7 @@ class SharedAccessCoordinator(automat.Automat):
         pkt_out = None
         if event == 'supplier-file-modified':
             remote_path = kwargs['remote_path']
-            if remote_path == settings.BackupIndexFileName():
+            if remote_path == settings.BackupIndexFileName() or packetid.IsIndexFileName(remote_path):
                 if self.state == 'CONNECTED':
                     self.automat('restart')
                 else:
@@ -770,7 +784,7 @@ class SharedAccessCoordinator(automat.Automat):
                 is_in_sync = True
         if _Debug:
             lg.args(_DebugLevel, rev=supplier_index_file_revision, is_in_sync=is_in_sync)
-        remote_files_changed, backups2remove, paths2remove, missed_backups = backup_matrix.process_raw_list_files(
+        remote_files_changed, backups2remove, paths2remove, _ = backup_matrix.process_raw_list_files(
             supplier_num=kwargs['supplier_pos'],
             list_files_text_body=kwargs['payload'],
             customer_idurl=self.customer_idurl,
@@ -810,14 +824,10 @@ class SharedAccessCoordinator(automat.Automat):
         """
         Action method.
         """
-        critical_suppliers_number = 1
-        if self.known_ecc_map:
-            from bitdust.raid import eccmap
-            critical_suppliers_number = eccmap.GetCorrectableErrors(eccmap.GetEccMapSuppliersNumber(self.known_ecc_map))
         if _Debug:
-            lg.args(_DebugLevel, progress=len(self.suppliers_in_progress), succeed=self.suppliers_succeed, critical_suppliers_number=critical_suppliers_number)
+            lg.args(_DebugLevel, progress=len(self.suppliers_in_progress), succeed=self.suppliers_succeed, critical_suppliers_number=self.critical_suppliers_number)
         if len(self.suppliers_in_progress) == 0:
-            if len(self.suppliers_succeed) >= critical_suppliers_number:
+            if len(self.suppliers_succeed) >= self.critical_suppliers_number:
                 self.automat('all-suppliers-connected')
             else:
                 self.automat('all-suppliers-disconnected')
@@ -880,6 +890,7 @@ class SharedAccessCoordinator(automat.Automat):
     def _do_retrieve_index_file(self, supplier_idurl):
         packetID = global_id.MakeGlobalID(
             key_id=self.key_id,
+            # path=packetid.MakeIndexFileNamePacketID(),
             path=settings.BackupIndexFileName(),
         )
         sc = supplier_connector.by_idurl(supplier_idurl, customer_idurl=self.customer_idurl)
@@ -920,6 +931,14 @@ class SharedAccessCoordinator(automat.Automat):
             lg.err('incoming Data() is not valid from supplier %r' % supplier_idurl)
             self.automat('supplier-failed', supplier_idurl=supplier_idurl)
             return
+        if id_url.is_cached(supplier_idurl):
+            self._do_read_index_file(wrapped_packet, supplier_idurl)
+        else:
+            d = identitycache.start_one(supplier_idurl)
+            d.addErrback(lg.errback, debug=_Debug, debug_level=_DebugLevel, method='shared_access_coordinator._do_process_index_file')
+            d.addBoth(lambda _: self._do_read_index_file(wrapped_packet, supplier_idurl))
+
+    def _do_read_index_file(self, wrapped_packet, supplier_idurl):
         supplier_revision = backup_control.IncomingSupplierBackupIndex(
             wrapped_packet,
             key_id=self.key_id,
@@ -933,6 +952,7 @@ class SharedAccessCoordinator(automat.Automat):
     def _do_send_index_file(self, supplier_idurl):
         packetID = global_id.MakeGlobalID(
             key_id=self.key_id,
+            # path=packetid.MakeIndexFileNamePacketID(),
             path=settings.BackupIndexFileName(),
         )
         data = bpio.ReadBinaryFile(settings.BackupIndexFilePath(self.customer_idurl, self.key_alias))
