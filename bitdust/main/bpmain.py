@@ -68,8 +68,7 @@ def show():
     """
     Just calls ``p2p.web.control.show()`` to open the GUI.
     """
-    # from bitdust.main import control
-    # TODO: raise up electron window?
+    # TODO: to be implemented
     return 0
 
 
@@ -482,11 +481,13 @@ _LastCallableID = 0
 
 
 class _callable():
+
     """
     This class shows my experiments with performance monitoring.
 
     I tried to decrease the number of delayed calls.
     """
+
     def __init__(self, delay, callabl, *args, **kw):
         self.callabl = callabl
         self.to_call = lambda: self.run(*args, **kw)
@@ -539,6 +540,7 @@ def monitorDelayedCalls(r):
 
 
 class TwistedUnhandledErrorsObserver:
+
     def __init__(self, level):
         self.level = level
 

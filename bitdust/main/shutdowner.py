@@ -148,9 +148,11 @@ def shutdown_local():
 def shutdown_interfaces():
     from bitdust.interface import api_rest_http_server
     from bitdust.interface import api_web_socket
+    from bitdust.interface import api_device
     # from bitdust.interface import ftp_server
     # ftp_server.shutdown()
     api_rest_http_server.shutdown()
+    api_device.shutdown()
     api_web_socket.shutdown()
 
 
@@ -206,6 +208,7 @@ def A(event=None, *args, **kwargs):
 
 
 class Shutdowner(automat.Automat):
+
     """
     This is a state machine to manage a process of correctly finishing the
     BitDust software.
