@@ -172,11 +172,13 @@ class EncryptedWebSocket(automat.Automat):
         """
         Builds `encrypted_web_socket()` state machine.
         """
+        self.device_key_object = kwargs.pop('device_object')
+        self.device_name = self.device_key_object.label
+        self.encrypt_auth_info_callback = kwargs.pop('encrypt_auth_info_callback')
         self.host = kwargs.pop('host')
         self.port_number = int(kwargs.pop('port_number'))
         self.url = f'ws://{self.host.strip().strip("/")}:{self.port_number}'
         self.server_code = None
-        self.device_name = None
         self.client_connected = False
         super(EncryptedWebSocket, self).__init__(
             name='encrypted_web_socket',
@@ -382,7 +384,7 @@ class EncryptedWebSocket(automat.Automat):
         """
         Condition method.
         """
-        if kwargs['device_object'].meta.get('auth_token'):
+        if self.device_key_object.meta.get('auth_token'):
             return True
         return False
 
@@ -390,8 +392,6 @@ class EncryptedWebSocket(automat.Automat):
         """
         Action method.
         """
-        self.device_key_object = kwargs['device_object']
-        self.device_name = self.device_key_object.label
         self.auth_token = None
         self.session_key = None
         self.client_key_object = None
@@ -465,8 +465,7 @@ class EncryptedWebSocket(automat.Automat):
         """
         Action method.
         """
-        from bitdust.interface import api_device
-        auth_info, signature = api_device.encrypt_auth_info(
+        auth_info, signature = self.encrypt_auth_info_callback(
             client_code=kwargs['client_code'],
             auth_token=self.auth_token,
             session_key=self.session_key,
@@ -554,7 +553,13 @@ class EncryptedWebSocket(automat.Automat):
             _Listeners[self.device_name] = listen(f'tcp:{self.port_number}:interface={self.host}', ws)
         except:
             lg.exc()
+            cb = self.listening_callback
+            self.automat('stop')
+            if cb:
+                reactor.callLater(0, cb, False)  # @UndefinedVariable
             return None, None
+        self.device_key_object.meta['url'] = self.url
+        self.device_key_object.save()
         if _Debug:
             lg.args(_DebugLevel, listener=_Listeners[self.device_name], device=ws)
         if self.listening_callback:
