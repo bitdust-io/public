@@ -84,21 +84,22 @@ class BytesLoop:
     def read_defer(self, n=-1):
         if self._reader:
             raise Exception('already reading')
-        self._reader = (
-            Deferred(),
-            n,
-        )
+        if _Debug:
+            lg.args(_DebugLevel, n=n, b=len(self._buffer), f=self._finished)
+        self._reader = (Deferred(), n)
         if len(self._buffer) > 0:
             chunk = self.read(n=n)
             d = self._reader[0]
             self._reader = None
-            d.callback(chunk)
+            reactor.callFromThread(d.callback, chunk)  # @UndefinedVariable
             return d
         if self._finished:
             chunk = b''
             d = self._reader[0]
             self._reader = None
-            d.callback(chunk)
+            if len(self._buffer) > 0:
+                chunk = self.read(n=n)
+            reactor.callFromThread(d.callback, chunk)  # @UndefinedVariable
             return d
         return self._reader[0]
 
@@ -124,13 +125,13 @@ class BytesLoop:
                 chunk = self.read(n=self._reader[1])
                 d = self._reader[0]
                 self._reader = None
-                d.callback(chunk)
+                reactor.callFromThread(d.callback, chunk)  # @UndefinedVariable
 
     def close(self):
         if self._reader:
             d = self._reader[0]
             self._reader = None
-            d.callback(b'')
+            reactor.callFromThread(d.callback, b'')  # @UndefinedVariable
         self._closed = True
         self._buffer = b''
 
@@ -139,8 +140,20 @@ class BytesLoop:
 
     def mark_finished(self):
         self._finished = True
+        if self._reader:
+            d, n = self._reader
+            self._reader = None
+            chunk = b''
+            if len(self._buffer) > 0:
+                chunk = self.read(n=n)
+            if d.called:
+                lg.warn('stream was finished with unread data left, but receiver is not ready')
+            else:
+                reactor.callFromThread(d.callback, chunk)  # @UndefinedVariable
 
     def state(self):
+        if _Debug:
+            lg.args(_DebugLevel, b=len(self._buffer), c=self._closed, f=self._finished, l=self._last_read, r=bool(self._reader))
         if self._closed:
             return BYTES_LOOP_CLOSED
         if len(self._buffer) > 0:
@@ -148,12 +161,16 @@ class BytesLoop:
                 return BYTES_LOOP_EMPTY
             return BYTES_LOOP_READY2READ
         if self._last_read > 0:
+            if self._reader:
+                return BYTES_LOOP_EMPTY
+            if self._finished:
+                return BYTES_LOOP_CLOSED
             return BYTES_LOOP_READY2READ
         if self._finished:
+            return BYTES_LOOP_CLOSED
+        if self._reader:
             return BYTES_LOOP_EMPTY
-        if not self._reader:
-            return BYTES_LOOP_READY2READ
-        return BYTES_LOOP_EMPTY
+        return BYTES_LOOP_READY2READ
 
 
 #------------------------------------------------------------------------------
