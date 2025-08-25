@@ -6440,7 +6440,12 @@ def blockchain_transaction_send(recipient: str, amount: float, operation: str = 
     except:
         return ERROR(errors=['amount must be a number'])
     from bitdust.blockchain import bismuth_wallet
-    result = bismuth_wallet.send_transaction(recipient, amount, operation, data)
+    try:
+        result = bismuth_wallet.send_transaction(recipient, amount, operation, data)
+    except bismuth_wallet.BismuthCannotAffordPayFeeException:
+        return ERROR('Cannot afford to pay fees')
+    except Exception as exc:
+        return ERROR(exc, api_method='blockchain_transaction_send')
     if result and not isinstance(result, list):
         return OK({
             'transaction_id': result,
@@ -6450,8 +6455,8 @@ def blockchain_transaction_send(recipient: str, amount: float, operation: str = 
 
 def blockchain_block_produce():
     """
-    Will trigger minining one time to produce a single empty block in the blockchain.
-    This way foundation miners can initially generate enough coins to be able to sell those coins to customers.
+    Will trigger minining process one single time to produce a single empty block on the blockchain.
+    This way foundation miners can initially generate enough coins to be able to supply coins demand to customers and suppliers.
 
     This method only make sense to use by foundation miners.
     If you are not part of the foundation and your wallet address is not on the list, your transaction will be rejected by other nodes.
