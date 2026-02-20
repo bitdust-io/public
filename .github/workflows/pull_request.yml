@@ -12,6 +12,15 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
+    - name: docker stop
+      run: docker stop $(docker ps -q) || echo "skip"
+
+    - name: docker rm
+      run: docker rm $(docker ps -a -q) || echo "skip"
+
+    - name: docker system prune
+      run: docker system prune --force --all --volumes || echo "skip"
+
     - name: clean venv
       run: make clean venv
 
@@ -32,3 +41,12 @@ jobs:
 
     - name: regress_report
       run: make regress_report
+
+    - name: docker stop
+      run: docker stop $(docker ps -q) || echo "skip"
+
+    - name: docker rm
+      run: docker rm $(docker ps -a -q) || echo "skip"
+
+    - name: docker system prune
+      run: docker system prune --force --all --volumes || echo "skip"

@@ -160,7 +160,10 @@ def my_wallet_address():
 
 def my_balance():
     try:
-        _balance = float(client().balance())
+        _balance_raw = client().balance()
+        if _balance_raw == 'N/A':
+            return 'N/A'
+        _balance = float(_balance_raw)
     except:
         lg.exc()
         return 'N/A'
@@ -176,8 +179,9 @@ def send_transaction(recipient, amount, operation='', data='', raise_errors=Fals
     ret = client().send(recipient=recipient, amount=amount, operation=operation, data=data, error_reply=error_reply)
     if not ret:
         if raise_errors:
-            if str(error_reply).lower().count('cannot afford to pay fees'):
-                raise BismuthCannotAffordPayFeeException()
+            for e in error_reply:
+                if str(e).lower().count('cannot afford to pay fees'):
+                    raise BismuthCannotAffordPayFeeException()
             raise Exception(error_reply)
         return error_reply
     return ret
