@@ -1,6 +1,16 @@
 Change Log
 ==========
 
+2026-02-20 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
+
+* removed one seed node (#226)
+* various code fixes about IDURL, shared_access_coordinator() and other
+* added api.blockchain_wallet_transactions()
+* bug fix in bismuth_wallet.py
+* bug fix in shared_access_coordinator()
+
+
+
 2025-08-24 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
 * small updates in docs
@@ -1815,7 +1825,7 @@ Change Log
 2018-12-16 Veselin Penev [penev.veselin@gmail.com](mailto:penev.veselin@gmail.com)
 
 * created networks.json file to store info about "genesis" nodes
-* moved p2p-id.ru and bitdust.ai to the main network
+* moved 2 seed nodes to the main network
 * bug fixes proxy_router()
 * added retries=2 to propagate.PingContact()
 * added check for service_proxy_transport() in network/connected/v1
